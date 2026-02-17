@@ -324,6 +324,8 @@ func runScheduledTasks(ctx context.Context, cfg *config.Config, database *db.DB,
 			orchestrator.WithConfig(orchestrator.Config{
 				MaxIterations: 3,
 				AgentTimeout:  30 * time.Minute,
+				SyncBeforeRun: cfg.Git.SyncBeforeRun,
+				PrimaryBranch: cfg.Git.PrimaryBranch,
 			}),
 			orchestrator.WithLogger(logging.Component("orchestrator")),
 		)

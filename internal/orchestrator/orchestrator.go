@@ -96,9 +96,11 @@ type RunMetadata struct {
 
 // Config holds orchestrator configuration.
 type Config struct {
-	MaxIterations int           // Max review iterations (default: 3)
-	AgentTimeout  time.Duration // Per-agent timeout (default: 30min)
-	WorkDir       string        // Working directory for agents
+	MaxIterations  int           // Max review iterations (default: 3)
+	AgentTimeout   time.Duration // Per-agent timeout (default: 30min)
+	WorkDir        string        // Working directory for agents
+	SyncBeforeRun  bool          // Checkout and pull primary branch before tasks
+	PrimaryBranch  string        // Primary branch name (auto-detected if empty)
 }
 
 // DefaultConfig returns default orchestrator config.
@@ -214,6 +216,15 @@ func (o *Orchestrator) RunTask(ctx context.Context, task *tasks.Task, workDir st
 	// Override workDir from config if provided
 	if workDir == "" && o.config.WorkDir != "" {
 		workDir = o.config.WorkDir
+	}
+
+	// Sync git repository if configured
+	if o.config.SyncBeforeRun && workDir != "" {
+		o.log(result, "info", "syncing git repository", nil)
+		if err := o.syncGitRepo(ctx, workDir); err != nil {
+			o.log(result, "warn", "git sync failed", map[string]any{"error": err.Error()})
+			// Don't fail the task, just log the warning
+		}
 	}
 
 	// Step 1: Plan
@@ -619,6 +630,80 @@ func (o *Orchestrator) commit(_ context.Context, task *tasks.Task, impl *Impleme
 	// - Send notifications
 	o.logger.Infof("commit: task=%s files=%d", task.ID, len(impl.FilesModified))
 	return nil
+}
+
+// syncGitRepo checks out the primary branch and pulls latest changes.
+func (o *Orchestrator) syncGitRepo(ctx context.Context, workDir string) error {
+	// Detect primary branch if not configured
+	primaryBranch := o.config.PrimaryBranch
+	if primaryBranch == "" {
+		var err error
+		primaryBranch, err = o.detectPrimaryBranch(ctx, workDir)
+		if err != nil {
+			return fmt.Errorf("detecting primary branch: %w", err)
+		}
+	}
+
+	// Check if working tree is clean
+	statusCmd := exec.CommandContext(ctx, "git", "status", "--porcelain")
+	statusCmd.Dir = workDir
+	output, err := statusCmd.Output()
+	if err != nil {
+		return fmt.Errorf("git status: %w", err)
+	}
+	if len(output) > 0 {
+		return fmt.Errorf("working tree has uncommitted changes, refusing to sync")
+	}
+
+	// Checkout primary branch
+	checkoutCmd := exec.CommandContext(ctx, "git", "checkout", primaryBranch)
+	checkoutCmd.Dir = workDir
+	if output, err := checkoutCmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("git checkout %s: %s: %w", primaryBranch, string(output), err)
+	}
+
+	// Pull latest changes
+	pullCmd := exec.CommandContext(ctx, "git", "pull", "--ff-only")
+	pullCmd.Dir = workDir
+	if output, err := pullCmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("git pull: %s: %w", string(output), err)
+	}
+
+	o.logger.InfoCtx("synced git repository", map[string]any{
+		"branch":  primaryBranch,
+		"workDir": workDir,
+	})
+
+	return nil
+}
+
+// detectPrimaryBranch attempts to detect the primary branch name.
+// Tries common names: main, master.
+func (o *Orchestrator) detectPrimaryBranch(ctx context.Context, workDir string) (string, error) {
+	// Try to get default branch from remote
+	cmd := exec.CommandContext(ctx, "git", "symbolic-ref", "refs/remotes/origin/HEAD", "--short")
+	cmd.Dir = workDir
+	if output, err := cmd.Output(); err == nil {
+		branch := strings.TrimSpace(string(output))
+		// Strip "origin/" prefix if present
+		if strings.HasPrefix(branch, "origin/") {
+			branch = strings.TrimPrefix(branch, "origin/")
+		}
+		if branch != "" {
+			return branch, nil
+		}
+	}
+
+	// Fallback: check if main or master exists
+	for _, candidate := range []string{"main", "master"} {
+		cmd := exec.CommandContext(ctx, "git", "rev-parse", "--verify", candidate)
+		cmd.Dir = workDir
+		if err := cmd.Run(); err == nil {
+			return candidate, nil
+		}
+	}
+
+	return "", errors.New("could not detect primary branch (tried: origin/HEAD, main, master)")
 }
 
 // Run processes all tasks in queue until empty or budget exhausted.

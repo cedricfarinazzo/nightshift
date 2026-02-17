@@ -220,6 +220,8 @@ func runTaskRun(cmd *cobra.Command, args []string) error {
 		orchestrator.WithConfig(orchestrator.Config{
 			MaxIterations: 3,
 			AgentTimeout:  timeout,
+			SyncBeforeRun: cfg.Git.SyncBeforeRun,
+			PrimaryBranch: cfg.Git.PrimaryBranch,
 		}),
 		orchestrator.WithLogger(logging.Component("task-run")),
 	)

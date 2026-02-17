@@ -25,6 +25,7 @@ type Config struct {
 	Integrations IntegrationsConfig `mapstructure:"integrations"`
 	Logging      LoggingConfig      `mapstructure:"logging"`
 	Reporting    ReportingConfig    `mapstructure:"reporting"`
+	Git          GitConfig          `mapstructure:"git"`
 }
 
 // ScheduleConfig defines when nightshift runs.
@@ -138,6 +139,12 @@ type ReportingConfig struct {
 	MorningSummary bool    `mapstructure:"morning_summary"`
 	Email          *string `mapstructure:"email"`         // Optional email notification
 	SlackWebhook   *string `mapstructure:"slack_webhook"` // Optional Slack webhook
+}
+
+// GitConfig defines git workflow settings.
+type GitConfig struct {
+	SyncBeforeRun bool   `mapstructure:"sync_before_run"` // Checkout and pull primary branch before tasks
+	PrimaryBranch string `mapstructure:"primary_branch"`  // Primary branch name (auto-detected if empty)
 }
 
 // Default values for configuration.
@@ -266,6 +273,10 @@ func setDefaults(v *viper.Viper) {
 
 	// Reporting defaults
 	v.SetDefault("reporting.morning_summary", true)
+
+	// Git defaults
+	v.SetDefault("git.sync_before_run", false)
+	v.SetDefault("git.primary_branch", "")
 
 	// Integration defaults
 	v.SetDefault("integrations.claude_md", true)

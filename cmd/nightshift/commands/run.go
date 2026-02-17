@@ -643,6 +643,8 @@ func executeRun(ctx context.Context, p executeRunParams) error {
 			orchestrator.WithConfig(orchestrator.Config{
 				MaxIterations: 3,
 				AgentTimeout:  30 * time.Minute,
+				SyncBeforeRun: p.cfg.Git.SyncBeforeRun,
+				PrimaryBranch: p.cfg.Git.PrimaryBranch,
 			}),
 			orchestrator.WithLogger(logging.Component("orchestrator")),
 		}
