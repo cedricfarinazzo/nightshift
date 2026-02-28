@@ -54,22 +54,27 @@ func newCodexAgentFromConfig(cfg *config.Config) *agents.CodexAgent {
 	)
 }
 
-func newCopilotAgentFromConfig(cfg *config.Config) *agents.CopilotAgent {
+// newCopilotAgentFromConfig creates a CopilotAgent from config. If binaryPath
+// is non-empty it overrides auto-detection; otherwise the binary is resolved
+// from PATH (preferring standalone "copilot", falling back to "gh").
+func newCopilotAgentFromConfig(cfg *config.Config, binaryPath ...string) *agents.CopilotAgent {
 	if cfg == nil {
 		return agents.NewCopilotAgent()
 	}
 
-	// Auto-detect: prefer standalone copilot, fallback to gh
-	binaryPath := "gh"
-	if _, err := exec.LookPath("copilot"); err == nil {
-		binaryPath = "copilot"
+	binary := ""
+	if len(binaryPath) > 0 && binaryPath[0] != "" {
+		binary = binaryPath[0]
+	} else {
+		// Auto-detect: prefer standalone copilot, fallback to gh
+		binary = "gh"
+		if _, err := exec.LookPath("copilot"); err == nil {
+			binary = "copilot"
+		}
 	}
 
-	// Copilot uses DangerouslySkipPermissions for --allow-all-tools flag
-	// Note: The agent already uses --no-ask-user for autonomous mode
 	opts := []agents.CopilotOption{
-		agents.WithCopilotBinaryPath(binaryPath),
+		agents.WithCopilotBinaryPath(binary),
 	}
-	// TODO: when DangerouslySkipPermissions is enabled, pass --allow-all-tools flag to copilot agent
 	return agents.NewCopilotAgent(opts...)
 }
