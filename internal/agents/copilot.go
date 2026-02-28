@@ -15,21 +15,21 @@ import (
 // CopilotAgent spawns GitHub Copilot CLI for task execution.
 //
 // GitHub Copilot CLI implementation notes:
-// - Supports both 'gh copilot' (passthrough to copilot binary) and standalone 'copilot' binary
-// - Non-interactive mode: use -p/--prompt flag (exits after completion)
-// - Uses --no-ask-user to disable the ask_user tool (fully autonomous)
-// - Uses --silent to output only the agent response (no stats)
+// - Supports both 'gh copilot' (gh extension) and standalone 'copilot' binary
+// - Main commands: 'copilot suggest' and 'copilot explain'
+// - For agent tasks, we use 'copilot suggest' with prompts
+// - Uses --no-ask-user flag for autonomous non-interactive mode
 //
 // Install options:
-// - Via gh: gh copilot (downloads copilot binary automatically if not in PATH)
+// - Via gh: gh extension install github/gh-copilot
 // - Standalone: npm install -g @github/copilot or curl script
-// - Usage: copilot -p "<prompt>" --no-ask-user --silent
+// - Usage: copilot suggest -t <type> --no-ask-user <prompt>
+// - Types: shell, gh, git (for different command contexts)
 type CopilotAgent struct {
-	binaryPath           string        // Path to binary: "gh" or "copilot" (default: "gh")
-	dangerouslySkipPerms bool          // Pass --allow-all-tools --allow-all-urls
-	model                string        // Model to use (empty = CLI default)
-	timeout              time.Duration // Default timeout
-	runner               CommandRunner // Command executor (for testing)
+	binaryPath string        // Path to binary: "gh" or "copilot" (default: "gh")
+	timeout    time.Duration // Default timeout
+	runner     CommandRunner // Command executor (for testing)
+	model      string        // Default model to use
 }
 
 // CopilotOption configures a CopilotAgent.
@@ -42,24 +42,17 @@ func WithCopilotBinaryPath(path string) CopilotOption {
 	}
 }
 
-// WithCopilotDangerouslySkipPermissions sets whether to pass --allow-all-tools and --allow-all-urls.
-func WithCopilotDangerouslySkipPermissions(enabled bool) CopilotOption {
-	return func(a *CopilotAgent) {
-		a.dangerouslySkipPerms = enabled
-	}
-}
-
-// WithCopilotModel sets the model to use (e.g. "claude-sonnet-4.6"). Empty means CLI default.
-func WithCopilotModel(model string) CopilotOption {
-	return func(a *CopilotAgent) {
-		a.model = model
-	}
-}
-
 // WithCopilotDefaultTimeout sets the default execution timeout.
 func WithCopilotDefaultTimeout(d time.Duration) CopilotOption {
 	return func(a *CopilotAgent) {
 		a.timeout = d
+	}
+}
+
+// WithCopilotModel sets the default model to use.
+func WithCopilotModel(model string) CopilotOption {
+	return func(a *CopilotAgent) {
+		a.model = model
 	}
 }
 
@@ -88,10 +81,13 @@ func (a *CopilotAgent) Name() string {
 	return "copilot"
 }
 
-// Execute runs the Copilot CLI with the given prompt in non-interactive mode.
+// Execute runs gh copilot with the given prompt.
 //
-// Both 'gh copilot' and standalone 'copilot' use the same -p flag interface.
-// For 'gh copilot', '--' is used to pass flags through to the copilot binary.
+// Implementation approach:
+//   - Uses 'gh copilot suggest' for general prompts
+//   - Runs in non-interactive mode by providing prompt directly
+//   - Note: GitHub Copilot CLI is designed to be interactive, so we work around this
+//     by using environment variables or input redirection where needed
 func (a *CopilotAgent) Execute(ctx context.Context, opts ExecuteOptions) (*ExecuteResult, error) {
 	start := time.Now()
 
@@ -105,25 +101,36 @@ func (a *CopilotAgent) Execute(ctx context.Context, opts ExecuteOptions) (*Execu
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	// Build command args. Both modes use -p for non-interactive prompt.
-	// gh mode uses '--' to pass flags through to the copilot binary.
-	// 1. gh copilot: gh copilot -- -p <prompt> --no-ask-user [--model <m>] [--allow-all-tools --allow-all-urls] --silent
-	// 2. standalone: copilot -p <prompt> --no-ask-user [--model <m>] [--allow-all-tools --allow-all-urls] --silent
+	// Build command args
+	// Two modes:
+	// 1. gh copilot: gh copilot suggest -t <type> --no-ask-user <prompt>
+	// 2. standalone copilot: copilot -p <prompt> --no-ask-user --allow-all-tools --silent
+	var args []string
+
+	// Determine model
 	model := opts.Model
 	if model == "" {
 		model = a.model
 	}
-	var args []string
+
 	if a.binaryPath == "gh" {
-		args = []string{"copilot", "--", "-p", opts.Prompt, "--no-ask-user", "--silent"}
+		args = []string{"copilot", "suggest", "-t", "shell"}
+		// Add --no-ask-user for non-interactive execution (autonomous mode)
+		args = append(args, "--no-ask-user")
+		if model != "" {
+			args = append(args, "--model", model)
+		}
+		// Add prompt directly as argument
+		if opts.Prompt != "" {
+			args = append(args, opts.Prompt)
+		}
 	} else {
-		args = []string{"-p", opts.Prompt, "--no-ask-user", "--silent"}
-	}
-	if model != "" {
-		args = append(args, "--model", model)
-	}
-	if a.dangerouslySkipPerms {
-		args = append(args, "--allow-all-tools", "--allow-all-urls")
+		// Standalone copilot binary uses -p flag for non-interactive mode
+		// --silent outputs only the response (no stats), useful for scripting
+		args = []string{"-p", opts.Prompt, "--no-ask-user", "--allow-all-tools", "--allow-all-urls", "--silent"}
+		if model != "" {
+			args = append(args, "--model", model)
+		}
 	}
 
 	// Build stdin content from files if provided
@@ -280,14 +287,11 @@ func (a *CopilotAgent) Available() bool {
 		strings.Contains(string(output), "gh-copilot")
 }
 
-// Version returns the copilot CLI version.
+// Version returns the gh copilot extension version.
 func (a *CopilotAgent) Version() (string, error) {
-	var cmd *exec.Cmd
-	if a.binaryPath == "gh" {
-		cmd = exec.Command("gh", "copilot", "--", "--version")
-	} else {
-		cmd = exec.Command(a.binaryPath, "--version")
-	}
+	// GitHub CLI doesn't have a direct version command for extensions
+	// We can get gh version instead
+	cmd := exec.Command(a.binaryPath, "--version")
 	output, err := cmd.Output()
 	if err != nil {
 		return "", fmt.Errorf("getting version: %w", err)
