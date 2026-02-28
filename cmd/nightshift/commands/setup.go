@@ -398,7 +398,7 @@ func (m *setupModel) View() string {
 	case stepConfig:
 		b.WriteString(styleAccent.Render("Global config"))
 		b.WriteString("\n")
-		fmt.Fprintf(&b, "  %s\n", m.configPath)
+		b.WriteString(fmt.Sprintf("  %s\n", m.configPath))
 		if m.configExist {
 			b.WriteString("  Status: found (will update in place)\n")
 		} else {
@@ -429,7 +429,7 @@ func (m *setupModel) View() string {
 			if label == "" {
 				label = "(unset)"
 			}
-			fmt.Fprintf(&b, " %s %s\n", cursor, label)
+			b.WriteString(fmt.Sprintf(" %s %s\n", cursor, label))
 		}
 		if m.projectErr != "" {
 			b.WriteString("\nError: " + m.projectErr + "\n")
@@ -482,7 +482,7 @@ func (m *setupModel) View() string {
 			if preset == setup.PresetBalanced {
 				label += " (recommended)"
 			}
-			fmt.Fprintf(&b, " %s %s\n", cursor, label)
+			b.WriteString(fmt.Sprintf(" %s %s\n", cursor, label))
 		}
 	case stepTaskSelect:
 		b.WriteString(styleAccent.Render("Tasks"))
@@ -501,7 +501,7 @@ func (m *setupModel) View() string {
 				if item.selected {
 					check = "x"
 				}
-				fmt.Fprintf(&b, " %s [%s] %-22s %s\n", cursor, check, item.def.Type, item.def.Name)
+				b.WriteString(fmt.Sprintf(" %s [%s] %-22s %s\n", cursor, check, item.def.Type, item.def.Name))
 			}
 		}
 		if m.taskErr != "" {
@@ -573,8 +573,8 @@ func (m *setupModel) View() string {
 		}
 		b.WriteString("Nightshift isn’t in PATH yet. The daemon and CLI shortcuts need it there.\n")
 		if m.pathShell != "" && m.pathConfig != "" {
-			fmt.Fprintf(&b, "Shell: %s\n", m.pathShell)
-			fmt.Fprintf(&b, "Config: %s\n", m.pathConfig)
+			b.WriteString(fmt.Sprintf("Shell: %s\n", m.pathShell))
+			b.WriteString(fmt.Sprintf("Config: %s\n", m.pathConfig))
 		}
 		b.WriteString("\nSelect action:\n")
 		for i, option := range m.pathOptions {
@@ -582,7 +582,7 @@ func (m *setupModel) View() string {
 			if i == m.pathCursor {
 				cursor = ">"
 			}
-			fmt.Fprintf(&b, " %s %s\n", cursor, option.label)
+			b.WriteString(fmt.Sprintf(" %s %s\n", cursor, option.label))
 		}
 		if m.pathErr != "" {
 			b.WriteString("\nError: " + m.pathErr + "\n")
@@ -601,7 +601,7 @@ func (m *setupModel) View() string {
 	case stepDaemon:
 		b.WriteString(styleAccent.Render("Daemon setup"))
 		b.WriteString("\n\n")
-		fmt.Fprintf(&b, "Service: %s\n", m.serviceType)
+		b.WriteString(fmt.Sprintf("Service: %s\n", m.serviceType))
 		if m.serviceState.installed {
 			b.WriteString("Status: installed\n")
 		} else {
@@ -618,7 +618,7 @@ func (m *setupModel) View() string {
 			if i == m.daemonCursor {
 				cursor = ">"
 			}
-			fmt.Fprintf(&b, " %s %s\n", cursor, label)
+			b.WriteString(fmt.Sprintf(" %s %s\n", cursor, label))
 		}
 		b.WriteString("\nPress Enter to apply.\n")
 	case stepFinish:
@@ -1558,37 +1558,37 @@ func copyFile(src, dst string) error {
 func renderEnvChecks(cfg *config.Config) string {
 	var b strings.Builder
 	if _, err := execLookPath("nightshift"); err != nil {
-		fmt.Fprintf(&b, "  %s %s\n", styleWarn.Render("Heads up:"), "nightshift not found in PATH yet. Setup can add it for you.")
+		b.WriteString(fmt.Sprintf("  %s %s\n", styleWarn.Render("Heads up:"), "nightshift not found in PATH yet. Setup can add it for you."))
 	} else {
-		fmt.Fprintf(&b, "  %s %s\n", styleOk.Render("OK:"), "nightshift is in PATH")
+		b.WriteString(fmt.Sprintf("  %s %s\n", styleOk.Render("OK:"), "nightshift is in PATH"))
 	}
 	if _, err := execLookPath("tmux"); err != nil {
-		fmt.Fprintf(&b, "  %s %s\n", styleWarn.Render("Note:"), "tmux not found (calibration will be local-only)")
+		b.WriteString(fmt.Sprintf("  %s %s\n", styleWarn.Render("Note:"), "tmux not found (calibration will be local-only)"))
 	} else {
-		fmt.Fprintf(&b, "  %s %s\n", styleOk.Render("OK:"), "tmux available")
+		b.WriteString(fmt.Sprintf("  %s %s\n", styleOk.Render("OK:"), "tmux available"))
 	}
 	// Check for Copilot CLI (gh or copilot binary)
 	_, ghErr := execLookPath("gh")
 	_, copilotErr := execLookPath("copilot")
 	if ghErr != nil && copilotErr != nil {
-		fmt.Fprintf(&b, "  %s %s\n", styleWarn.Render("Note:"), "Copilot CLI not found (install via 'gh' or native 'copilot')")
+		b.WriteString(fmt.Sprintf("  %s %s\n", styleWarn.Render("Note:"), "Copilot CLI not found (install via 'gh' or native 'copilot')"))
 	} else if ghErr == nil {
-		fmt.Fprintf(&b, "  %s %s\n", styleOk.Render("OK:"), "gh CLI available (use 'gh copilot')")
+		b.WriteString(fmt.Sprintf("  %s %s\n", styleOk.Render("OK:"), "gh CLI available (use 'gh copilot')"))
 	} else {
-		fmt.Fprintf(&b, "  %s %s\n", styleOk.Render("OK:"), "copilot CLI available")
+		b.WriteString(fmt.Sprintf("  %s %s\n", styleOk.Render("OK:"), "copilot CLI available"))
 	}
 	if cfg.Providers.Claude.Enabled {
 		if _, err := os.Stat(cfg.ExpandedProviderPath("claude")); err != nil {
-			fmt.Fprintf(&b, "  %s %s\n", styleWarn.Render("Note:"), "Claude data path not found")
+			b.WriteString(fmt.Sprintf("  %s %s\n", styleWarn.Render("Note:"), "Claude data path not found"))
 		} else {
-			fmt.Fprintf(&b, "  %s %s\n", styleOk.Render("OK:"), "Claude data path found")
+			b.WriteString(fmt.Sprintf("  %s %s\n", styleOk.Render("OK:"), "Claude data path found"))
 		}
 	}
 	if cfg.Providers.Codex.Enabled {
 		if _, err := os.Stat(cfg.ExpandedProviderPath("codex")); err != nil {
-			fmt.Fprintf(&b, "  %s %s\n", styleWarn.Render("Note:"), "Codex data path not found")
+			b.WriteString(fmt.Sprintf("  %s %s\n", styleWarn.Render("Note:"), "Codex data path not found"))
 		} else {
-			fmt.Fprintf(&b, "  %s %s\n", styleOk.Render("OK:"), "Codex data path found")
+			b.WriteString(fmt.Sprintf("  %s %s\n", styleOk.Render("OK:"), "Codex data path found"))
 		}
 	}
 	return b.String()
