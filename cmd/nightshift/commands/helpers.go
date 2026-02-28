@@ -75,6 +75,7 @@ func newCopilotAgentFromConfig(cfg *config.Config, binaryPath ...string) *agents
 
 	opts := []agents.CopilotOption{
 		agents.WithCopilotBinaryPath(binary),
+		agents.WithCopilotDangerouslySkipPermissions(cfg.Providers.Copilot.DangerouslySkipPermissions),
 	}
 	return agents.NewCopilotAgent(opts...)
 }

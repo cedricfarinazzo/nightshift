@@ -26,9 +26,10 @@ import (
 // - Usage: copilot suggest -t <type> --no-ask-user <prompt>
 // - Types: shell, gh, git (for different command contexts)
 type CopilotAgent struct {
-	binaryPath string        // Path to binary: "gh" or "copilot" (default: "gh")
-	timeout    time.Duration // Default timeout
-	runner     CommandRunner // Command executor (for testing)
+	binaryPath              string        // Path to binary: "gh" or "copilot" (default: "gh")
+	dangerouslySkipPerms    bool          // Pass --allow-all-tools --allow-all-urls
+	timeout                 time.Duration // Default timeout
+	runner                  CommandRunner // Command executor (for testing)
 }
 
 // CopilotOption configures a CopilotAgent.
@@ -38,6 +39,13 @@ type CopilotOption func(*CopilotAgent)
 func WithCopilotBinaryPath(path string) CopilotOption {
 	return func(a *CopilotAgent) {
 		a.binaryPath = path
+	}
+}
+
+// WithCopilotDangerouslySkipPermissions sets whether to pass --allow-all-tools and --allow-all-urls.
+func WithCopilotDangerouslySkipPermissions(enabled bool) CopilotOption {
+	return func(a *CopilotAgent) {
+		a.dangerouslySkipPerms = enabled
 	}
 }
 
@@ -96,7 +104,7 @@ func (a *CopilotAgent) Execute(ctx context.Context, opts ExecuteOptions) (*Execu
 	// Build command args
 	// Two modes:
 	// 1. gh copilot: gh copilot suggest -t <type> --no-ask-user <prompt>
-	// 2. standalone copilot: copilot -p <prompt> --no-ask-user --allow-all-tools --allow-all-urls --silent
+	// 2. standalone copilot: copilot -p <prompt> --no-ask-user [--allow-all-tools --allow-all-urls] --silent
 	var args []string
 	if a.binaryPath == "gh" {
 		args = []string{"copilot", "suggest", "-t", "shell"}
@@ -109,7 +117,10 @@ func (a *CopilotAgent) Execute(ctx context.Context, opts ExecuteOptions) (*Execu
 	} else {
 		// Standalone copilot binary uses -p flag for non-interactive mode
 		// --silent outputs only the response (no stats), useful for scripting
-		args = []string{"-p", opts.Prompt, "--no-ask-user", "--allow-all-tools", "--allow-all-urls", "--silent"}
+		args = []string{"-p", opts.Prompt, "--no-ask-user", "--silent"}
+		if a.dangerouslySkipPerms {
+			args = append(args, "--allow-all-tools", "--allow-all-urls")
+		}
 	}
 
 	// Build stdin content from files if provided
