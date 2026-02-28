@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -26,6 +27,14 @@ func (r *ExecRunner) Run(ctx context.Context, name string, args []string, dir st
 	cmd := exec.CommandContext(ctx, name, args...)
 	if dir != "" {
 		cmd.Dir = dir
+	}
+
+	// Use process group so timeout kills the entire process tree,
+	// not just the direct child (e.g. Node wrapper leaves Rust child alive).
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error {
+		// Kill the entire process group (negative PID)
+		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 	}
 
 	var stdoutBuf, stderrBuf bytes.Buffer
@@ -171,6 +180,12 @@ func (a *ClaudeAgent) Execute(ctx context.Context, opts ExecuteOptions) (*Execut
 	// Check for context timeout
 	if ctx.Err() == context.DeadlineExceeded {
 		result.Error = fmt.Sprintf("timeout after %v", timeout)
+		if stderr != "" {
+			result.Error = fmt.Sprintf("timeout after %v; stderr: %s", timeout, truncate(stderr, 2000))
+		}
+		if stdout != "" {
+			result.Output = stdout
+		}
 		result.ExitCode = -1
 		return result, ctx.Err()
 	}
@@ -182,6 +197,9 @@ func (a *ClaudeAgent) Execute(ctx context.Context, opts ExecuteOptions) (*Execut
 			result.Error = stderr
 		} else {
 			result.Error = err.Error()
+			if stderr != "" {
+				result.Error = fmt.Sprintf("%s; stderr: %s", err.Error(), truncate(stderr, 2000))
+			}
 		}
 		return result, err
 	}
