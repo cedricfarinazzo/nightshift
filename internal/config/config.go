@@ -29,9 +29,11 @@ type Config struct {
 
 // ScheduleConfig defines when nightshift runs.
 type ScheduleConfig struct {
-	Cron     string        `mapstructure:"cron"`     // Cron expression (e.g., "0 2 * * *")
-	Interval string        `mapstructure:"interval"` // Alternative: duration (e.g., "1h")
-	Window   *WindowConfig `mapstructure:"window"`   // Optional time window constraint
+	Cron        string        `mapstructure:"cron"`         // Cron expression (e.g., "0 2 * * *")
+	Interval    string        `mapstructure:"interval"`     // Alternative: duration (e.g., "1h")
+	Window      *WindowConfig `mapstructure:"window"`       // Optional time window constraint
+	MaxProjects int           `mapstructure:"max_projects"` // Default max projects per run (0 = unlimited)
+	MaxTasks    int           `mapstructure:"max_tasks"`    // Default max tasks per project (0 = 1)
 }
 
 // WindowConfig defines a time window for execution.
