@@ -1636,7 +1636,7 @@ func renderSafetyFields(b *strings.Builder, m *setupModel) {
 			available: m.cfg.Providers.Codex.Enabled,
 		},
 		{
-			label:     "Copilot: --allow-all-tools",
+			label:     "Copilot: --allow-all-tools --allow-all-urls",
 			enabled:   m.cfg.Providers.Copilot.DangerouslySkipPermissions,
 			available: m.cfg.Providers.Copilot.Enabled,
 		},

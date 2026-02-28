@@ -15,21 +15,21 @@ import (
 // CopilotAgent spawns GitHub Copilot CLI for task execution.
 //
 // GitHub Copilot CLI implementation notes:
-// - Supports both 'gh copilot' (gh extension) and standalone 'copilot' binary
-// - Main commands: 'copilot suggest' and 'copilot explain'
-// - For agent tasks, we use 'copilot suggest' with prompts
-// - Uses --no-ask-user flag for autonomous non-interactive mode
+// - Supports both 'gh copilot' (passthrough to copilot binary) and standalone 'copilot' binary
+// - Non-interactive mode: use -p/--prompt flag (exits after completion)
+// - Uses --no-ask-user to disable the ask_user tool (fully autonomous)
+// - Uses --silent to output only the agent response (no stats)
 //
 // Install options:
-// - Via gh: gh extension install github/gh-copilot
+// - Via gh: gh copilot (downloads copilot binary automatically if not in PATH)
 // - Standalone: npm install -g @github/copilot or curl script
-// - Usage: copilot suggest -t <type> --no-ask-user <prompt>
-// - Types: shell, gh, git (for different command contexts)
+// - Usage: copilot -p "<prompt>" --no-ask-user --silent
 type CopilotAgent struct {
-	binaryPath string        // Path to binary: "gh" or "copilot" (default: "gh")
-	timeout    time.Duration // Default timeout
-	runner     CommandRunner // Command executor (for testing)
-	model      string        // Default model to use
+	binaryPath           string        // Path to binary: "gh" or "copilot" (default: "gh")
+	dangerouslySkipPerms bool          // Pass --allow-all-tools --allow-all-urls
+	model                string        // Default model to use
+	timeout              time.Duration // Default timeout
+	runner               CommandRunner // Command executor (for testing)
 }
 
 // CopilotOption configures a CopilotAgent.
@@ -39,6 +39,13 @@ type CopilotOption func(*CopilotAgent)
 func WithCopilotBinaryPath(path string) CopilotOption {
 	return func(a *CopilotAgent) {
 		a.binaryPath = path
+	}
+}
+
+// WithCopilotDangerouslySkipPermissions sets whether to pass --allow-all-tools and --allow-all-urls.
+func WithCopilotDangerouslySkipPermissions(enabled bool) CopilotOption {
+	return func(a *CopilotAgent) {
+		a.dangerouslySkipPerms = enabled
 	}
 }
 
@@ -81,13 +88,10 @@ func (a *CopilotAgent) Name() string {
 	return "copilot"
 }
 
-// Execute runs gh copilot with the given prompt.
+// Execute runs the Copilot CLI with the given prompt in non-interactive mode.
 //
-// Implementation approach:
-//   - Uses 'gh copilot suggest' for general prompts
-//   - Runs in non-interactive mode by providing prompt directly
-//   - Note: GitHub Copilot CLI is designed to be interactive, so we work around this
-//     by using environment variables or input redirection where needed
+// Both 'gh copilot' and standalone 'copilot' use the same -p flag interface.
+// For 'gh copilot', '--' is used to pass flags through to the copilot binary.
 func (a *CopilotAgent) Execute(ctx context.Context, opts ExecuteOptions) (*ExecuteResult, error) {
 	start := time.Now()
 
@@ -101,10 +105,10 @@ func (a *CopilotAgent) Execute(ctx context.Context, opts ExecuteOptions) (*Execu
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	// Build command args
-	// Two modes:
-	// 1. gh copilot: gh copilot suggest -t <type> --no-ask-user <prompt>
-	// 2. standalone copilot: copilot -p <prompt> --no-ask-user --allow-all-tools --silent
+	// Build command args. Both modes use -p for non-interactive prompt.
+	// gh mode uses '--' to pass flags through to the copilot binary.
+	// 1. gh copilot: gh copilot -- -p <prompt> --no-ask-user [--allow-all-tools --allow-all-urls] --silent
+	// 2. standalone: copilot -p <prompt> --no-ask-user [--allow-all-tools --allow-all-urls] --silent
 	var args []string
 
 	// Determine model
@@ -114,23 +118,15 @@ func (a *CopilotAgent) Execute(ctx context.Context, opts ExecuteOptions) (*Execu
 	}
 
 	if a.binaryPath == "gh" {
-		args = []string{"copilot", "suggest", "-t", "shell"}
-		// Add --no-ask-user for non-interactive execution (autonomous mode)
-		args = append(args, "--no-ask-user")
-		if model != "" {
-			args = append(args, "--model", model)
-		}
-		// Add prompt directly as argument
-		if opts.Prompt != "" {
-			args = append(args, opts.Prompt)
-		}
+		args = []string{"copilot", "--", "-p", opts.Prompt, "--no-ask-user", "--silent"}
 	} else {
-		// Standalone copilot binary uses -p flag for non-interactive mode
-		// --silent outputs only the response (no stats), useful for scripting
-		args = []string{"-p", opts.Prompt, "--no-ask-user", "--allow-all-tools", "--allow-all-urls", "--silent"}
-		if model != "" {
-			args = append(args, "--model", model)
-		}
+		args = []string{"-p", opts.Prompt, "--no-ask-user", "--silent"}
+	}
+	if model != "" {
+		args = append(args, "--model", model)
+	}
+	if a.dangerouslySkipPerms {
+		args = append(args, "--allow-all-tools", "--allow-all-urls")
 	}
 
 	// Build stdin content from files if provided
@@ -287,11 +283,14 @@ func (a *CopilotAgent) Available() bool {
 		strings.Contains(string(output), "gh-copilot")
 }
 
-// Version returns the gh copilot extension version.
+// Version returns the copilot CLI version.
 func (a *CopilotAgent) Version() (string, error) {
-	// GitHub CLI doesn't have a direct version command for extensions
-	// We can get gh version instead
-	cmd := exec.Command(a.binaryPath, "--version")
+	var cmd *exec.Cmd
+	if a.binaryPath == "gh" {
+		cmd = exec.Command("gh", "copilot", "--", "--version")
+	} else {
+		cmd = exec.Command(a.binaryPath, "--version")
+	}
 	output, err := cmd.Output()
 	if err != nil {
 		return "", fmt.Errorf("getting version: %w", err)
