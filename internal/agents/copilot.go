@@ -106,13 +106,13 @@ func (a *CopilotAgent) Execute(ctx context.Context, opts ExecuteOptions) (*Execu
 	// 1. gh copilot: gh copilot suggest -t <type> --no-ask-user <prompt>
 	// 2. standalone copilot: copilot -p <prompt> --no-ask-user --allow-all-tools --silent
 	var args []string
-	
+
 	// Determine model
 	model := opts.Model
 	if model == "" {
 		model = a.model
 	}
-	
+
 	if a.binaryPath == "gh" {
 		args = []string{"copilot", "suggest", "-t", "shell"}
 		// Add --no-ask-user for non-interactive execution (autonomous mode)
