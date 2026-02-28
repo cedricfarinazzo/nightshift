@@ -96,7 +96,7 @@ func (a *CopilotAgent) Execute(ctx context.Context, opts ExecuteOptions) (*Execu
 	// Build command args
 	// Two modes:
 	// 1. gh copilot: gh copilot suggest -t <type> --no-ask-user <prompt>
-	// 2. standalone copilot: copilot -p <prompt> --no-ask-user --allow-all-tools --silent
+	// 2. standalone copilot: copilot -p <prompt> --no-ask-user --allow-all-tools --allow-all-urls --silent
 	var args []string
 	if a.binaryPath == "gh" {
 		args = []string{"copilot", "suggest", "-t", "shell"}
@@ -109,7 +109,7 @@ func (a *CopilotAgent) Execute(ctx context.Context, opts ExecuteOptions) (*Execu
 	} else {
 		// Standalone copilot binary uses -p flag for non-interactive mode
 		// --silent outputs only the response (no stats), useful for scripting
-		args = []string{"-p", opts.Prompt, "--no-ask-user", "--allow-all-tools", "--silent"}
+		args = []string{"-p", opts.Prompt, "--no-ask-user", "--allow-all-tools", "--allow-all-urls", "--silent"}
 	}
 
 	// Build stdin content from files if provided
