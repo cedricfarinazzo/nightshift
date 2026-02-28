@@ -79,6 +79,8 @@ type modelOption struct {
 	value string // empty = use CLI default
 }
 
+// claudeModels lists available Claude models.
+// Source: https://platform.claude.com/docs/en/about-claude/models/overview (Claude API aliases)
 var claudeModels = []modelOption{
 	{label: "default", value: ""},
 	{label: "claude-opus-4-6", value: "claude-opus-4-6"},
@@ -86,6 +88,8 @@ var claudeModels = []modelOption{
 	{label: "claude-haiku-4-5", value: "claude-haiku-4-5"},
 }
 
+// codexModels lists available Codex models.
+// Source: https://developers.openai.com/codex/models/
 var codexModels = []modelOption{
 	{label: "default", value: ""},
 	{label: "gpt-5.3-codex", value: "gpt-5.3-codex"},
@@ -99,6 +103,8 @@ var codexModels = []modelOption{
 	{label: "gpt-5", value: "gpt-5"},
 }
 
+// copilotModels lists available Copilot models.
+// Source: `copilot --help`, see the --model flag description for the full list.
 var copilotModels = []modelOption{
 	{label: "default", value: ""},
 	{label: "claude-sonnet-4.6", value: "claude-sonnet-4.6"},
