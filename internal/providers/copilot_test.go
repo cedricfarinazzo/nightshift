@@ -230,9 +230,9 @@ func TestCopilot_GetUsedPercent_Daily(t *testing.T) {
 	// Daily allocation = 500 / days_in_month
 	// Today's estimate = 20 / days_elapsed
 	// Percent = (today_estimate / daily_allocation) * 100
-	// This should be a reasonable percentage
-	if pct < 0 || pct > 100 {
-		t.Errorf("GetUsedPercent(daily) = %.2f, want between 0 and 100", pct)
+	// Can exceed 100% if daily usage exceeds allocation (e.g. early in month)
+	if pct < 0 {
+		t.Errorf("GetUsedPercent(daily) = %.2f, want >= 0", pct)
 	}
 }
 

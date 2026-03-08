@@ -256,6 +256,23 @@ Each task has a default cooldown interval to prevent the same task from running 
 
 `skill-groom` is enabled by default. Add it to `tasks.disabled` if you want to opt out. It updates project-local skills under `.claude/skills` and `.codex/skills` using `README.md` as project context and starts Agent Skills docs lookup from `https://agentskills.io/llms.txt`.
 
+## Development
+
+### Pre-commit hooks
+
+Install the git pre-commit hook to catch formatting and vet issues before pushing:
+
+```bash
+make install-hooks
+```
+
+This symlinks `scripts/pre-commit.sh` into `.git/hooks/pre-commit`. The hook runs:
+- **gofmt** — flags any staged `.go` files that need formatting
+- **go vet** — catches common correctness issues
+- **go build** — ensures the project compiles
+
+To bypass in a pinch: `git commit --no-verify`
+
 ## Uninstalling
 
 ```bash

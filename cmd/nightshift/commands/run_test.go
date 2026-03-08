@@ -242,56 +242,68 @@ func newTestRunConfig() *config.Config {
 	}
 }
 
-func TestMaxProjects_DefaultLimitsToOne(t *testing.T) {
-	// Simulate 3 projects, no --project set, maxProjects=1 (default)
-	projects := []string{"/proj/a", "/proj/b", "/proj/c"}
-	projectPath := "" // not explicitly set
-	maxProjects := 1
+// TestMaxProjects_SkipsProcessedBeforeCounting verifies that --max-projects counts
+// only eligible (non-processed-today) projects. With project[0] already processed
+// and maxProjects=1, project[1] should be the one that gets processed.
+func TestMaxProjects_SkipsProcessedBeforeCounting(t *testing.T) {
+	p0 := t.TempDir()
+	p1 := t.TempDir()
+	p2 := t.TempDir()
+	params := newPreflightParams(t, []string{p0, p1, p2})
+	params.maxProjects = 1
 
-	if projectPath == "" && maxProjects > 0 && len(projects) > maxProjects {
-		projects = projects[:maxProjects]
+	// Mark p0 as already processed today
+	params.st.RecordProjectRun(p0)
+
+	plan, err := buildPreflight(params)
+	if err != nil {
+		t.Fatalf("buildPreflight: %v", err)
 	}
 
-	if len(projects) != 1 {
-		t.Fatalf("len(projects) = %d, want 1", len(projects))
+	// p0 should be skipped (processed today), p1 should be eligible and counted,
+	// p2 should not be reached (limit hit).
+	eligibleCount := 0
+	var eligiblePath string
+	for _, pp := range plan.projects {
+		if pp.skipReason == "" {
+			eligibleCount++
+			eligiblePath = pp.path
+		}
 	}
-	if projects[0] != "/proj/a" {
-		t.Fatalf("projects[0] = %q, want /proj/a", projects[0])
+	if eligibleCount != 1 {
+		t.Fatalf("eligible projects = %d, want 1", eligibleCount)
+	}
+	if eligiblePath != p1 {
+		t.Fatalf("eligible project = %q, want p1 (%q)", eligiblePath, p1)
 	}
 }
 
-func TestMaxProjects_OverrideToN(t *testing.T) {
-	projects := []string{"/proj/a", "/proj/b", "/proj/c"}
-	projectPath := ""
-	maxProjects := 2
+// TestMaxProjects_LimitsEligibleCount verifies that with no projects processed,
+// --max-projects 2 processes exactly 2 projects.
+func TestMaxProjects_LimitsEligibleCount(t *testing.T) {
+	p0 := t.TempDir()
+	p1 := t.TempDir()
+	p2 := t.TempDir()
+	params := newPreflightParams(t, []string{p0, p1, p2})
+	params.maxProjects = 2
 
-	if projectPath == "" && maxProjects > 0 && len(projects) > maxProjects {
-		projects = projects[:maxProjects]
+	plan, err := buildPreflight(params)
+	if err != nil {
+		t.Fatalf("buildPreflight: %v", err)
 	}
 
-	if len(projects) != 2 {
-		t.Fatalf("len(projects) = %d, want 2", len(projects))
+	eligibleCount := 0
+	for _, pp := range plan.projects {
+		if pp.skipReason == "" {
+			eligibleCount++
+		}
 	}
-	if projects[1] != "/proj/b" {
-		t.Fatalf("projects[1] = %q, want /proj/b", projects[1])
+	if eligibleCount != 2 {
+		t.Fatalf("eligible projects = %d, want 2", eligibleCount)
 	}
-}
-
-func TestMaxProjects_IgnoredWhenProjectSet(t *testing.T) {
-	projects := []string{"/proj/explicit"}
-	projectPath := "/proj/explicit" // explicitly set
-	maxProjects := 1
-
-	// The guard: projectPath == "" is false, so no truncation
-	if projectPath == "" && maxProjects > 0 && len(projects) > maxProjects {
-		projects = projects[:maxProjects]
-	}
-
-	if len(projects) != 1 {
-		t.Fatalf("len(projects) = %d, want 1", len(projects))
-	}
-	if projects[0] != "/proj/explicit" {
-		t.Fatalf("projects[0] = %q, want /proj/explicit", projects[0])
+	// Total projects in plan should be 2 (p2 never added)
+	if len(plan.projects) != 2 {
+		t.Fatalf("plan.projects len = %d, want 2", len(plan.projects))
 	}
 }
 
@@ -1249,5 +1261,49 @@ func TestDisplayPreflight_NoWarningsWhenBudgetRespected(t *testing.T) {
 
 	if strings.Contains(output, "Warnings:") {
 		t.Errorf("output should not contain 'Warnings:' when ignoreBudget=false\nGot:\n%s", output)
+	}
+}
+
+// TestScheduleMaxProjectsFromConfig verifies that schedule.max_projects in config
+// is respected when --max-projects is not explicitly set via CLI flag (Bug #19, fix 1).
+func TestScheduleMaxProjectsFromConfig(t *testing.T) {
+	// Simulate what runRun does: after loading config, apply schedule.MaxProjects
+	// when the flag was not explicitly changed by the user.
+	maxProjects := 1            // CLI default
+	maxProjectsChanged := false // --max-projects was NOT passed
+
+	cfg := &config.Config{
+		Schedule: config.ScheduleConfig{
+			MaxProjects: 3, // configured in nightshift.yaml
+		},
+	}
+
+	if !maxProjectsChanged && cfg.Schedule.MaxProjects > 0 {
+		maxProjects = cfg.Schedule.MaxProjects
+	}
+
+	if maxProjects != 3 {
+		t.Fatalf("maxProjects = %d, want 3 (from config)", maxProjects)
+	}
+}
+
+// TestScheduleMaxProjectsCLIOverridesConfig verifies that an explicit --max-projects
+// flag takes precedence over schedule.max_projects in config (Bug #19, fix 1).
+func TestScheduleMaxProjectsCLIOverridesConfig(t *testing.T) {
+	maxProjects := 2           // CLI value explicitly set
+	maxProjectsChanged := true // --max-projects=2 was passed
+
+	cfg := &config.Config{
+		Schedule: config.ScheduleConfig{
+			MaxProjects: 5, // configured in nightshift.yaml
+		},
+	}
+
+	if !maxProjectsChanged && cfg.Schedule.MaxProjects > 0 {
+		maxProjects = cfg.Schedule.MaxProjects
+	}
+
+	if maxProjects != 2 {
+		t.Fatalf("maxProjects = %d, want 2 (CLI should win over config)", maxProjects)
 	}
 }

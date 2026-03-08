@@ -123,6 +123,8 @@ func runRun(cmd *cobra.Command, args []string) error {
 	taskFilter, _ := cmd.Flags().GetString("task")
 	maxProjects, _ := cmd.Flags().GetInt("max-projects")
 	maxTasks, _ := cmd.Flags().GetInt("max-tasks")
+	maxProjectsChanged := cmd.Flags().Changed("max-projects")
+	maxTasksChanged := cmd.Flags().Changed("max-tasks")
 	ignoreBudget, _ := cmd.Flags().GetBool("ignore-budget")
 	yes, _ := cmd.Flags().GetBool("yes")
 	randomTask, _ := cmd.Flags().GetBool("random-task")
@@ -159,6 +161,14 @@ func runRun(cmd *cobra.Command, args []string) error {
 	cfg, err := loadConfig(projectPath)
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
+	}
+
+	// Apply config defaults for max-projects and max-tasks if not set via CLI flag.
+	if !maxProjectsChanged && cfg.Schedule.MaxProjects > 0 {
+		maxProjects = cfg.Schedule.MaxProjects
+	}
+	if !maxTasksChanged && cfg.Schedule.MaxTasks > 0 {
+		maxTasks = cfg.Schedule.MaxTasks
 	}
 
 	// Initialize logging
@@ -202,11 +212,6 @@ func runRun(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("resolve projects: %w", err)
 	}
 
-	// Limit projects when --project was not explicitly set
-	if projectPath == "" && maxProjects > 0 && len(projects) > maxProjects {
-		projects = projects[:maxProjects]
-	}
-
 	if len(projects) == 0 {
 		fmt.Println("no projects configured")
 		return nil
@@ -241,6 +246,7 @@ func runRun(cmd *cobra.Command, args []string) error {
 		st:           st,
 		projects:     projects,
 		taskFilter:   taskFilter,
+		maxProjects:  maxProjects,
 		maxTasks:     maxTasks,
 		randomTask:   randomTask,
 		ignoreBudget: ignoreBudget,
@@ -263,6 +269,7 @@ type executeRunParams struct {
 	st           *state.State
 	projects     []string
 	taskFilter   string
+	maxProjects  int
 	maxTasks     int
 	randomTask   bool
 	ignoreBudget bool
@@ -428,7 +435,13 @@ func buildPreflight(p executeRunParams) (*preflightPlan, error) {
 		branch:       p.branch,
 	}
 
+	eligibleCount := 0
 	for _, projectPath := range p.projects {
+		// Apply --max-projects limit (counts only eligible, non-skipped projects)
+		if p.maxProjects > 0 && eligibleCount >= p.maxProjects {
+			break
+		}
+
 		// Skip if already processed today (unless task filter specified)
 		if p.taskFilter == "" && p.st.WasProcessedToday(projectPath) {
 			p.log.Infof("skip %s (processed today)", projectPath)
@@ -503,6 +516,9 @@ func buildPreflight(p executeRunParams) (*preflightPlan, error) {
 		}
 
 		plan.projects = append(plan.projects, pp)
+		if pp.skipReason == "" {
+			eligibleCount++
+		}
 	}
 
 	return plan, nil

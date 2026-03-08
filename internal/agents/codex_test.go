@@ -454,3 +454,52 @@ func TestCodexAgent_Execute_ModelFromOptions(t *testing.T) {
 		t.Error("expected agent default model to be overridden")
 	}
 }
+
+// TestCodexAgentDefaultsBypassFlag verifies that a CodexAgent created with no
+// options includes --dangerously-bypass-approvals-and-sandbox (required for
+// non-interactive execution). This guards against Bug #19 fix 3, where
+// newCodexAgentFromConfig() was inadvertently stripping the flag when the
+// config field defaulted to false.
+func TestCodexAgentDefaultsBypassFlag(t *testing.T) {
+	mock := &MockRunner{Stdout: "done"}
+	agent := NewCodexAgent(WithCodexRunner(mock))
+
+	ctx := context.Background()
+	_, err := agent.Execute(ctx, ExecuteOptions{Prompt: "test"})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+
+	found := false
+	for _, arg := range mock.CapturedArgs {
+		if arg == "--dangerously-bypass-approvals-and-sandbox" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected --dangerously-bypass-approvals-and-sandbox in args %v", mock.CapturedArgs)
+	}
+}
+
+// TestCodexAgentExplicitFalseBypassDisablesFlag verifies that explicitly calling
+// WithDangerouslyBypassApprovalsAndSandbox(false) does disable the flag.
+func TestCodexAgentExplicitFalseBypassDisablesFlag(t *testing.T) {
+	mock := &MockRunner{Stdout: "done"}
+	agent := NewCodexAgent(
+		WithDangerouslyBypassApprovalsAndSandbox(false),
+		WithCodexRunner(mock),
+	)
+
+	ctx := context.Background()
+	_, err := agent.Execute(ctx, ExecuteOptions{Prompt: "test"})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+
+	for _, arg := range mock.CapturedArgs {
+		if arg == "--dangerously-bypass-approvals-and-sandbox" {
+			t.Errorf("expected flag to be absent when explicitly disabled, got args %v", mock.CapturedArgs)
+		}
+	}
+}

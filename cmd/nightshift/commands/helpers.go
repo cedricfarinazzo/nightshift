@@ -53,8 +53,21 @@ func newCodexAgentFromConfig(cfg *config.Config) *agents.CodexAgent {
 	if cfg == nil {
 		return agents.NewCodexAgent()
 	}
-	opts := []agents.CodexOption{
-		agents.WithDangerouslyBypassApprovalsAndSandbox(cfg.Providers.Codex.DangerouslyBypassApprovalsAndSandbox),
+	// The --dangerously-bypass-approvals-and-sandbox flag is required for
+	// non-interactive (headless) Codex execution. The agent defaults to true.
+	// We only pass the config value when it is explicitly enabled; when the
+	// field is false (Go zero value / unconfigured) we preserve the agent's
+	// default so that Codex continues to work as a fallback provider even
+	// when the user has only configured Claude in their nightshift.yaml.
+	//
+	// NOTE: Both bool fields on ProviderConfig are zero-valued false, so we
+	// cannot distinguish "not configured" from "explicitly false". Erring on
+	// the side of enabling the flag for headless operation is the safe choice;
+	// users who want Codex to prompt for approvals should disable the provider
+	// entirely rather than toggling this flag.
+	opts := []agents.CodexOption{}
+	if cfg.Providers.Codex.DangerouslyBypassApprovalsAndSandbox {
+		opts = append(opts, agents.WithDangerouslyBypassApprovalsAndSandbox(true))
 	}
 	if cfg.Providers.Codex.Model != "" {
 		opts = append(opts, agents.WithCodexModel(cfg.Providers.Codex.Model))

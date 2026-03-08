@@ -174,3 +174,67 @@ func TestMakeTaskItems_PreservesExplicitEnabledTasks(t *testing.T) {
 		t.Fatal("expected bug-finder task to exist in setup list")
 	}
 }
+
+func TestWriteGlobalConfig_ProviderYAMLKeys(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yaml")
+
+	// Seed an initial config so WriteConfig can overwrite it.
+	if err := os.WriteFile(cfgPath, []byte("# nightshift config\n"), 0o644); err != nil {
+		t.Fatalf("seed config: %v", err)
+	}
+
+	cfg := &config.Config{}
+	cfg.Providers.Claude.Enabled = true
+	cfg.Providers.Claude.DataPath = "/tmp/claude-data"
+	cfg.Providers.Claude.DangerouslySkipPermissions = true
+	cfg.Providers.Claude.DangerouslyBypassApprovalsAndSandbox = true
+	cfg.Providers.Codex.DataPath = "/tmp/codex-data"
+
+	if err := writeGlobalConfigToPath(cfg, cfgPath); err != nil {
+		t.Fatalf("writeGlobalConfigToPath: %v", err)
+	}
+
+	raw, err := os.ReadFile(cfgPath)
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	content := string(raw)
+
+	// Must use snake_case mapstructure tag names, not lowercased Go field names.
+	wantKeys := []string{
+		"data_path",
+		"dangerously_skip_permissions",
+		"dangerously_bypass_approvals_and_sandbox",
+	}
+	for _, key := range wantKeys {
+		if !containsStr(content, key) {
+			t.Errorf("expected YAML key %q in config output, got:\n%s", key, content)
+		}
+	}
+
+	// Must NOT contain the lowercased Go field name variants.
+	badKeys := []string{
+		"datapath",
+		"dangerouslyskippermissions",
+		"dangerouslybypassapprovalsandsandbox",
+	}
+	for _, key := range badKeys {
+		if containsStr(content, key) {
+			t.Errorf("found incorrect lowercased key %q in config output, got:\n%s", key, content)
+		}
+	}
+}
+
+func containsStr(s, substr string) bool {
+	return len(s) >= len(substr) && (s == substr || len(s) > 0 && stringContains(s, substr))
+}
+
+func stringContains(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
+}
