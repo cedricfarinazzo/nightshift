@@ -23,6 +23,7 @@ type Config struct {
 	Projects     []ProjectConfig    `mapstructure:"projects"`
 	Tasks        TasksConfig        `mapstructure:"tasks"`
 	Integrations IntegrationsConfig `mapstructure:"integrations"`
+	Jira         JiraConfig         `mapstructure:"jira"`
 	Logging      LoggingConfig      `mapstructure:"logging"`
 	Reporting    ReportingConfig    `mapstructure:"reporting"`
 }
@@ -116,6 +117,33 @@ type IntegrationsConfig struct {
 	TaskSources []TaskSourceEntry `mapstructure:"task_sources"` // Task sources
 }
 
+// JiraConfig defines Jira integration settings.
+type JiraConfig struct {
+	URL          string            `mapstructure:"url"`            // Jira instance URL (e.g., https://mycompany.atlassian.net)
+	Email        string            `mapstructure:"email"`          // Jira account email for authentication
+	APITokenEnv  string            `mapstructure:"api_token_env"`  // Env var name holding the Jira API token
+	ProjectKeys  []string          `mapstructure:"project_keys"`   // Jira project keys to watch (e.g., ["PROJ", "BACKEND"])
+	Label        string            `mapstructure:"label"`          // Label to filter tickets (e.g., "nightshift")
+	WorkspacePath string           `mapstructure:"workspace_path"` // Base directory for repo checkouts
+	MaxTickets   int               `mapstructure:"max_tickets"`    // Max tickets to process per run (0 = unlimited)
+	Concurrency  int               `mapstructure:"concurrency"`    // Number of tickets processed in parallel
+	RepoMapping  map[string]string `mapstructure:"repo_mapping"`   // Maps Jira project key to local repo path
+	Phases       JiraPhasesConfig  `mapstructure:"phases"`         // Provider/model config per processing phase
+}
+
+// JiraPhasesConfig defines which provider/model to use for each Jira processing phase.
+type JiraPhasesConfig struct {
+	Validation     JiraPhaseConfig `mapstructure:"validation"`     // Validate ticket is actionable
+	Implementation JiraPhaseConfig `mapstructure:"implementation"` // Implement the ticket
+	Review         JiraPhaseConfig `mapstructure:"review"`         // Review the implementation
+}
+
+// JiraPhaseConfig defines provider and model for a single Jira processing phase.
+type JiraPhaseConfig struct {
+	Provider string `mapstructure:"provider"` // AI provider (claude, codex, copilot)
+	Model    string `mapstructure:"model"`    // Model name override
+}
+
 // TaskSourceEntry represents a task source configuration.
 type TaskSourceEntry struct {
 	TD           *TDConfig `mapstructure:"td"`
@@ -158,6 +186,9 @@ const (
 	DefaultClaudeDataPath    = "~/.claude"
 	DefaultCodexDataPath     = "~/.codex"
 	DefaultCopilotDataPath   = "~/.copilot"
+	DefaultJiraLabel         = "nightshift"
+	DefaultJiraAPITokenEnv   = "JIRA_API_TOKEN"
+	DefaultJiraConcurrency   = 1
 )
 
 // DefaultLogPath returns the default log path.
@@ -273,6 +304,15 @@ func setDefaults(v *viper.Viper) {
 	// Integration defaults
 	v.SetDefault("integrations.claude_md", true)
 	v.SetDefault("integrations.agents_md", true)
+
+	// Jira defaults
+	v.SetDefault("jira.label", DefaultJiraLabel)
+	v.SetDefault("jira.api_token_env", DefaultJiraAPITokenEnv)
+	v.SetDefault("jira.concurrency", DefaultJiraConcurrency)
+	v.SetDefault("jira.max_tickets", 0)
+	v.SetDefault("jira.phases.validation.provider", "claude")
+	v.SetDefault("jira.phases.implementation.provider", "claude")
+	v.SetDefault("jira.phases.review.provider", "claude")
 }
 
 // loadConfigFile merges a YAML config file into viper.
@@ -336,6 +376,12 @@ var (
 	ErrCustomTaskInvalidCostTier    = errors.New("custom task: invalid cost_tier")
 	ErrCustomTaskInvalidRiskLevel   = errors.New("custom task: invalid risk_level")
 	ErrCustomTaskDuplicateType      = errors.New("custom task: duplicate type")
+
+	ErrJiraInvalidURL         = errors.New("jira.url must be a valid https:// URL")
+	ErrJiraMissingEmail       = errors.New("jira.email is required when jira.url is set")
+	ErrJiraInvalidConcurrency = errors.New("jira.concurrency must be >= 1")
+	ErrJiraInvalidMaxTickets  = errors.New("jira.max_tickets must be >= 0")
+	ErrJiraInvalidProvider    = errors.New("jira phase provider must be claude, codex, or copilot")
 )
 
 var customTaskTypeRe = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
@@ -427,6 +473,11 @@ func Validate(cfg *Config) error {
 		return err
 	}
 
+	// Jira validation (only when url is set)
+	if err := validateJiraConfig(&cfg.Jira); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -478,8 +529,35 @@ func validateCustomTasks(tasks []CustomTaskConfig) error {
 	return nil
 }
 
-func normalizeBudgetConfig(cfg *Config) {
-	if cfg == nil {
+func validateJiraConfig(j *JiraConfig) error {
+	if j.URL == "" {
+		return nil // Jira integration not configured; skip validation.
+	}
+
+	if !strings.HasPrefix(j.URL, "https://") && !strings.HasPrefix(j.URL, "http://") {
+		return ErrJiraInvalidURL
+	}
+	if j.Email == "" {
+		return ErrJiraMissingEmail
+	}
+	if j.Concurrency < 1 {
+		return ErrJiraInvalidConcurrency
+	}
+	if j.MaxTickets < 0 {
+		return ErrJiraInvalidMaxTickets
+	}
+
+	validProviders := map[string]bool{"claude": true, "codex": true, "copilot": true, "": true}
+	for _, phase := range []string{j.Phases.Validation.Provider, j.Phases.Implementation.Provider, j.Phases.Review.Provider} {
+		if !validProviders[strings.ToLower(phase)] {
+			return ErrJiraInvalidProvider
+		}
+	}
+
+	return nil
+}
+
+func normalizeBudgetConfig(cfg *Config) {	if cfg == nil {
 		return
 	}
 	if strings.EqualFold(cfg.Budget.BillingMode, "api") {

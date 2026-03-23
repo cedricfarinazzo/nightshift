@@ -256,6 +256,75 @@ Each task has a default cooldown interval to prevent the same task from running 
 
 `skill-groom` is enabled by default. Add it to `tasks.disabled` if you want to opt out. It updates project-local skills under `.claude/skills` and `.codex/skills` using `README.md` as project context and starts Agent Skills docs lookup from `https://agentskills.io/llms.txt`.
 
+## Jira Integration
+
+Nightshift can connect to a Jira instance to discover and process tickets autonomously. This is configured via the `jira` section of `~/.config/nightshift/config.yaml`.
+
+### Setup
+
+1. Create a Jira API token at https://id.atlassian.com/manage-profile/security/api-tokens
+2. Export the token in your shell environment:
+   ```bash
+   export JIRA_API_TOKEN="your-token-here"
+   ```
+3. Add the `jira` section to your config (see below)
+4. Run `nightshift jira` to verify connectivity
+
+### Config Schema
+
+```yaml
+jira:
+  # Jira instance URL (required)
+  url: "https://mycompany.atlassian.net"
+
+  # Jira account email for basic authentication (required)
+  email: "user@company.com"
+
+  # Name of the env var holding the API token (default: JIRA_API_TOKEN)
+  api_token_env: "JIRA_API_TOKEN"
+
+  # Jira project keys to watch. If empty, all accessible projects are used.
+  project_keys:
+    - "PROJ"
+    - "BACKEND"
+
+  # Label used to filter tickets (default: nightshift)
+  label: "nightshift"
+
+  # Base directory where repos live (used for workspace resolution)
+  workspace_path: "~/code"
+
+  # Max tickets to process per run (0 = unlimited, default: 0)
+  max_tickets: 5
+
+  # Number of tickets processed in parallel (default: 1)
+  concurrency: 1
+
+  # Optional: map Jira project key to local repo path
+  repo_mapping:
+    PROJ: "~/code/myproject"
+    BACKEND: "~/code/backend"
+
+  # Provider and model for each processing phase
+  phases:
+    validation:
+      provider: "claude"        # claude | codex | copilot
+      model: ""                 # optional model override
+    implementation:
+      provider: "claude"
+      model: ""
+    review:
+      provider: "codex"
+      model: ""
+```
+
+### CLI
+
+```bash
+# Verify Jira connectivity and list configured projects
+nightshift jira
+```
+
 ## Development
 
 ### Pre-commit hooks
