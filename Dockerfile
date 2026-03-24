@@ -9,7 +9,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /nightshift 
 # ── Stage 2: runtime image ────────────────────────────────────────────────────
 # Node.js LTS is required to run all three provider CLIs
 # (claude-code, codex, and copilot are npm packages).
-FROM node:22-bookworm-slim
+FROM node:24-bookworm-slim
 
 # Grab uv and bun binaries from their official images
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
