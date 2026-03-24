@@ -4,11 +4,13 @@ on:
   push:
     branches:
       - main
+      - "feature/**"
     tags:
       - "v*"
   pull_request:
     branches:
       - main
+
 
 permissions:
   contents: read
