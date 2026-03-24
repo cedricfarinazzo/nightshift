@@ -1,0 +1,46 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nightshift-config
+  namespace: nightshift
+data:
+  config.yaml: |
+    # Nightshift configuration for Kubernetes CronJob deployment.
+    # The schedule is driven by the CronJob spec below — nightshift's
+    # internal scheduler is not used in this mode.
+
+    budget:
+      mode: daily
+      max_percent: 75
+      reserve_percent: 5
+      billing_mode: subscription
+      calibrate_enabled: false
+      snapshot_interval: 30m
+      db_path: /data/nightshift.db
+
+    providers:
+      preference:
+        - claude
+        - codex
+      claude:
+        enabled: true
+        data_path: /home/nightshift/.claude
+        dangerously_skip_permissions: true
+      codex:
+        enabled: false
+        data_path: /home/nightshift/.codex
+        dangerously_bypass_approvals_and_sandbox: true
+
+    projects:
+      - path: /repos/my-project
+
+    tasks:
+      enabled:
+        - lint-fix
+        - docs-backfill
+        - bug-finder
+
+    logging:
+      level: info
+      path: /data/logs
+      format: json
