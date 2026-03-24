@@ -7,8 +7,6 @@ COPY . .
 RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /nightshift ./cmd/nightshift
 
 # ── Stage 2: runtime image ────────────────────────────────────────────────────
-# Node.js LTS is required to run all three provider CLIs
-# (claude-code, codex, and copilot are npm packages).
 FROM debian:bookworm-slim
 
 # Grab uv and bun binaries from their official images
@@ -38,14 +36,18 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends nodejs gh \
     && rm -rf /var/lib/apt/lists/*
 
-# Provider CLIs — installed globally so they land in /usr/local/bin
-#   claude  → @anthropic-ai/claude-code
-#   codex   → @openai/codex
-#   copilot → @github/copilot
-RUN npm install -g --no-fund --no-audit \
-        @anthropic-ai/claude-code \
-        @openai/codex \
-        @github/copilot \
+# Claude Code — standalone installer (installs to ~/.local/bin, move to system path)
+RUN curl -fsSL https://claude.ai/install.sh | sh \
+    && mv /root/.local/bin/claude /usr/local/bin/claude
+
+# GitHub Copilot — standalone installer
+RUN curl -fsSL https://gh.io/copilot-install | bash \
+    && (mv /root/.local/bin/copilot /usr/local/bin/copilot 2>/dev/null \
+        || mv /usr/local/bin/.copilot-install/copilot /usr/local/bin/copilot 2>/dev/null \
+        || true)
+
+# Codex — npm (no standalone installer available)
+RUN npm install -g --no-fund --no-audit @openai/codex \
     && npm cache clean --force
 
 # nightshift binary
