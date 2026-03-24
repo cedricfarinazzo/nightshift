@@ -25,10 +25,16 @@ data:
       claude:
         enabled: true
         data_path: /home/nightshift/.claude
+        # Available models: claude-opus-4-6, claude-sonnet-4-6, claude-haiku-4-5
+        # Omit to use the provider CLI default.
+        model: claude-sonnet-4-6
         dangerously_skip_permissions: true
       codex:
         enabled: false
         data_path: /home/nightshift/.codex
+        # Available models: gpt-5.3-codex, gpt-5.3-codex-spark, gpt-5.2, gpt-5-mini
+        # Omit to use the provider CLI default.
+        model: gpt-5.3-codex
         dangerously_bypass_approvals_and_sandbox: true
 
     projects:

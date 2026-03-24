@@ -64,8 +64,40 @@ Edit `configmap.yaml` to match your projects, providers, and task selection. Key
 | `budget.db_path` | Must be on the PVC mount (`/data/nightshift.db`) |
 | `logging.path` | Must be on the PVC mount (`/data/logs`) |
 | `providers.*.data_path` | Provider CLI credential directory inside the container |
+| `providers.*.model` | Model to use (see table below); omit to use the provider CLI default |
 | `providers.*.dangerously_skip_permissions` | Set `true` for unattended runs |
 | `projects[].path` | Path to the repo inside the container (mount it or clone on start) |
+
+#### Available models
+
+| Provider | Model | Notes |
+|----------|-------|-------|
+| `claude` | `claude-opus-4-6` | Most capable, higher cost |
+| `claude` | `claude-sonnet-4-6` | Recommended balance of quality and cost |
+| `claude` | `claude-haiku-4-5` | Fastest, lowest cost |
+| `codex` | `gpt-5.3-codex` | Full Codex model |
+| `codex` | `gpt-5.3-codex-spark` | Lighter Codex variant |
+| `codex` | `gpt-5.2` | GPT-5.2 base |
+| `codex` | `gpt-5-mini` | Lowest cost Codex option |
+
+Example provider block with explicit model selection:
+
+```yaml
+providers:
+  preference:
+    - claude
+    - codex
+  claude:
+    enabled: true
+    data_path: /home/nightshift/.claude
+    model: claude-sonnet-4-6
+    dangerously_skip_permissions: true
+  codex:
+    enabled: true
+    data_path: /home/nightshift/.codex
+    model: gpt-5.3-codex
+    dangerously_bypass_approvals_and_sandbox: true
+```
 
 ### 3. Supply secrets
 
