@@ -27,33 +27,31 @@ deploy/kubernetes/
 
 ## Quick start
 
-### 1. Build or pull the image
+### 1. Pull the image
 
-nightshift does not yet publish an official container image. Build one from source:
+Images are published automatically to the GitHub Container Registry by the
+[Docker CI workflow](../../.github/workflows/docker.yml):
 
-```dockerfile
-# Example minimal Dockerfile (place at repo root)
-FROM golang:1.24 AS builder
-WORKDIR /src
-COPY . .
-RUN go build -o /nightshift ./cmd/nightshift
+| Tag | Published when |
+|-----|----------------|
+| `ghcr.io/cedricfarinazzo/nightshift:latest` | Every push to `main` |
+| `ghcr.io/cedricfarinazzo/nightshift:v1.2.3` | Version tag (e.g. `v0.3.4`) |
+| `ghcr.io/cedricfarinazzo/nightshift:sha-<short>` | Every push (immutable ref) |
 
-FROM debian:bookworm-slim
-RUN apt-get update && apt-get install -y git ca-certificates && rm -rf /var/lib/apt/lists/*
-RUN useradd -m -u 1000 nightshift
-COPY --from=builder /nightshift /usr/local/bin/nightshift
-USER nightshift
-ENTRYPOINT ["nightshift"]
+**Recommended:** pin to a version tag in production:
+
+```yaml
+image: ghcr.io/cedricfarinazzo/nightshift:v0.3.4
 ```
 
-Build and push to your registry:
+To build locally (e.g. for a fork or custom patch):
 
 ```bash
 docker build -t ghcr.io/<your-org>/nightshift:latest .
 docker push ghcr.io/<your-org>/nightshift:latest
 ```
 
-Then update the `image:` field in `cronjob.yaml` to point at your registry.
+Then update the `image:` field in `cronjob.yaml`.
 
 ### 2. Configure
 

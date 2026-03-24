@@ -51,8 +51,9 @@ spec:
 
           containers:
             - name: nightshift
-              # Pin to a specific release tag in production.
-              # See: https://github.com/cedricfarinazzo/nightshift/releases
+              # Pin to a specific release tag in production, e.g. :v0.3.4
+              # Images are published to GHCR by the Docker CI workflow on every
+              # push to main (:latest) and on every version tag (:v1.2.3).
               image: ghcr.io/cedricfarinazzo/nightshift:latest
 
               # In Kubernetes, nightshift is invoked as a one-shot command.
