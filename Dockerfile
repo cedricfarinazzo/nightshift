@@ -11,6 +11,10 @@ RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /nightshift 
 # (claude-code, codex, and copilot are npm packages).
 FROM node:22-bookworm-slim
 
+# Grab uv and bun binaries from their official images
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+COPY --from=oven/bun:latest /usr/local/bin/bun /usr/local/bin/bun
+
 # System packages: git (branch push/PR), curl + gnupg (gh CLI apt key), ca-certs
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
