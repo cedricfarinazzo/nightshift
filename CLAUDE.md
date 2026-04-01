@@ -246,6 +246,7 @@ Agents MUST follow these git conventions:
   - Example: `feat(budget): add per-provider daily cap enforcement`
 - Include **Jira ticket ID** at end of commit body when applicable: `Refs: NS-123`
 - **No merge commits** on feature branches — rebase onto main.
+- **Never amend commits** — always create a new commit for follow-up changes.
 - Branch naming: `type/short-description` (e.g. `feat/model-selection`, `fix/budget-overflow`)
 - PRs must be small and focused; split large changes into sequential PRs.
 - Never force-push to `main`.

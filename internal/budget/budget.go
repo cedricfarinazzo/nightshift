@@ -228,7 +228,7 @@ func (m *Manager) calculateWeeklyAllowance(weeklyBudget int64, usedPercent float
 	multiplier := 1.0
 	if m.cfg.Budget.AggressiveEndOfWeek && remainingDays <= 2 {
 		// 2x on day before reset, 3x on last day
-		multiplier = float64(3 - remainingDays)
+		multiplier = float64(4 - remainingDays)
 	}
 
 	nightshiftAllowance := (remainingWeekly / float64(remainingDays)) * float64(maxPercent) / 100 * multiplier

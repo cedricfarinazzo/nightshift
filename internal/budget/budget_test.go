@@ -258,13 +258,13 @@ func TestAggressiveEndOfWeek(t *testing.T) {
 			name:           "friday aggressive (2 days left)",
 			dayOfWeek:      time.Friday,
 			aggressive:     true,
-			wantMultiplier: 1.0, // 3-2=1, remaining=2 so multiplier=1
+			wantMultiplier: 2.0, // 4-2=2, remaining=2 so multiplier=2
 		},
 		{
 			name:           "saturday aggressive (1 day left)",
 			dayOfWeek:      time.Saturday,
 			aggressive:     true,
-			wantMultiplier: 2.0, // 3-1=2
+			wantMultiplier: 3.0, // 4-1=3
 		},
 	}
 
