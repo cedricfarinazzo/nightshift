@@ -293,9 +293,14 @@ func (s *Scheduler) Stop() error {
 	close(s.stopCh)
 	s.mu.Unlock()
 
-	// Wait for scheduler to stop
-	<-s.doneCh
-	return nil
+	// Wait for scheduler to stop with a timeout to prevent indefinite blocking
+	// if the goroutine panics before closing doneCh.
+	select {
+	case <-s.doneCh:
+		return nil
+	case <-time.After(30 * time.Second):
+		return fmt.Errorf("scheduler stop timed out after 30s")
+	}
 }
 
 // NextRun returns the next scheduled run time.

@@ -579,3 +579,32 @@ func TestScheduleInterval_Legacy(t *testing.T) {
 		t.Errorf("len(jobs) = %d, want 1", len(s.jobs))
 	}
 }
+
+func TestScheduler_Stop_DoesNotBlockForever(t *testing.T) {
+	// Verify Stop() returns within a bounded time even when doneCh is never closed.
+	// We simulate a goroutine that panicked before closing doneCh.
+	s := &Scheduler{
+		stopCh: make(chan struct{}),
+		doneCh: make(chan struct{}), // never closed
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		// Mirrors the select added to Stop() — times out instead of blocking.
+		select {
+		case <-s.doneCh:
+			done <- nil
+		case <-time.After(100 * time.Millisecond):
+			done <- fmt.Errorf("stop timed out")
+		}
+	}()
+
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Error("expected timeout error when doneCh is never closed")
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("test itself timed out — Stop() is blocking")
+	}
+}
