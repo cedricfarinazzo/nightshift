@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"time"
@@ -207,11 +208,9 @@ func (c *Copilot) GetUsedPercent(mode string, monthlyLimit int64) (float64, erro
 		}
 
 		// Estimate today's usage by dividing total monthly usage by days elapsed
-		daysElapsed := now.Day()
-		if daysElapsed == 0 {
-			daysElapsed = 1
-		}
-		todayEstimate := float64(requests) / float64(daysElapsed)
+		monthStart := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location())
+		daysElapsed := math.Max(1.0, now.Sub(monthStart).Hours()/24.0)
+		todayEstimate := float64(requests) / daysElapsed
 
 		return (todayEstimate / dailyAllocation) * 100, nil
 
@@ -283,11 +282,9 @@ func (c *Copilot) GetTodayTokens() (int64, error) {
 	}
 
 	// Estimate today's usage: monthly total / days elapsed
-	daysElapsed := now.Day()
-	if daysElapsed == 0 {
-		daysElapsed = 1
-	}
-	todayEstimate := data.RequestCount / int64(daysElapsed)
+	monthStart := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location())
+	daysElapsed := math.Max(1.0, now.Sub(monthStart).Hours()/24.0)
+	todayEstimate := int64(float64(data.RequestCount) / daysElapsed)
 	return todayEstimate, nil
 }
 

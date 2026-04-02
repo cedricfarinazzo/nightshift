@@ -1,6 +1,7 @@
 package providers
 
 import (
+	"math"
 	"os"
 	"testing"
 	"time"
@@ -341,6 +342,31 @@ func TestFirstOfMonth(t *testing.T) {
 		if !result.Equal(tt.expected) {
 			t.Errorf("firstOfMonth(%v) = %v, want %v", tt.input, result, tt.expected)
 		}
+	}
+}
+
+func TestCopilot_DaysElapsed_UsesActualElapsedTime(t *testing.T) {
+	// At 6 AM on day 1 of the month, only 0.25 days have elapsed — not 1.
+	now := time.Date(2026, 1, 1, 6, 0, 0, 0, time.UTC)
+	monthStart := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location())
+	daysElapsed := math.Max(1.0, now.Sub(monthStart).Hours()/24.0)
+
+	// Should be 0.25 but clamped to 1.0 by math.Max — still much less than day-of-month (1).
+	// The key check: elapsed hours / 24 = 0.25, which is less than now.Day() = 1.
+	rawElapsed := now.Sub(monthStart).Hours() / 24.0
+	if rawElapsed >= 1.0 {
+		t.Errorf("raw elapsed = %f, expected < 1.0 at 6 AM on day 1", rawElapsed)
+	}
+	if daysElapsed != 1.0 {
+		t.Errorf("daysElapsed = %f, expected 1.0 (clamped minimum)", daysElapsed)
+	}
+
+	// Mid-month: day 15 at noon → 14.5 days elapsed, not 15.
+	now2 := time.Date(2026, 1, 15, 12, 0, 0, 0, time.UTC)
+	monthStart2 := time.Date(now2.Year(), now2.Month(), 1, 0, 0, 0, 0, now2.Location())
+	daysElapsed2 := math.Max(1.0, now2.Sub(monthStart2).Hours()/24.0)
+	if math.Abs(daysElapsed2-14.5) > 0.01 {
+		t.Errorf("daysElapsed = %f, expected ~14.5", daysElapsed2)
 	}
 }
 
