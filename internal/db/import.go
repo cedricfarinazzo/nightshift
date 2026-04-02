@@ -179,9 +179,17 @@ func importLegacyStateData(db *sql.DB, legacy legacyStateData) (int, int, error)
 	return projectCount, runCount, nil
 }
 
+var validImportTables = map[string]bool{
+	"projects": true, "task_history": true,
+	"assigned_tasks": true, "run_history": true,
+}
+
 func dbHasStateRows(db *sql.DB) (bool, error) {
 	tables := []string{"projects", "task_history", "assigned_tasks", "run_history"}
 	for _, table := range tables {
+		if !validImportTables[table] {
+			return false, fmt.Errorf("invalid table name: %s", table)
+		}
 		row := db.QueryRow(fmt.Sprintf("SELECT 1 FROM %s LIMIT 1", table))
 		var one int
 		err := row.Scan(&one)
