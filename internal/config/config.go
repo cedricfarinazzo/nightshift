@@ -430,6 +430,18 @@ func Validate(cfg *Config) error {
 	return nil
 }
 
+// ValidateForDaemon extends Validate with daemon-specific checks.
+// One-shot commands (e.g. `run`) should use Validate instead.
+func ValidateForDaemon(cfg *Config) error {
+	if err := Validate(cfg); err != nil {
+		return err
+	}
+	if cfg.Schedule.Cron == "" && cfg.Schedule.Interval == "" {
+		return ErrNoSchedule
+	}
+	return nil
+}
+
 func validateCustomTasks(tasks []CustomTaskConfig) error {
 	validCategories := map[string]bool{
 		"pr": true, "analysis": true, "options": true,

@@ -2,6 +2,7 @@ package commands
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -141,9 +142,12 @@ func runDaemonStart(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("load config: %w", err)
 	}
 
-	// Validate schedule is configured
-	if cfg.Schedule.Cron == "" && cfg.Schedule.Interval == "" {
-		return fmt.Errorf("no schedule configured (set cron or interval in config)")
+	// Validate config for daemon mode (requires a schedule)
+	if err := config.ValidateForDaemon(cfg); err != nil {
+		if errors.Is(err, config.ErrNoSchedule) {
+			return fmt.Errorf("no schedule configured: set schedule.cron or schedule.interval in config")
+		}
+		return fmt.Errorf("invalid config: %w", err)
 	}
 
 	if daemonForegroundFlag {
