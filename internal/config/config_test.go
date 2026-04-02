@@ -602,3 +602,32 @@ func TestValidate_CustomTaskDuplicateType(t *testing.T) {
 		t.Errorf("expected ErrCustomTaskDuplicateType, got %v", err)
 	}
 }
+
+func TestValidateForDaemon_NoSchedule(t *testing.T) {
+	cfg := &Config{}
+	if err := ValidateForDaemon(cfg); !errors.Is(err, ErrNoSchedule) {
+		t.Errorf("expected ErrNoSchedule, got %v", err)
+	}
+}
+
+func TestValidateForDaemon_WithCron(t *testing.T) {
+	cfg := &Config{Schedule: ScheduleConfig{Cron: "0 22 * * *"}}
+	if err := ValidateForDaemon(cfg); err != nil {
+		t.Errorf("unexpected error with cron schedule: %v", err)
+	}
+}
+
+func TestValidateForDaemon_WithInterval(t *testing.T) {
+	cfg := &Config{Schedule: ScheduleConfig{Interval: "24h"}}
+	if err := ValidateForDaemon(cfg); err != nil {
+		t.Errorf("unexpected error with interval schedule: %v", err)
+	}
+}
+
+func TestValidate_NoScheduleIsOK(t *testing.T) {
+	// One-shot run does not require a schedule — Validate() must pass.
+	cfg := &Config{}
+	if err := Validate(cfg); err != nil {
+		t.Errorf("Validate() without schedule should pass, got %v", err)
+	}
+}
