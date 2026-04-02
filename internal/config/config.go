@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/marcus/nightshift/internal/jira"
 	"github.com/spf13/viper"
 )
 
@@ -25,6 +26,7 @@ type Config struct {
 	Integrations IntegrationsConfig `mapstructure:"integrations"`
 	Logging      LoggingConfig      `mapstructure:"logging"`
 	Reporting    ReportingConfig    `mapstructure:"reporting"`
+	Jira         jira.JiraConfig    `mapstructure:"jira"`
 }
 
 // ScheduleConfig defines when nightshift runs.
