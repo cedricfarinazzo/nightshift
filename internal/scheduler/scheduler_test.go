@@ -2,6 +2,7 @@ package scheduler
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync/atomic"
 	"testing"
@@ -581,30 +582,30 @@ func TestScheduleInterval_Legacy(t *testing.T) {
 }
 
 func TestScheduler_Stop_DoesNotBlockForever(t *testing.T) {
-	// Verify Stop() returns within a bounded time even when doneCh is never closed.
-	// We simulate a goroutine that panicked before closing doneCh.
+	// Verify Stop() itself returns ErrStopTimeout when doneCh is never closed.
+	// Uses a short injectable timeout so the test completes quickly.
 	s := &Scheduler{
-		stopCh: make(chan struct{}),
-		doneCh: make(chan struct{}), // never closed
+		stopCh:       make(chan struct{}),
+		doneCh:       make(chan struct{}), // never closed
+		stopTimeoutD: 50 * time.Millisecond,
 	}
+	s.running = true
 
 	done := make(chan error, 1)
+	start := time.Now()
 	go func() {
-		// Mirrors the select added to Stop() — times out instead of blocking.
-		select {
-		case <-s.doneCh:
-			done <- nil
-		case <-time.After(100 * time.Millisecond):
-			done <- fmt.Errorf("stop timed out")
-		}
+		done <- s.Stop()
 	}()
 
 	select {
 	case err := <-done:
-		if err == nil {
-			t.Error("expected timeout error when doneCh is never closed")
+		if !errors.Is(err, ErrStopTimeout) {
+			t.Errorf("expected ErrStopTimeout, got: %v", err)
+		}
+		if elapsed := time.Since(start); elapsed > 500*time.Millisecond {
+			t.Errorf("Stop() returned too slowly: %v", elapsed)
 		}
 	case <-time.After(500 * time.Millisecond):
-		t.Fatal("test itself timed out — Stop() is blocking")
+		t.Fatal("Stop() blocked — did not return within 500ms")
 	}
 }
