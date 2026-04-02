@@ -586,6 +586,68 @@ func TestTruncate(t *testing.T) {
 	}
 }
 
+// TestExecRunnerHelperProcess is a subprocess helper used by TestExecRunner_Cancel_NilProcess.
+// It signals readiness by writing a file, then sleeps until killed.
+func TestExecRunnerHelperProcess(t *testing.T) {
+	const helperArg = "--exec-runner-helper"
+	readyFile := ""
+	for i, arg := range os.Args {
+		if arg == helperArg && i+1 < len(os.Args) {
+			readyFile = os.Args[i+1]
+			break
+		}
+	}
+	if readyFile == "" {
+		return // not running as helper subprocess
+	}
+	if err := os.WriteFile(readyFile, []byte("ready"), 0o600); err != nil {
+		os.Exit(2)
+	}
+	time.Sleep(5 * time.Second)
+	os.Exit(0)
+}
+
+func TestExecRunner_Cancel_NilProcess(t *testing.T) {
+	// Cancel the context after the subprocess has started to exercise the nil-Process guard.
+	readyFile := filepath.Join(t.TempDir(), "ready")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Cancel once the helper signals it has started.
+	cancelDone := make(chan struct{})
+	go func() {
+		defer close(cancelDone)
+		deadline := time.Now().Add(2 * time.Second)
+		for time.Now().Before(deadline) {
+			if _, err := os.Stat(readyFile); err == nil {
+				cancel()
+				return
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	}()
+
+	runner := &ExecRunner{}
+	_, _, _, err := runner.Run(ctx, os.Args[0], []string{
+		"-test.run=TestExecRunnerHelperProcess",
+		"--",
+		"--exec-runner-helper",
+		readyFile,
+	}, "", "")
+
+	<-cancelDone
+
+	if _, statErr := os.Stat(readyFile); statErr != nil {
+		t.Fatalf("helper process did not start before cancellation: %v", statErr)
+	}
+	if err == nil {
+		t.Fatal("expected cancellation error, got nil")
+	}
+	if !errors.Is(err, context.Canceled) && !strings.Contains(err.Error(), "killed") {
+		t.Fatalf("expected cancellation error, got: %v", err)
+	}
+}
+
 func TestClaudeAgent_Execute_ModelFromOptions(t *testing.T) {
 	mock := &MockRunner{Stdout: "response", ExitCode: 0}
 	agent := NewClaudeAgent(
