@@ -231,7 +231,7 @@ func (a *ClaudeAgent) buildFileContext(files []string) (string, error) {
 			return "", fmt.Errorf("reading %s: %w", path, err)
 		}
 
-		// Use absolute path for unambiguous output
+		// Use absolute path for cleaner output
 		displayPath := path
 		if abs, err := filepath.Abs(path); err == nil {
 			displayPath = abs
