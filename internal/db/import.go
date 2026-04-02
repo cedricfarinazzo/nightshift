@@ -179,25 +179,25 @@ func importLegacyStateData(db *sql.DB, legacy legacyStateData) (int, int, error)
 	return projectCount, runCount, nil
 }
 
-var validImportTables = map[string]bool{
-	"projects": true, "task_history": true,
-	"assigned_tasks": true, "run_history": true,
+// importTableRowChecks maps each import-relevant table to its row-existence query.
+// Single source of truth: add/remove entries here to affect both iteration and validation.
+var importTableRowChecks = map[string]string{
+	"projects":       "SELECT 1 FROM projects LIMIT 1",
+	"task_history":   "SELECT 1 FROM task_history LIMIT 1",
+	"assigned_tasks": "SELECT 1 FROM assigned_tasks LIMIT 1",
+	"run_history":    "SELECT 1 FROM run_history LIMIT 1",
 }
 
 func dbHasStateRows(db *sql.DB) (bool, error) {
-	tables := []string{"projects", "task_history", "assigned_tasks", "run_history"}
-	for _, table := range tables {
-		if !validImportTables[table] {
-			return false, fmt.Errorf("invalid table name: %s", table)
-		}
-		row := db.QueryRow(fmt.Sprintf("SELECT 1 FROM %s LIMIT 1", table))
+	for table, query := range importTableRowChecks {
+		row := db.QueryRow(query)
 		var one int
 		err := row.Scan(&one)
 		if err == nil {
 			return true, nil
 		}
 		if !errors.Is(err, sql.ErrNoRows) {
-			return false, fmt.Errorf("check %s rows: %w", table, err)
+			return false, fmt.Errorf("check %q rows: %w", table, err)
 		}
 	}
 	return false, nil
