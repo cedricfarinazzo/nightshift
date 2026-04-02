@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"time"
@@ -198,20 +199,17 @@ func (c *Copilot) GetUsedPercent(mode string, monthlyLimit int64) (float64, erro
 
 	switch mode {
 	case "daily":
-		// For daily mode, we calculate what portion of today's allocation has been used
-		// Daily allocation = monthly_limit / days_in_month
+		// For daily mode, we calculate what portion of today's allocation has been used.
+		// Daily allocation = monthly_limit / days_in_month.
+		// Today's estimate = monthly_requests / days_elapsed (average per elapsed day).
 		daysInMonth := daysInCurrentMonth(now)
 		dailyAllocation := float64(monthlyLimit) / float64(daysInMonth)
 		if dailyAllocation <= 0 {
 			return 0, nil
 		}
 
-		// Estimate today's usage by dividing total monthly usage by days elapsed
-		daysElapsed := now.Day()
-		if daysElapsed == 0 {
-			daysElapsed = 1
-		}
-		todayEstimate := float64(requests) / float64(daysElapsed)
+		daysElapsed := daysElapsedInMonth(now)
+		todayEstimate := float64(requests) / daysElapsed
 
 		return (todayEstimate / dailyAllocation) * 100, nil
 
@@ -257,6 +255,13 @@ func firstOfMonth(t time.Time) time.Time {
 	return time.Date(t.Year(), t.Month(), 1, 0, 0, 0, 0, time.UTC)
 }
 
+// daysElapsedInMonth returns the number of days elapsed since the start of the month.
+// Minimum is 1 hour (1/24) to avoid division by zero at the exact moment of reset.
+func daysElapsedInMonth(t time.Time) float64 {
+	const minDays = 1.0 / 24.0 // 1 hour minimum
+	return math.Max(minDays, t.UTC().Sub(firstOfMonth(t)).Hours()/24.0)
+}
+
 // daysInCurrentMonth returns the number of days in the month of the given time.
 func daysInCurrentMonth(t time.Time) int {
 	t = t.UTC()
@@ -283,11 +288,7 @@ func (c *Copilot) GetTodayTokens() (int64, error) {
 	}
 
 	// Estimate today's usage: monthly total / days elapsed
-	daysElapsed := now.Day()
-	if daysElapsed == 0 {
-		daysElapsed = 1
-	}
-	todayEstimate := data.RequestCount / int64(daysElapsed)
+	todayEstimate := int64(float64(data.RequestCount) / daysElapsedInMonth(now))
 	return todayEstimate, nil
 }
 

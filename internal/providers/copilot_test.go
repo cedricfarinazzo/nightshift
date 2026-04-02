@@ -344,6 +344,43 @@ func TestFirstOfMonth(t *testing.T) {
 	}
 }
 
+func TestDaysElapsedInMonth(t *testing.T) {
+	tests := []struct {
+		name    string
+		now     time.Time
+		wantMin float64
+		wantMax float64
+	}{
+		{
+			name:    "6 AM on day 1: rawElapsed=0.25, returned as-is (above 1h minimum)",
+			now:     time.Date(2026, 1, 1, 6, 0, 0, 0, time.UTC),
+			wantMin: 0.24,
+			wantMax: 0.26,
+		},
+		{
+			name:    "exact reset moment: clamped to 1h minimum",
+			now:     time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+			wantMin: 1.0 / 24.0,
+			wantMax: 1.0/24.0 + 0.001,
+		},
+		{
+			name:    "day 15 at noon: 14.5 days elapsed",
+			now:     time.Date(2026, 1, 15, 12, 0, 0, 0, time.UTC),
+			wantMin: 14.49,
+			wantMax: 14.51,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := daysElapsedInMonth(tt.now)
+			if got < tt.wantMin || got > tt.wantMax {
+				t.Errorf("daysElapsedInMonth(%v) = %f, want [%f, %f]", tt.now, got, tt.wantMin, tt.wantMax)
+			}
+		})
+	}
+}
+
 func TestDaysInCurrentMonth(t *testing.T) {
 	tests := []struct {
 		input    time.Time
