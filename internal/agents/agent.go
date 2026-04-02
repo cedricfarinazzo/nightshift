@@ -42,13 +42,16 @@ func (r *ExecuteResult) IsSuccess() bool {
 	return r.ExitCode == 0 && r.Error == ""
 }
 
-// truncate returns s trimmed to maxLen characters, appending "..." if truncated.
+// truncate returns s trimmed to at most maxLen bytes, appending "..." if truncated.
 func truncate(s string, maxLen int) string {
 	if len(s) <= maxLen {
 		return s
 	}
+	if maxLen <= 0 {
+		return ""
+	}
 	if maxLen <= 3 {
-		return "..."
+		return "..."[:maxLen]
 	}
 	return s[:maxLen-3] + "..."
 }

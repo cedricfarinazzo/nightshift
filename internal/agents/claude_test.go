@@ -558,27 +558,31 @@ func TestClaudeAgent_Execute_NoModel(t *testing.T) {
 
 func TestTruncate(t *testing.T) {
 	tests := []struct {
-		input      string
-		maxLen     int
-		want       string
-		checkLen   bool
+		name   string
+		input  string
+		maxLen int
+		want   string
 	}{
-		{"hello world", 5, "he...", true},      // AC-2: exactly 5 chars
-		{"hello world", 11, "hello world", true}, // no truncation needed
-		{"hello world", 3, "...", false},         // maxLen <= 3: returns "..." (minimum)
-		{"hello world", 1, "...", false},         // maxLen < 3: returns "..." (minimum)
-		{"hi", 5, "hi", true},                    // short string, no truncation
-		{"hello world", 8, "hello...", true},
+		{"truncate to exactly five bytes", "hello world", 5, "he..."},
+		{"no truncation needed", "hello world", 11, "hello world"},
+		{"maxLen equals three returns ellipsis", "hello world", 3, "..."},
+		{"maxLen equals two returns two dots", "hello world", 2, ".."},
+		{"maxLen equals one returns one dot", "hello world", 1, "."},
+		{"maxLen zero returns empty", "hello world", 0, ""},
+		{"short string unchanged", "hi", 5, "hi"},
+		{"truncate to eight bytes", "hello world", 8, "hello..."},
 	}
 
 	for _, tt := range tests {
-		got := truncate(tt.input, tt.maxLen)
-		if got != tt.want {
-			t.Errorf("truncate(%q, %d) = %q, want %q", tt.input, tt.maxLen, got, tt.want)
-		}
-		if tt.checkLen && len(got) > tt.maxLen {
-			t.Errorf("truncate(%q, %d) = %q (len %d), exceeds maxLen %d", tt.input, tt.maxLen, got, len(got), tt.maxLen)
-		}
+		t.Run(tt.name, func(t *testing.T) {
+			got := truncate(tt.input, tt.maxLen)
+			if got != tt.want {
+				t.Errorf("truncate(%q, %d) = %q, want %q", tt.input, tt.maxLen, got, tt.want)
+			}
+			if len(got) > tt.maxLen {
+				t.Errorf("truncate(%q, %d) = %q (len %d), exceeds maxLen %d", tt.input, tt.maxLen, got, len(got), tt.maxLen)
+			}
+		})
 	}
 }
 
