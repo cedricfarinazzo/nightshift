@@ -1386,6 +1386,41 @@ func TestCodexGetWeeklyTokens(t *testing.T) {
 	}
 }
 
+func TestCodexParseSessionTokenUsage_CachedExceedsInput(t *testing.T) {
+	// When Codex reports cached > input (data inconsistency), cached should be
+	// capped at input so CachedInputTokens never exceeds InputTokens.
+	tmpDir := t.TempDir()
+	sessionPath := filepath.Join(tmpDir, "session.jsonl")
+
+	// Single event: input=500, cached=800 (cached > input — inconsistent data)
+	content := codexTokenCountJSON(500, 800, 100, 0, 1400) + "\n"
+	if err := os.WriteFile(sessionPath, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	provider := NewCodexWithPath(tmpDir)
+	usage, err := provider.ParseSessionTokenUsage(sessionPath)
+	if err != nil {
+		t.Fatalf("ParseSessionTokenUsage error: %v", err)
+	}
+	if usage == nil {
+		t.Fatal("expected non-nil token usage")
+	}
+
+	// AC-1: CachedInputTokens must not exceed InputTokens
+	if usage.CachedInputTokens > usage.InputTokens {
+		t.Errorf("CachedInputTokens %d > InputTokens %d", usage.CachedInputTokens, usage.InputTokens)
+	}
+	// cached capped at input=500
+	if usage.CachedInputTokens != 500 {
+		t.Errorf("CachedInputTokens = %d, want 500 (capped at input)", usage.CachedInputTokens)
+	}
+	// TotalTokens = (500-500) non-cached + 100 output + 0 reasoning = 100
+	if usage.TotalTokens != 100 {
+		t.Errorf("TotalTokens = %d, want 100", usage.TotalTokens)
+	}
+}
+
 func TestCodexParseSessionJSONL_LargeLines(t *testing.T) {
 	tmpDir := t.TempDir()
 	sessionPath := filepath.Join(tmpDir, "session.jsonl")

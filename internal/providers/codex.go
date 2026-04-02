@@ -439,11 +439,14 @@ func (c *Codex) ParseSessionTokenUsage(path string) (*CodexTokenUsage, error) {
 
 	input := nonNegative(src.InputTokens)
 	cached := nonNegative(src.CachedInputTokens)
+	if cached > input {
+		cached = input // cap cached at input to maintain invariant
+	}
 	output := nonNegative(src.OutputTokens)
 	reasoning := nonNegative(src.ReasoningOutputTokens)
 
 	// Compute billable TotalTokens = non-cached input + output + reasoning
-	nonCachedInput := nonNegative(input - cached)
+	nonCachedInput := input - cached
 	return &CodexTokenUsage{
 		InputTokens:           input,
 		CachedInputTokens:     cached,
