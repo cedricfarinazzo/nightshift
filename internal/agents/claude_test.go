@@ -586,6 +586,17 @@ func TestTruncate(t *testing.T) {
 	}
 }
 
+func TestExecRunner_Cancel_NilProcess(t *testing.T) {
+	// Cancel must not panic when Process is nil (context fires before process starts).
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // cancel before Run so process never starts
+
+	runner := &ExecRunner{}
+	// Use "sleep" with a short duration; cancelled ctx means it may not even start.
+	// We just need to confirm no panic occurs — the nil guard is in place.
+	_, _, _, _ = runner.Run(ctx, "sleep", []string{"10"}, "", "")
+}
+
 func TestClaudeAgent_Execute_ModelFromOptions(t *testing.T) {
 	mock := &MockRunner{Stdout: "response", ExitCode: 0}
 	agent := NewClaudeAgent(

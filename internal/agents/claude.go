@@ -33,6 +33,9 @@ func (r *ExecRunner) Run(ctx context.Context, name string, args []string, dir st
 	// not just the direct child (e.g. Node wrapper leaves Rust child alive).
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error {
+		if cmd.Process == nil {
+			return nil
+		}
 		// Kill the entire process group (negative PID)
 		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 	}
