@@ -747,6 +747,22 @@ func contains(s, substr string) bool {
 	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsHelper(s, substr))
 }
 
+func TestWeeklyToMonthlyConversion(t *testing.T) {
+	// weeklyBudget * 52 / 12 should be ~4.33x the weekly budget, not 4x.
+	weeklyBudget := int64(100000)
+	monthlyLimit := weeklyBudget * 52 / 12
+
+	ratio := float64(monthlyLimit) / float64(weeklyBudget)
+	// Should be ~4.333, not 4.0
+	if ratio < 4.3 || ratio > 4.4 {
+		t.Errorf("monthly/weekly ratio = %.3f, want ~4.333", ratio)
+	}
+	// Must be strictly greater than 4x
+	if monthlyLimit <= weeklyBudget*4 {
+		t.Errorf("monthlyLimit %d should be > weeklyBudget*4 %d", monthlyLimit, weeklyBudget*4)
+	}
+}
+
 func containsHelper(s, substr string) bool {
 	for i := 0; i <= len(s)-len(substr); i++ {
 		if s[i:i+len(substr)] == substr {
