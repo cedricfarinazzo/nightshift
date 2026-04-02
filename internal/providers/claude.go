@@ -225,7 +225,9 @@ func (c *Claude) GetTodayUsage() (int64, error) {
 func (c *Claude) getTodayUsageWithSource() (int64, string, error) {
 	stats, err := c.ParseStatsCache()
 	if err == nil {
+		c.mu.Lock()
 		c.statsCache = stats
+		c.mu.Unlock()
 		today := time.Now().Format("2006-01-02")
 		byDate := stats.TokensByDate()
 		if t, ok := byDate[today]; ok && t > 0 {
@@ -254,7 +256,9 @@ func (c *Claude) GetWeeklyUsage() (int64, error) {
 func (c *Claude) getWeeklyUsageWithSource() (int64, string, error) {
 	stats, err := c.ParseStatsCache()
 	if err == nil {
+		c.mu.Lock()
 		c.statsCache = stats
+		c.mu.Unlock()
 		byDate := stats.TokensByDate()
 		var total int64
 		now := time.Now()
