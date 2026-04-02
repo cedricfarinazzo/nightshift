@@ -188,8 +188,8 @@ func TestCalculateAllowance_WeeklyMode(t *testing.T) {
 			usedPercent:    0,
 			aggressive:     false,
 			remainingDays:  5,
-			// remaining=700000, perDay=140000, allowance=14000, reserve=35000, final=0 (negative becomes 0)
-			wantAllowance:  0,
+			// remaining=700000, perDay=140000, allowance=14000, reserve=5%*14000=700, final=13300
+			wantAllowance:  13300,
 			wantMultiplier: 1.0,
 		},
 		{
