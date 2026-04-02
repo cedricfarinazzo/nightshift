@@ -609,3 +609,35 @@ func TestScheduler_Stop_DoesNotBlockForever(t *testing.T) {
 		t.Fatal("Stop() blocked — did not return within 500ms")
 	}
 }
+
+func TestNextWindowStartForWindow_ExactStartTime(t *testing.T) {
+	window := &Window{
+		Start:    TimeOfDay{Hour: 22, Minute: 0},
+		End:      TimeOfDay{Hour: 6, Minute: 0},
+		Location: time.UTC,
+	}
+
+	// At exactly 22:00:00, window has just opened — should return today, not tomorrow.
+	exactStart := time.Date(2026, 1, 15, 22, 0, 0, 0, time.UTC)
+	result := nextWindowStartForWindow(window, exactStart)
+
+	expected := time.Date(2026, 1, 15, 22, 0, 0, 0, time.UTC)
+	if !result.Equal(expected) {
+		t.Errorf("at exact start time: got %v, want %v (today)", result, expected)
+	}
+
+	// One second before: also returns today.
+	before := exactStart.Add(-time.Second)
+	result2 := nextWindowStartForWindow(window, before)
+	if !result2.Equal(expected) {
+		t.Errorf("before start time: got %v, want %v (today)", result2, expected)
+	}
+
+	// One second after: returns tomorrow.
+	after := exactStart.Add(time.Second)
+	result3 := nextWindowStartForWindow(window, after)
+	expectedTomorrow := time.Date(2026, 1, 16, 22, 0, 0, 0, time.UTC)
+	if !result3.Equal(expectedTomorrow) {
+		t.Errorf("after start time: got %v, want %v (tomorrow)", result3, expectedTomorrow)
+	}
+}
