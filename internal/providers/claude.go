@@ -75,8 +75,7 @@ func (u *TokenUsage) TotalTokens() int64 {
 
 // Claude wraps the Claude Code CLI as a provider.
 type Claude struct {
-	dataPath              string      // Path to ~/.claude
-	statsCache            *StatsCache // Cached stats data
+	dataPath              string // Path to ~/.claude
 	mu                    sync.RWMutex
 	lastUsedPercentSource string
 }
@@ -225,7 +224,6 @@ func (c *Claude) GetTodayUsage() (int64, error) {
 func (c *Claude) getTodayUsageWithSource() (int64, string, error) {
 	stats, err := c.ParseStatsCache()
 	if err == nil {
-		c.statsCache = stats
 		today := time.Now().Format("2006-01-02")
 		byDate := stats.TokensByDate()
 		if t, ok := byDate[today]; ok && t > 0 {
@@ -254,7 +252,6 @@ func (c *Claude) GetWeeklyUsage() (int64, error) {
 func (c *Claude) getWeeklyUsageWithSource() (int64, string, error) {
 	stats, err := c.ParseStatsCache()
 	if err == nil {
-		c.statsCache = stats
 		byDate := stats.TokensByDate()
 		var total int64
 		now := time.Now()
