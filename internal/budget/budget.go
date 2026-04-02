@@ -111,7 +111,8 @@ type AllowanceResult struct {
 	Allowance          int64   // Final token allowance for this run
 	AllowanceNoDaytime int64   // Allowance before predicted daytime usage is reserved
 	WeeklyBudget       int64   // Weekly token budget used for calculation
-	BudgetBase         int64   // Base budget (daily or remaining weekly)
+	BudgetBase         int64   // Base budget for reserve calculation (daily budget or per-run allowance)
+	RemainingBudget    int64   // Remaining weekly budget (weekly mode only)
 	UsedPercent        float64 // Current used percentage
 	UsedPercentSource  string  // Source of used percentage (e.g., stats-cache, jsonl-fallback)
 	ReserveAmount      int64   // Tokens reserved
@@ -234,12 +235,13 @@ func (m *Manager) calculateWeeklyAllowance(weeklyBudget int64, usedPercent float
 	nightshiftAllowance := (remainingWeekly / float64(remainingDays)) * float64(maxPercent) / 100 * multiplier
 
 	return &AllowanceResult{
-		Allowance:     int64(math.Max(0, nightshiftAllowance)),
-		BudgetBase:    int64(nightshiftAllowance),
-		UsedPercent:   usedPercent,
-		Mode:          "weekly",
-		RemainingDays: remainingDays,
-		Multiplier:    multiplier,
+		Allowance:       int64(math.Max(0, nightshiftAllowance)),
+		BudgetBase:      int64(math.Max(0, nightshiftAllowance)),
+		RemainingBudget: int64(math.Max(0, remainingWeekly)),
+		UsedPercent:     usedPercent,
+		Mode:            "weekly",
+		RemainingDays:   remainingDays,
+		Multiplier:      multiplier,
 	}
 }
 
@@ -424,7 +426,7 @@ func (m *Manager) Summary(provider string) (string, error) {
 	return fmt.Sprintf(
 		"%s: %.1f%% used this week (%d days left), %d tokens allowed (weekly: %d, remaining: %d, reserve: %d, multiplier: %.1fx)",
 		provider, result.UsedPercent, result.RemainingDays, result.Allowance,
-		weeklyBudget, result.BudgetBase, result.ReserveAmount, result.Multiplier,
+		weeklyBudget, result.RemainingBudget, result.ReserveAmount, result.Multiplier,
 	), nil
 }
 
