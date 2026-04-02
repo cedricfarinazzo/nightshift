@@ -39,13 +39,15 @@ func (m *mockCodexProvider) GetResetTime(mode string) (time.Time, error) {
 
 // mockCopilotProvider implements CopilotUsageProvider for testing.
 type mockCopilotProvider struct {
-	usedPercent float64
-	resetTime   time.Time
-	err         error
+	usedPercent          float64
+	resetTime            time.Time
+	err                  error
+	receivedMonthlyLimit int64 // captures the monthlyLimit passed by production code
 }
 
 func (m *mockCopilotProvider) Name() string { return "copilot" }
 func (m *mockCopilotProvider) GetUsedPercent(mode string, monthlyLimit int64) (float64, error) {
+	m.receivedMonthlyLimit = monthlyLimit
 	return m.usedPercent, m.err
 }
 func (m *mockCopilotProvider) GetResetTime(mode string) (time.Time, error) {
@@ -745,6 +747,34 @@ func TestReserveEnforcement(t *testing.T) {
 
 func contains(s, substr string) bool {
 	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsHelper(s, substr))
+}
+
+func TestWeeklyToMonthlyConversion(t *testing.T) {
+	// Verify the production code passes weeklyBudget*52/12 (~4.33x) to GetUsedPercent,
+	// not weeklyBudget*4 (the old incorrect factor).
+	weeklyBudget := int64(100000)
+	copilot := &mockCopilotProvider{usedPercent: 50}
+	cfg := &config.Config{
+		Budget: config.BudgetConfig{
+			WeeklyTokens: int(weeklyBudget),
+		},
+	}
+	mgr := NewManager(cfg, nil, nil, copilot)
+
+	_, err := mgr.GetUsedPercent("copilot")
+	if err != nil {
+		t.Fatalf("GetUsedPercent error: %v", err)
+	}
+
+	got := copilot.receivedMonthlyLimit
+	want := weeklyBudget * 52 / 12
+	if got != want {
+		t.Errorf("monthlyLimit passed to GetUsedPercent = %d, want %d (~4.33x weekly)", got, want)
+	}
+	// Must be strictly greater than the old 4x factor
+	if got <= weeklyBudget*4 {
+		t.Errorf("monthlyLimit %d should be > weeklyBudget*4 %d", got, weeklyBudget*4)
+	}
 }
 
 func containsHelper(s, substr string) bool {
