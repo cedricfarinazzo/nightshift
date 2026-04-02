@@ -317,7 +317,7 @@ func (m *Manager) GetUsedPercent(provider string) (float64, error) {
 		// Copilot uses monthly request limits, not weekly token budgets
 		// Convert weekly budget to monthly limit for consistency
 		// Note: This is a simplification; actual monthly limits should be configured separately
-		monthlyLimit := weeklyBudget * 52 / 12 // ~4.33 weeks per month (365/12/7)
+		monthlyLimit := weeklyBudget * 52 / 12 // ~4.33 weeks per month (52/12)
 		return m.copilot.GetUsedPercent(mode, monthlyLimit)
 
 	default:

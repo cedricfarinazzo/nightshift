@@ -39,13 +39,15 @@ func (m *mockCodexProvider) GetResetTime(mode string) (time.Time, error) {
 
 // mockCopilotProvider implements CopilotUsageProvider for testing.
 type mockCopilotProvider struct {
-	usedPercent float64
-	resetTime   time.Time
-	err         error
+	usedPercent          float64
+	resetTime            time.Time
+	err                  error
+	receivedMonthlyLimit int64 // captures the monthlyLimit passed by production code
 }
 
 func (m *mockCopilotProvider) Name() string { return "copilot" }
 func (m *mockCopilotProvider) GetUsedPercent(mode string, monthlyLimit int64) (float64, error) {
+	m.receivedMonthlyLimit = monthlyLimit
 	return m.usedPercent, m.err
 }
 func (m *mockCopilotProvider) GetResetTime(mode string) (time.Time, error) {
@@ -748,18 +750,30 @@ func contains(s, substr string) bool {
 }
 
 func TestWeeklyToMonthlyConversion(t *testing.T) {
-	// weeklyBudget * 52 / 12 should be ~4.33x the weekly budget, not 4x.
+	// Verify the production code passes weeklyBudget*52/12 (~4.33x) to GetUsedPercent,
+	// not weeklyBudget*4 (the old incorrect factor).
 	weeklyBudget := int64(100000)
-	monthlyLimit := weeklyBudget * 52 / 12
-
-	ratio := float64(monthlyLimit) / float64(weeklyBudget)
-	// Should be ~4.333, not 4.0
-	if ratio < 4.3 || ratio > 4.4 {
-		t.Errorf("monthly/weekly ratio = %.3f, want ~4.333", ratio)
+	copilot := &mockCopilotProvider{usedPercent: 50}
+	cfg := &config.Config{
+		Budget: config.BudgetConfig{
+			WeeklyTokens: int(weeklyBudget),
+		},
 	}
-	// Must be strictly greater than 4x
-	if monthlyLimit <= weeklyBudget*4 {
-		t.Errorf("monthlyLimit %d should be > weeklyBudget*4 %d", monthlyLimit, weeklyBudget*4)
+	mgr := NewManager(cfg, nil, nil, copilot)
+
+	_, err := mgr.GetUsedPercent("copilot")
+	if err != nil {
+		t.Fatalf("GetUsedPercent error: %v", err)
+	}
+
+	got := copilot.receivedMonthlyLimit
+	want := weeklyBudget * 52 / 12
+	if got != want {
+		t.Errorf("monthlyLimit passed to GetUsedPercent = %d, want %d (~4.33x weekly)", got, want)
+	}
+	// Must be strictly greater than the old 4x factor
+	if got <= weeklyBudget*4 {
+		t.Errorf("monthlyLimit %d should be > weeklyBudget*4 %d", got, weeklyBudget*4)
 	}
 }
 
