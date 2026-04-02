@@ -43,6 +43,7 @@ func (r *ExecuteResult) IsSuccess() bool {
 }
 
 // truncate returns s trimmed to at most maxLen bytes, appending "..." if truncated.
+// Operates on bytes, not runes; callers pass ASCII-only strings (CLI stderr/stdout).
 func truncate(s string, maxLen int) string {
 	if len(s) <= maxLen {
 		return s
