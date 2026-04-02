@@ -22,6 +22,7 @@ var (
 	ErrNoSchedule      = errors.New("no schedule configured (need cron or interval)")
 	ErrAlreadyRunning  = errors.New("scheduler already running")
 	ErrNotRunning      = errors.New("scheduler not running")
+	ErrStopTimeout     = errors.New("scheduler stop timed out")
 )
 
 // Job is a function to execute on schedule.
@@ -38,13 +39,14 @@ type Scheduler struct {
 	location *time.Location
 
 	// Runtime state
-	cron    *cron.Cron
-	jobs    []Job
-	running bool
-	stopCh  chan struct{}
-	doneCh  chan struct{}
-	nextRun time.Time
-	entryID cron.EntryID
+	cron        *cron.Cron
+	jobs        []Job
+	running     bool
+	stopCh      chan struct{}
+	doneCh      chan struct{}
+	nextRun     time.Time
+	entryID     cron.EntryID
+	stopTimeoutD time.Duration // overridable in tests; 0 means use default (30s)
 }
 
 // Window represents a time window constraint.
@@ -282,6 +284,14 @@ func (s *Scheduler) runJobs(ctx context.Context) {
 	}
 }
 
+// stopTimeout returns the effective stop timeout (default 30s, overridable for tests).
+func (s *Scheduler) stopTimeout() time.Duration {
+	if s.stopTimeoutD > 0 {
+		return s.stopTimeoutD
+	}
+	return 30 * time.Second
+}
+
 // Stop stops the scheduler.
 func (s *Scheduler) Stop() error {
 	s.mu.Lock()
@@ -293,9 +303,24 @@ func (s *Scheduler) Stop() error {
 	close(s.stopCh)
 	s.mu.Unlock()
 
-	// Wait for scheduler to stop
-	<-s.doneCh
-	return nil
+	// Wait for scheduler to stop with a timeout to prevent indefinite blocking
+	// if the goroutine panics before closing doneCh.
+	timeout := s.stopTimeout()
+	timer := time.NewTimer(timeout)
+	defer func() {
+		if !timer.Stop() {
+			select {
+			case <-timer.C:
+			default:
+			}
+		}
+	}()
+	select {
+	case <-s.doneCh:
+		return nil
+	case <-timer.C:
+		return fmt.Errorf("%w after %s", ErrStopTimeout, timeout)
+	}
 }
 
 // NextRun returns the next scheduled run time.

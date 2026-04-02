@@ -2,6 +2,7 @@ package scheduler
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync/atomic"
 	"testing"
@@ -577,5 +578,34 @@ func TestScheduleInterval_Legacy(t *testing.T) {
 	}
 	if len(s.jobs) != 1 {
 		t.Errorf("len(jobs) = %d, want 1", len(s.jobs))
+	}
+}
+
+func TestScheduler_Stop_DoesNotBlockForever(t *testing.T) {
+	// Verify Stop() itself returns ErrStopTimeout when doneCh is never closed.
+	// Uses a short injectable timeout so the test completes quickly.
+	s := &Scheduler{
+		stopCh:       make(chan struct{}),
+		doneCh:       make(chan struct{}), // never closed
+		stopTimeoutD: 50 * time.Millisecond,
+	}
+	s.running = true
+
+	done := make(chan error, 1)
+	start := time.Now()
+	go func() {
+		done <- s.Stop()
+	}()
+
+	select {
+	case err := <-done:
+		if !errors.Is(err, ErrStopTimeout) {
+			t.Errorf("expected ErrStopTimeout, got: %v", err)
+		}
+		if elapsed := time.Since(start); elapsed > 500*time.Millisecond {
+			t.Errorf("Stop() returned too slowly: %v", elapsed)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("Stop() blocked — did not return within 500ms")
 	}
 }
