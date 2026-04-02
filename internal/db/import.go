@@ -75,31 +75,28 @@ func importLegacyStateData(db *sql.DB, legacy legacyStateData) (int, int, error)
 	if err != nil {
 		return 0, 0, fmt.Errorf("begin legacy import: %w", err)
 	}
+	defer func() { _ = tx.Rollback() }() // no-op after Commit()
 
 	projectStmt, err := tx.Prepare(`INSERT INTO projects (path, last_run, run_count) VALUES (?, ?, ?)`)
 	if err != nil {
-		_ = tx.Rollback()
 		return 0, 0, fmt.Errorf("prepare projects insert: %w", err)
 	}
 	defer func() { _ = projectStmt.Close() }()
 
 	taskStmt, err := tx.Prepare(`INSERT INTO task_history (project_path, task_type, last_run) VALUES (?, ?, ?)`)
 	if err != nil {
-		_ = tx.Rollback()
 		return 0, 0, fmt.Errorf("prepare task_history insert: %w", err)
 	}
 	defer func() { _ = taskStmt.Close() }()
 
 	assignedStmt, err := tx.Prepare(`INSERT INTO assigned_tasks (task_id, project, task_type, assigned_at) VALUES (?, ?, ?, ?)`)
 	if err != nil {
-		_ = tx.Rollback()
 		return 0, 0, fmt.Errorf("prepare assigned_tasks insert: %w", err)
 	}
 	defer func() { _ = assignedStmt.Close() }()
 
 	runStmt, err := tx.Prepare(`INSERT INTO run_history (id, start_time, end_time, project, tasks, tokens_used, status, error) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
-		_ = tx.Rollback()
 		return 0, 0, fmt.Errorf("prepare run_history insert: %w", err)
 	}
 	defer func() { _ = runStmt.Close() }()
@@ -120,7 +117,6 @@ func importLegacyStateData(db *sql.DB, legacy legacyStateData) (int, int, error)
 		}
 
 		if _, err := projectStmt.Exec(projectPath, lastRun, runCountValue); err != nil {
-			_ = tx.Rollback()
 			return 0, 0, fmt.Errorf("insert project %s: %w", projectPath, err)
 		}
 		projectCount++
@@ -130,7 +126,6 @@ func importLegacyStateData(db *sql.DB, legacy legacyStateData) (int, int, error)
 		}
 		for taskType, lastRun := range project.TaskHistory {
 			if _, err := taskStmt.Exec(projectPath, taskType, lastRun); err != nil {
-				_ = tx.Rollback()
 				return 0, 0, fmt.Errorf("insert task_history %s/%s: %w", projectPath, taskType, err)
 			}
 		}
@@ -143,7 +138,6 @@ func importLegacyStateData(db *sql.DB, legacy legacyStateData) (int, int, error)
 		}
 
 		if _, err := assignedStmt.Exec(resolvedID, assigned.Project, assigned.TaskType, assigned.AssignedAt); err != nil {
-			_ = tx.Rollback()
 			return 0, 0, fmt.Errorf("insert assigned task %s: %w", resolvedID, err)
 		}
 	}
@@ -156,7 +150,6 @@ func importLegacyStateData(db *sql.DB, legacy legacyStateData) (int, int, error)
 
 		tasksJSON, err := json.Marshal(tasks)
 		if err != nil {
-			_ = tx.Rollback()
 			return 0, 0, fmt.Errorf("marshal tasks for run %s: %w", run.ID, err)
 		}
 
@@ -166,7 +159,6 @@ func importLegacyStateData(db *sql.DB, legacy legacyStateData) (int, int, error)
 		}
 
 		if _, err := runStmt.Exec(run.ID, run.StartTime, endTime, run.Project, string(tasksJSON), run.TokensUsed, run.Status, run.Error); err != nil {
-			_ = tx.Rollback()
 			return 0, 0, fmt.Errorf("insert run_history %s: %w", run.ID, err)
 		}
 		runCount++
