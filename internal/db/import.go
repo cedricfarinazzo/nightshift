@@ -75,7 +75,7 @@ func importLegacyStateData(db *sql.DB, legacy legacyStateData) (int, int, error)
 	if err != nil {
 		return 0, 0, fmt.Errorf("begin legacy import: %w", err)
 	}
-	defer func() { _ = tx.Rollback() }() // no-op after Commit()
+	defer func() { _ = tx.Rollback() }() // safe to call; ignored if already committed
 
 	projectStmt, err := tx.Prepare(`INSERT INTO projects (path, last_run, run_count) VALUES (?, ?, ?)`)
 	if err != nil {
