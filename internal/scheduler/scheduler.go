@@ -459,7 +459,7 @@ func nextWindowStartForWindow(window *Window, t time.Time) time.Time {
 	today := time.Date(t.Year(), t.Month(), t.Day(), window.Start.Hour, window.Start.Minute, 0, 0, window.Location)
 
 	// If window start has passed today, use tomorrow
-	if t.After(today) || t.Equal(today) {
+	if t.After(today) {
 		today = today.AddDate(0, 0, 1)
 	}
 
