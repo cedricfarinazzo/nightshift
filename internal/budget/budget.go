@@ -235,7 +235,7 @@ func (m *Manager) calculateWeeklyAllowance(weeklyBudget int64, usedPercent float
 
 	return &AllowanceResult{
 		Allowance:     int64(math.Max(0, nightshiftAllowance)),
-		BudgetBase:    int64(remainingWeekly),
+		BudgetBase:    int64(nightshiftAllowance),
 		UsedPercent:   usedPercent,
 		Mode:          "weekly",
 		RemainingDays: remainingDays,
