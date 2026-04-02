@@ -556,6 +556,36 @@ func TestClaudeAgent_Execute_NoModel(t *testing.T) {
 	}
 }
 
+func TestTruncate(t *testing.T) {
+	tests := []struct {
+		name   string
+		input  string
+		maxLen int
+		want   string
+	}{
+		{"truncate to exactly five bytes", "hello world", 5, "he..."},
+		{"no truncation needed", "hello world", 11, "hello world"},
+		{"maxLen equals three returns ellipsis", "hello world", 3, "..."},
+		{"maxLen equals two returns two dots", "hello world", 2, ".."},
+		{"maxLen equals one returns one dot", "hello world", 1, "."},
+		{"maxLen zero returns empty", "hello world", 0, ""},
+		{"short string unchanged", "hi", 5, "hi"},
+		{"truncate to eight bytes", "hello world", 8, "hello..."},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := truncate(tt.input, tt.maxLen)
+			if got != tt.want {
+				t.Errorf("truncate(%q, %d) = %q, want %q", tt.input, tt.maxLen, got, tt.want)
+			}
+			if len(got) > tt.maxLen {
+				t.Errorf("truncate(%q, %d) = %q (len %d), exceeds maxLen %d", tt.input, tt.maxLen, got, len(got), tt.maxLen)
+			}
+		})
+	}
+}
+
 func TestClaudeAgent_Execute_ModelFromOptions(t *testing.T) {
 	mock := &MockRunner{Stdout: "response", ExitCode: 0}
 	agent := NewClaudeAgent(
