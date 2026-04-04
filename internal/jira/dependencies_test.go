@@ -25,10 +25,7 @@ func TestBuildDependencyGraph_NoDependencies(t *testing.T) {
 		makeTicket("A-3", nil),
 	}
 	g := BuildDependencyGraph(tickets)
-	ready, blocked, err := g.ResolveOrder()
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	ready, blocked := g.ResolveOrder()
 	if len(blocked) != 0 {
 		t.Errorf("expected no blocked tickets, got %d", len(blocked))
 	}
@@ -50,10 +47,7 @@ func TestBuildDependencyGraph_SimpleChain(t *testing.T) {
 	if len(cycles) != 0 {
 		t.Errorf("expected no cycles in simple linear chain, got %v", cycles)
 	}
-	ready, blocked, err := g.ResolveOrder()
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	ready, blocked := g.ResolveOrder()
 	if len(ready)+len(blocked) != 3 {
 		t.Errorf("expected 3 total tickets, got ready=%d blocked=%d", len(ready), len(blocked))
 	}
@@ -81,10 +75,7 @@ func TestBuildDependencyGraph_CycleDetection(t *testing.T) {
 	if len(cycles) == 0 {
 		t.Error("expected at least one cycle, got none")
 	}
-	_, blocked, err := g.ResolveOrder()
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	_, blocked := g.ResolveOrder()
 	if len(blocked) == 0 {
 		t.Error("expected blocked tickets due to circular dependency")
 	}
@@ -107,10 +98,7 @@ func TestBuildDependencyGraph_ExternalBlocker(t *testing.T) {
 		makeTicket("A-2", nil),
 	}
 	g := BuildDependencyGraph(tickets)
-	ready, blocked, err := g.ResolveOrder()
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	ready, blocked := g.ResolveOrder()
 	if len(blocked) == 0 {
 		t.Fatal("expected A-1 to be blocked by external blocker outside set")
 	}

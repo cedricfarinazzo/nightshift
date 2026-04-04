@@ -35,8 +35,8 @@ type Comment struct {
 // IssueLink represents a link between two Jira issues.
 type IssueLink struct {
 	Type       string // e.g. "Blocks"
-	InwardKey  string // the issue that is being blocked (inward side)
-	OutwardKey string // the issue that blocks (outward side)
+	InwardKey  string // the issue that blocks (inward side)
+	OutwardKey string // the issue that is being blocked (outward side)
 	Direction  string // "inward" or "outward" relative to this ticket
 }
 
@@ -53,7 +53,7 @@ func (c *Client) FetchTodoTickets(ctx context.Context) ([]Ticket, error) {
 
 // FetchReviewTickets fetches issues that are in a review status, filtered by the configured label.
 func (c *Client) FetchReviewTickets(ctx context.Context, statusMap *StatusMap) ([]Ticket, error) {
-	if len(statusMap.ReviewStatuses) == 0 {
+	if statusMap == nil || len(statusMap.ReviewStatuses) == 0 {
 		return nil, nil
 	}
 	names := make([]string, len(statusMap.ReviewStatuses))
@@ -224,13 +224,12 @@ func extractAcceptanceCriteria(description string) string {
 	}
 	start += idx + 1
 	rest := description[start:]
-	// Find the next heading (a line that looks like a heading: starts at beginning of line with uppercase)
-	// Simple heuristic: stop at next blank-line-separated ALL CAPS or "##"-style line
+	// Stop at the next section: a non-empty line that ends with ':' and contains no spaces
+	// (matches "SectionName:" style headings produced by extractText).
 	lines := strings.Split(rest, "\n")
 	var out []string
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
-		// Stop at what looks like a new section heading
 		if len(out) > 0 && trimmed != "" && strings.HasSuffix(trimmed, ":") && !strings.Contains(trimmed, " ") {
 			break
 		}

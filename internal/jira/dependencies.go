@@ -1,7 +1,5 @@
 package jira
 
-import "fmt"
-
 // DependencyGraph represents the dependency relationships between tickets.
 type DependencyGraph struct {
 	tickets   map[string]*Ticket
@@ -17,7 +15,8 @@ type BlockedTicket struct {
 }
 
 // BuildDependencyGraph builds a dependency graph from a set of tickets.
-// Only "Blocks" link types are used to establish edges.
+// Only "Blocks" link types are used to establish edges. Duplicate edges are
+// deduplicated so each blocker appears at most once per ticket.
 func BuildDependencyGraph(tickets []Ticket) *DependencyGraph {
 	g := &DependencyGraph{
 		tickets:   make(map[string]*Ticket, len(tickets)),
@@ -33,35 +32,46 @@ func BuildDependencyGraph(tickets []Ticket) *DependencyGraph {
 			if link.Type != "Blocks" {
 				continue
 			}
-			// Direction "outward": t.Key (InwardKey) blocks OutwardKey
-			// i.e. OutwardKey is blocked by t.Key
+			// Direction "outward": t.Key blocks OutwardKey
 			if link.Direction == "outward" && link.OutwardKey != "" {
-				blocker := t.Key
-				blocked := link.OutwardKey
-				g.blockedBy[blocked] = append(g.blockedBy[blocked], blocker)
-				g.blocks[blocker] = append(g.blocks[blocker], blocked)
+				g.addEdge(t.Key, link.OutwardKey)
 			}
 			// Direction "inward": InwardKey blocks t.Key
 			if link.Direction == "inward" && link.InwardKey != "" {
-				blocker := link.InwardKey
-				blocked := t.Key
-				g.blockedBy[blocked] = append(g.blockedBy[blocked], blocker)
-				g.blocks[blocker] = append(g.blocks[blocker], blocked)
+				g.addEdge(link.InwardKey, t.Key)
 			}
 		}
 	}
 	return g
 }
 
+// addEdge records that blocker blocks blocked, deduplicating if the edge already exists.
+func (g *DependencyGraph) addEdge(blocker, blocked string) {
+	if !containsKey(g.blockedBy[blocked], blocker) {
+		g.blockedBy[blocked] = append(g.blockedBy[blocked], blocker)
+	}
+	if !containsKey(g.blocks[blocker], blocked) {
+		g.blocks[blocker] = append(g.blocks[blocker], blocked)
+	}
+}
+
+func containsKey(keys []string, key string) bool {
+	for _, k := range keys {
+		if k == key {
+			return true
+		}
+	}
+	return false
+}
+
 // ResolveOrder performs a topological sort and returns ready tickets (no unresolved blockers)
-// and blocked tickets (with reasons). Returns an error only if an unexpected graph state occurs.
-func (g *DependencyGraph) ResolveOrder() (ready []Ticket, blocked []BlockedTicket, err error) {
+// and blocked tickets (with reasons).
+func (g *DependencyGraph) ResolveOrder() (ready []Ticket, blocked []BlockedTicket) {
 	// Compute in-degree within the graph only (external blockers handled separately).
 	inDegree := make(map[string]int, len(g.tickets))
 	for key := range g.tickets {
 		inDegree[key] = 0
 	}
-	// Track external blockers per ticket.
 	externalBlockers := make(map[string][]string)
 	for key := range g.tickets {
 		for _, blocker := range g.blockedBy[key] {
@@ -114,19 +124,18 @@ func (g *DependencyGraph) ResolveOrder() (ready []Ticket, blocked []BlockedTicke
 		}
 	}
 
-	// Any non-visited ticket (not externally blocked) is part of a cycle or blocked by a cycle member.
+	// Any non-visited ticket (not externally blocked) is part of a cycle.
 	for key := range g.tickets {
 		if !visited[key] && !externallyBlocked[key] {
-			blockers := g.blockedBy[key]
 			blocked = append(blocked, BlockedTicket{
 				Ticket:   *g.tickets[key],
 				Reason:   "circular dependency",
-				Blockers: blockers,
+				Blockers: g.blockedBy[key],
 			})
 		}
 	}
 
-	return ready, blocked, nil
+	return ready, blocked
 }
 
 // DetectCycles returns all cycles in the dependency graph as slices of ticket keys.
@@ -152,7 +161,6 @@ func (g *DependencyGraph) DetectCycles() [][]string {
 			case unvisited:
 				dfs(dep)
 			case inStack:
-				// Found a cycle: extract it from the stack.
 				cycle := extractCycle(stack, dep)
 				cycles = append(cycles, cycle)
 			}
@@ -180,6 +188,3 @@ func extractCycle(stack []string, cycleStart string) []string {
 	}
 	return nil
 }
-
-// Ensure fmt is used (it's used via error returns in callers, but guard against lint).
-var _ = fmt.Sprintf
