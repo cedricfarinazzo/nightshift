@@ -1,0 +1,240 @@
+package jira
+
+import (
+	"context"
+	"fmt"
+	"strings"
+	"time"
+
+	model "github.com/ctreminiom/go-atlassian/v2/pkg/infra/models"
+)
+
+// Ticket represents a Jira issue with all fields needed for agent context.
+type Ticket struct {
+	Key                string
+	Summary            string
+	Description        string
+	Comments           []Comment
+	AcceptanceCriteria string
+	Labels             []string
+	Status             Status
+	IssueLinks         []IssueLink
+	Reporter           string
+	Assignee           string
+}
+
+// Comment represents a single comment on a Jira issue.
+type Comment struct {
+	ID      string
+	Author  string
+	Body    string
+	Created time.Time
+	Updated time.Time
+}
+
+// IssueLink represents a link between two Jira issues.
+type IssueLink struct {
+	Type       string // e.g. "Blocks"
+	InwardKey  string // the issue that is being blocked (inward side)
+	OutwardKey string // the issue that blocks (outward side)
+	Direction  string // "inward" or "outward" relative to this ticket
+}
+
+const searchPageSize = 50
+
+// FetchTodoTickets fetches issues in the "To Do" status category filtered by the configured label.
+func (c *Client) FetchTodoTickets(ctx context.Context) ([]Ticket, error) {
+	jql := fmt.Sprintf(
+		`project = "%s" AND statusCategory = "To Do" AND labels = "%s" ORDER BY created ASC`,
+		c.cfg.Project, c.cfg.Label,
+	)
+	return c.fetchTickets(ctx, jql)
+}
+
+// FetchReviewTickets fetches issues that are in a review status, filtered by the configured label.
+func (c *Client) FetchReviewTickets(ctx context.Context, statusMap *StatusMap) ([]Ticket, error) {
+	if len(statusMap.ReviewStatuses) == 0 {
+		return nil, nil
+	}
+	names := make([]string, len(statusMap.ReviewStatuses))
+	for i, s := range statusMap.ReviewStatuses {
+		names[i] = fmt.Sprintf(`"%s"`, s.Name)
+	}
+	jql := fmt.Sprintf(
+		`project = "%s" AND status in (%s) AND labels = "%s" ORDER BY created ASC`,
+		c.cfg.Project, strings.Join(names, ", "), c.cfg.Label,
+	)
+	return c.fetchTickets(ctx, jql)
+}
+
+// fetchTickets executes a JQL query with pagination and returns all matching tickets.
+func (c *Client) fetchTickets(ctx context.Context, jql string) ([]Ticket, error) {
+	var tickets []Ticket
+	startAt := 0
+	fields := []string{
+		"summary", "description", "comment", "labels", "status",
+		"issuelinks", "reporter", "assignee",
+	}
+	for {
+		page, _, err := c.jira.Issue.Search.Post(ctx, jql, fields, nil, startAt, searchPageSize, "")
+		if err != nil {
+			return nil, fmt.Errorf("jira: searching issues (startAt=%d): %w", startAt, err)
+		}
+		for _, issue := range page.Issues {
+			tickets = append(tickets, issueToTicket(issue))
+		}
+		startAt += len(page.Issues)
+		if startAt >= page.Total || len(page.Issues) == 0 {
+			break
+		}
+	}
+	return tickets, nil
+}
+
+// issueToTicket maps a go-atlassian IssueScheme to a Ticket.
+func issueToTicket(issue *model.IssueScheme) Ticket {
+	if issue == nil {
+		return Ticket{}
+	}
+	t := Ticket{Key: issue.Key}
+	if f := issue.Fields; f != nil {
+		t.Summary = f.Summary
+		t.Labels = f.Labels
+
+		if f.Description != nil {
+			t.Description = extractText(f.Description)
+			t.AcceptanceCriteria = extractAcceptanceCriteria(t.Description)
+		}
+		if f.Status != nil {
+			t.Status = Status{
+				ID:   f.Status.ID,
+				Name: f.Status.Name,
+			}
+			if f.Status.StatusCategory != nil {
+				t.Status.CategoryKey = f.Status.StatusCategory.Key
+			}
+		}
+		if f.Reporter != nil {
+			t.Reporter = f.Reporter.DisplayName
+		}
+		if f.Assignee != nil {
+			t.Assignee = f.Assignee.DisplayName
+		}
+		if f.Comment != nil {
+			for _, c := range f.Comment.Comments {
+				t.Comments = append(t.Comments, commentToComment(c))
+			}
+		}
+		for _, link := range f.IssueLinks {
+			t.IssueLinks = append(t.IssueLinks, issueLinkToLink(issue.Key, link))
+		}
+	}
+	return t
+}
+
+// commentToComment maps an IssueCommentScheme to a Comment.
+func commentToComment(c *model.IssueCommentScheme) Comment {
+	if c == nil {
+		return Comment{}
+	}
+	cm := Comment{ID: c.ID}
+	if c.Author != nil {
+		cm.Author = c.Author.DisplayName
+	}
+	if c.Body != nil {
+		cm.Body = extractText(c.Body)
+	}
+	cm.Created, _ = time.Parse(time.RFC3339, c.Created)
+	cm.Updated, _ = time.Parse(time.RFC3339, c.Updated)
+	return cm
+}
+
+// issueLinkToLink maps an IssueLinkScheme to an IssueLink relative to the given issue key.
+func issueLinkToLink(selfKey string, link *model.IssueLinkScheme) IssueLink {
+	if link == nil {
+		return IssueLink{}
+	}
+	il := IssueLink{}
+	if link.Type != nil {
+		il.Type = link.Type.Name
+	}
+	if link.InwardIssue != nil {
+		il.InwardKey = link.InwardIssue.Key
+	}
+	if link.OutwardIssue != nil {
+		il.OutwardKey = link.OutwardIssue.Key
+	}
+	// Direction: outward means selfKey is the blocker (selfKey blocks OutwardKey)
+	//            inward means selfKey is being blocked (InwardKey blocks selfKey)
+	switch {
+	case il.OutwardKey != "" && il.InwardKey == "":
+		il.InwardKey = selfKey
+		il.Direction = "outward"
+	case il.InwardKey != "" && il.OutwardKey == "":
+		il.OutwardKey = selfKey
+		il.Direction = "inward"
+	}
+	return il
+}
+
+// extractText recursively extracts plain text from an ADF CommentNodeScheme.
+func extractText(n *model.CommentNodeScheme) string {
+	if n == nil {
+		return ""
+	}
+	if n.Text != "" {
+		return n.Text
+	}
+	var sb strings.Builder
+	for i, child := range n.Content {
+		sb.WriteString(extractText(child))
+		// Add newline between block-level nodes
+		if i < len(n.Content)-1 && isBlockNode(child) {
+			sb.WriteString("\n")
+		}
+	}
+	return sb.String()
+}
+
+func isBlockNode(n *model.CommentNodeScheme) bool {
+	if n == nil {
+		return false
+	}
+	switch n.Type {
+	case "paragraph", "heading", "bulletList", "orderedList", "listItem",
+		"blockquote", "codeBlock", "rule", "panel":
+		return true
+	}
+	return false
+}
+
+// extractAcceptanceCriteria extracts the acceptance criteria section from a description string.
+// It looks for a heading containing "acceptance criteria" (case-insensitive) and returns all
+// text until the next heading or end of string.
+func extractAcceptanceCriteria(description string) string {
+	lower := strings.ToLower(description)
+	idx := strings.Index(lower, "acceptance criteria")
+	if idx < 0 {
+		return ""
+	}
+	// Skip past the heading line
+	start := strings.Index(description[idx:], "\n")
+	if start < 0 {
+		return ""
+	}
+	start += idx + 1
+	rest := description[start:]
+	// Find the next heading (a line that looks like a heading: starts at beginning of line with uppercase)
+	// Simple heuristic: stop at next blank-line-separated ALL CAPS or "##"-style line
+	lines := strings.Split(rest, "\n")
+	var out []string
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		// Stop at what looks like a new section heading
+		if len(out) > 0 && trimmed != "" && strings.HasSuffix(trimmed, ":") && !strings.Contains(trimmed, " ") {
+			break
+		}
+		out = append(out, line)
+	}
+	return strings.TrimSpace(strings.Join(out, "\n"))
+}
