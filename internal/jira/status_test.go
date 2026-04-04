@@ -31,6 +31,31 @@ func TestIsReviewStatus(t *testing.T) {
 	}
 }
 
+func TestIsNeedsInfoStatus(t *testing.T) {
+	tests := []struct {
+		name string
+		want bool
+	}{
+		{"Needs Info", true},
+		{"Needs-Info", true},
+		{"Need Info", true},
+		{"More Info", true},
+		{"more info needed", true},
+		{"Waiting for Info", false},
+		{"In Review", false},
+		{"In Progress", false},
+		{"Done", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isNeedsInfoStatus(tt.name)
+			if got != tt.want {
+				t.Errorf("isNeedsInfoStatus(%q) = %v, want %v", tt.name, got, tt.want)
+			}
+		})
+	}
+}
+
 func statusScheme(id, name, categoryKey string) *model.ProjectStatusDetailsScheme {
 	return &model.ProjectStatusDetailsScheme{
 		ID:   id,

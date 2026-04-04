@@ -8,14 +8,14 @@ import (
 	model "github.com/ctreminiom/go-atlassian/v2/pkg/infra/models"
 )
 
-// Status represents a Jira status with its transition info.
+// Status represents a Jira status with its ID, display name, and category.
 type Status struct {
 	ID          string // Jira status ID
 	Name        string // Display name (e.g., "À faire", "In Progress")
 	CategoryKey string // "new", "indeterminate", "done"
 }
 
-// StatusMap holds the discovered status-to-transition mapping for a project.
+// StatusMap holds the discovered statuses for a project, grouped by category and role.
 type StatusMap struct {
 	TodoStatuses       []Status // statuses in "new" category
 	InProgressStatuses []Status // statuses in "indeterminate" (non-review)
@@ -85,7 +85,11 @@ func buildStatusMap(statuses []*model.ProjectStatusDetailsScheme) *StatusMap {
 }
 
 // DiscoverStatuses fetches all statuses for the configured project and classifies them.
+// The result is cached on the client for the lifetime of the client instance.
 func (c *Client) DiscoverStatuses(ctx context.Context) (*StatusMap, error) {
+	if c.statusMap != nil {
+		return c.statusMap, nil
+	}
 	pages, _, err := c.jira.Project.Statuses(ctx, c.cfg.Project)
 	if err != nil {
 		return nil, fmt.Errorf("jira: discovering statuses: %w", err)
@@ -94,7 +98,23 @@ func (c *Client) DiscoverStatuses(ctx context.Context) (*StatusMap, error) {
 	for _, page := range pages {
 		all = append(all, page.Statuses...)
 	}
-	return buildStatusMap(all), nil
+	c.statusMap = buildStatusMap(all)
+	return c.statusMap, nil
+}
+
+// getTransitions fetches available transitions for an issue, indexed by destination status ID.
+func (c *Client) getTransitions(ctx context.Context, issueKey string) (map[string]string, error) {
+	result, _, err := c.jira.Issue.Transitions(ctx, issueKey)
+	if err != nil {
+		return nil, fmt.Errorf("jira: getting transitions for %s: %w", issueKey, err)
+	}
+	byStatusID := make(map[string]string, len(result.Transitions))
+	for _, t := range result.Transitions {
+		if t.To != nil {
+			byStatusID[t.To.ID] = t.ID
+		}
+	}
+	return byStatusID, nil
 }
 
 // FindTransition finds a valid transition ID to a status in the target category.
@@ -111,20 +131,6 @@ func (c *Client) FindTransition(ctx context.Context, issueKey, targetCategoryKey
 	return "", fmt.Errorf("jira: no transition to category %q available for %s", targetCategoryKey, issueKey)
 }
 
-// findTransitionToStatus finds a transition ID that moves the issue to a specific status ID.
-func (c *Client) findTransitionToStatus(ctx context.Context, issueKey, statusID string) (string, error) {
-	result, _, err := c.jira.Issue.Transitions(ctx, issueKey)
-	if err != nil {
-		return "", fmt.Errorf("jira: getting transitions for %s: %w", issueKey, err)
-	}
-	for _, t := range result.Transitions {
-		if t.To != nil && t.To.ID == statusID {
-			return t.ID, nil
-		}
-	}
-	return "", fmt.Errorf("jira: no transition to status ID %q available for %s", statusID, issueKey)
-}
-
 // TransitionTo moves an issue to the first available status in the target category.
 func (c *Client) TransitionTo(ctx context.Context, issueKey, targetCategoryKey string) error {
 	transitionID, err := c.FindTransition(ctx, issueKey, targetCategoryKey)
@@ -138,7 +144,18 @@ func (c *Client) TransitionTo(ctx context.Context, issueKey, targetCategoryKey s
 	return nil
 }
 
-// TransitionToInProgress moves the ticket to the first non-review "indeterminate" status.
+// firstReachable returns the transition ID for the first status in candidates that has an
+// available transition, using the pre-fetched byStatusID map (status ID → transition ID).
+func firstReachable(candidates []Status, byStatusID map[string]string) (string, bool) {
+	for _, s := range candidates {
+		if tid, ok := byStatusID[s.ID]; ok {
+			return tid, true
+		}
+	}
+	return "", false
+}
+
+// TransitionToInProgress moves the ticket to the first reachable non-review "indeterminate" status.
 func (c *Client) TransitionToInProgress(ctx context.Context, issueKey string) error {
 	sm, err := c.DiscoverStatuses(ctx)
 	if err != nil {
@@ -147,9 +164,13 @@ func (c *Client) TransitionToInProgress(ctx context.Context, issueKey string) er
 	if len(sm.InProgressStatuses) == 0 {
 		return fmt.Errorf("jira: no in-progress status found in project %s", c.cfg.Project)
 	}
-	transitionID, err := c.findTransitionToStatus(ctx, issueKey, sm.InProgressStatuses[0].ID)
+	byStatusID, err := c.getTransitions(ctx, issueKey)
 	if err != nil {
 		return err
+	}
+	transitionID, ok := firstReachable(sm.InProgressStatuses, byStatusID)
+	if !ok {
+		return fmt.Errorf("jira: no reachable in-progress transition available for %s", issueKey)
 	}
 	_, err = c.jira.Issue.Move(ctx, issueKey, transitionID, nil)
 	if err != nil {
@@ -158,7 +179,7 @@ func (c *Client) TransitionToInProgress(ctx context.Context, issueKey string) er
 	return nil
 }
 
-// TransitionToReview moves the ticket to the review status.
+// TransitionToReview moves the ticket to the first reachable review status.
 func (c *Client) TransitionToReview(ctx context.Context, issueKey string) error {
 	sm, err := c.DiscoverStatuses(ctx)
 	if err != nil {
@@ -167,9 +188,13 @@ func (c *Client) TransitionToReview(ctx context.Context, issueKey string) error 
 	if len(sm.ReviewStatuses) == 0 {
 		return fmt.Errorf("jira: no review status found in project %s", c.cfg.Project)
 	}
-	transitionID, err := c.findTransitionToStatus(ctx, issueKey, sm.ReviewStatuses[0].ID)
+	byStatusID, err := c.getTransitions(ctx, issueKey)
 	if err != nil {
 		return err
+	}
+	transitionID, ok := firstReachable(sm.ReviewStatuses, byStatusID)
+	if !ok {
+		return fmt.Errorf("jira: no reachable review transition available for %s", issueKey)
 	}
 	_, err = c.jira.Issue.Move(ctx, issueKey, transitionID, nil)
 	if err != nil {
@@ -183,7 +208,7 @@ func (c *Client) TransitionToDone(ctx context.Context, issueKey string) error {
 	return c.TransitionTo(ctx, issueKey, "done")
 }
 
-// TransitionToNeedsInfo moves the ticket to a needs-info status if one exists,
+// TransitionToNeedsInfo moves the ticket to a needs-info status if one exists and is reachable,
 // otherwise falls back to the first "new" (todo) status.
 func (c *Client) TransitionToNeedsInfo(ctx context.Context, issueKey string) error {
 	sm, err := c.DiscoverStatuses(ctx)
@@ -191,16 +216,18 @@ func (c *Client) TransitionToNeedsInfo(ctx context.Context, issueKey string) err
 		return err
 	}
 	if sm.NeedsInfoStatus != nil {
-		transitionID, err := c.findTransitionToStatus(ctx, issueKey, sm.NeedsInfoStatus.ID)
+		byStatusID, err := c.getTransitions(ctx, issueKey)
 		if err != nil {
 			return err
 		}
-		_, err = c.jira.Issue.Move(ctx, issueKey, transitionID, nil)
-		if err != nil {
-			return fmt.Errorf("jira: transitioning %s to needs-info: %w", issueKey, err)
+		if transitionID, ok := byStatusID[sm.NeedsInfoStatus.ID]; ok {
+			_, err = c.jira.Issue.Move(ctx, issueKey, transitionID, nil)
+			if err != nil {
+				return fmt.Errorf("jira: transitioning %s to needs-info: %w", issueKey, err)
+			}
+			return nil
 		}
-		return nil
+		// needs-info status exists but is not reachable; fall through to todo
 	}
-	// Fallback: transition to todo (new category)
 	return c.TransitionTo(ctx, issueKey, "new")
 }
