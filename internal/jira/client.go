@@ -11,9 +11,10 @@ import (
 
 // Client wraps the go-atlassian Jira client with nightshift-specific helpers.
 type Client struct {
-	jira *atlassianjira.Client
-	cfg  JiraConfig
-	log  *logging.Logger
+	jira      *atlassianjira.Client
+	cfg       JiraConfig
+	log       *logging.Logger
+	statusMap *StatusMap // cached result of DiscoverStatuses
 }
 
 // NewClient creates a Jira client from nightshift config.
