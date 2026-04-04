@@ -49,6 +49,26 @@ func TestNewClient(t *testing.T) {
 			wantErr: true,
 		},
 		{
+			name: "missing email",
+			cfg: func() JiraConfig {
+				c := validCfg()
+				c.Email = ""
+				return c
+			}(),
+			envVal:  "test-token",
+			wantErr: true,
+		},
+		{
+			name: "missing token_env",
+			cfg: func() JiraConfig {
+				c := validCfg()
+				c.TokenEnv = ""
+				return c
+			}(),
+			envVal:  "",
+			wantErr: true,
+		},
+		{
 			name:    "missing api token env var",
 			cfg:     validCfg(),
 			envVal:  "",
@@ -57,8 +77,8 @@ func TestNewClient(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if tt.envVal != "" {
-				t.Setenv("NIGHTSHIFT_JIRA_TOKEN", tt.envVal)
+			if tt.cfg.TokenEnv != "" {
+				t.Setenv(tt.cfg.TokenEnv, tt.envVal)
 			}
 			_, err := NewClient(tt.cfg)
 			if (err != nil) != tt.wantErr {

@@ -5,13 +5,13 @@ import (
 	"fmt"
 	"os"
 
-	jira "github.com/ctreminiom/go-atlassian/v2/jira/v3"
+	atlassianjira "github.com/ctreminiom/go-atlassian/v2/jira/v3"
 	"github.com/marcus/nightshift/internal/logging"
 )
 
 // Client wraps the go-atlassian Jira client with nightshift-specific helpers.
 type Client struct {
-	jira *jira.Client
+	jira *atlassianjira.Client
 	cfg  JiraConfig
 	log  *logging.Logger
 }
@@ -24,6 +24,12 @@ func NewClient(cfg JiraConfig) (*Client, error) {
 	if cfg.Site == "" {
 		return nil, fmt.Errorf("jira: site is required")
 	}
+	if cfg.Email == "" {
+		return nil, fmt.Errorf("jira: email is required")
+	}
+	if cfg.TokenEnv == "" {
+		return nil, fmt.Errorf("jira: token_env is required")
+	}
 	if cfg.Project == "" {
 		return nil, fmt.Errorf("jira: project key is required")
 	}
@@ -32,7 +38,7 @@ func NewClient(cfg JiraConfig) (*Client, error) {
 		return nil, fmt.Errorf("jira: env var %s not set", cfg.TokenEnv)
 	}
 	siteURL := fmt.Sprintf("https://%s.atlassian.net", cfg.Site)
-	client, err := jira.New(nil, siteURL)
+	client, err := atlassianjira.New(nil, siteURL)
 	if err != nil {
 		return nil, fmt.Errorf("jira: creating client: %w", err)
 	}
@@ -54,7 +60,7 @@ func (c *Client) Ping(ctx context.Context) error {
 }
 
 // Raw returns the underlying go-atlassian client for direct API access.
-func (c *Client) Raw() *jira.Client { return c.jira }
+func (c *Client) Raw() *atlassianjira.Client { return c.jira }
 
 // ProjectKey returns the configured Jira project key.
 func (c *Client) ProjectKey() string { return c.cfg.Project }
