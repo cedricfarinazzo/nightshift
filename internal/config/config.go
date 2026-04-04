@@ -224,9 +224,19 @@ func LoadFromPaths(projectPath, globalPath string) (*Config, error) {
 		return nil, fmt.Errorf("unmarshaling config: %w", err)
 	}
 
+	// Apply Jira defaults
+	cfg.Jira.Defaults()
+
 	// Validate configuration
 	if err := Validate(&cfg); err != nil {
 		return nil, fmt.Errorf("validating config: %w", err)
+	}
+
+	// Validate Jira config when site is configured
+	if cfg.Jira.Site != "" {
+		if err := cfg.Jira.Validate(); err != nil {
+			return nil, fmt.Errorf("validating config: %w", err)
+		}
 	}
 
 	normalizeBudgetConfig(&cfg)
@@ -275,6 +285,9 @@ func setDefaults(v *viper.Viper) {
 	// Integration defaults
 	v.SetDefault("integrations.claude_md", true)
 	v.SetDefault("integrations.agents_md", true)
+
+	// Jira defaults
+	v.SetDefault("jira.budget_enabled", true)
 }
 
 // loadConfigFile merges a YAML config file into viper.

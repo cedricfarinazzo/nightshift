@@ -1,7 +1,11 @@
 // Package jira provides configuration types for Jira integration.
 package jira
 
-import "fmt"
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+)
 
 // JiraConfig holds all Jira-related configuration.
 type JiraConfig struct {
@@ -84,7 +88,12 @@ func (c *JiraConfig) Defaults() {
 		c.Label = "nightshift"
 	}
 	if c.WorkspaceRoot == "" {
-		c.WorkspaceRoot = "~/.local/share/nightshift/workspaces"
+		home, err := os.UserHomeDir()
+		if err == nil {
+			c.WorkspaceRoot = filepath.Join(home, ".local", "share", "nightshift", "workspaces")
+		} else {
+			c.WorkspaceRoot = "~/.local/share/nightshift/workspaces"
+		}
 	}
 	if c.CleanupAfterDays == 0 {
 		c.CleanupAfterDays = 30
