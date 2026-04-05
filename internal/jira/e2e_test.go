@@ -145,6 +145,163 @@ func TestE2E_DependencyGraph(t *testing.T) {
 	}
 }
 
+// ── VC-3: Client wrapper ────────────────────────────────────────────────────
+
+func TestE2E_VC3_ClientAccessors(t *testing.T) {
+	client := e2eClient(t)
+	if got := client.ProjectKey(); got != "VC" {
+		t.Errorf("ProjectKey() = %q, want %q", got, "VC")
+	}
+	if got := client.Label(); got != "nightshift" {
+		t.Errorf("Label() = %q, want %q", got, "nightshift")
+	}
+	if client.Raw() == nil {
+		t.Error("Raw() returned nil; expected underlying go-atlassian client")
+	}
+}
+
+func TestE2E_VC3_NewClient_BadCredentials(t *testing.T) {
+	if os.Getenv("NIGHTSHIFT_JIRA_TOKEN") == "" {
+		t.Skip("NIGHTSHIFT_JIRA_TOKEN not set; skipping e2e test")
+	}
+	// Use a wrong token — NewClient should succeed (it only validates config),
+	// but Ping must fail with an auth error.
+	t.Setenv("BAD_TOKEN_ENV", "not-a-real-token")
+	cfg := JiraConfig{
+		Site:     "sedinfra",
+		Email:    "cedric.farinazzo@gmail.com",
+		TokenEnv: "BAD_TOKEN_ENV",
+		Project:  "VC",
+		Label:    "nightshift",
+	}
+	client, err := NewClient(cfg)
+	if err != nil {
+		t.Fatalf("NewClient should succeed with any non-empty token; got: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := client.Ping(ctx); err == nil {
+		t.Error("Ping with bad token should fail, but it succeeded")
+	}
+}
+
+// ── VC-4: Status auto-discovery & transition helpers ─────────────────────────
+
+func TestE2E_VC4_DiscoverStatuses_Cached(t *testing.T) {
+	client := e2eClient(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	sm1, err := client.DiscoverStatuses(ctx)
+	if err != nil {
+		t.Fatalf("first DiscoverStatuses: %v", err)
+	}
+	sm2, err := client.DiscoverStatuses(ctx)
+	if err != nil {
+		t.Fatalf("second DiscoverStatuses: %v", err)
+	}
+	if sm1 != sm2 {
+		t.Error("DiscoverStatuses should return the same cached pointer on repeated calls")
+	}
+}
+
+func TestE2E_VC4_DiscoverStatuses_HasAllCategories(t *testing.T) {
+	client := e2eClient(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	sm, err := client.DiscoverStatuses(ctx)
+	if err != nil {
+		t.Fatalf("DiscoverStatuses: %v", err)
+	}
+
+	if len(sm.TodoStatuses) == 0 {
+		t.Error("expected at least one Todo status")
+	}
+	if len(sm.InProgressStatuses) == 0 {
+		t.Error("expected at least one InProgress status")
+	}
+	if len(sm.ReviewStatuses) == 0 {
+		t.Error("expected at least one Review status (project uses 'Revue en cours')")
+	}
+	if len(sm.DoneStatuses) == 0 {
+		t.Error("expected at least one Done status")
+	}
+
+	// All category keys must be consistent.
+	for _, s := range sm.TodoStatuses {
+		if s.CategoryKey != "new" {
+			t.Errorf("TodoStatus %q has CategoryKey %q, want 'new'", s.Name, s.CategoryKey)
+		}
+	}
+	for _, s := range append(sm.InProgressStatuses, sm.ReviewStatuses...) {
+		if s.CategoryKey != "indeterminate" {
+			t.Errorf("InProgress/Review status %q has CategoryKey %q, want 'indeterminate'", s.Name, s.CategoryKey)
+		}
+	}
+	for _, s := range sm.DoneStatuses {
+		if s.CategoryKey != "done" {
+			t.Errorf("DoneStatus %q has CategoryKey %q, want 'done'", s.Name, s.CategoryKey)
+		}
+	}
+}
+
+func TestE2E_VC4_DiscoverStatuses_ReviewIsSubsetOfIndeterminate(t *testing.T) {
+	client := e2eClient(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	sm, err := client.DiscoverStatuses(ctx)
+	if err != nil {
+		t.Fatalf("DiscoverStatuses: %v", err)
+	}
+
+	// ReviewStatuses must all pass isReviewStatus heuristic.
+	for _, s := range sm.ReviewStatuses {
+		if !isReviewStatus(s.Name) {
+			t.Errorf("ReviewStatus %q does not match review heuristic", s.Name)
+		}
+	}
+	// InProgressStatuses must NOT pass isReviewStatus.
+	for _, s := range sm.InProgressStatuses {
+		if isReviewStatus(s.Name) {
+			t.Errorf("InProgressStatus %q erroneously matches review heuristic", s.Name)
+		}
+	}
+}
+
+func TestE2E_VC4_FindTransition(t *testing.T) {
+	client := e2eClient(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	// VC-5 is currently in review; it should have transitions available.
+	const issueKey = "VC-5"
+
+	for _, category := range []string{"new", "indeterminate", "done"} {
+		tid, err := client.FindTransition(ctx, issueKey, category)
+		if err != nil {
+			t.Logf("FindTransition(%s, %q): no transition available (%v)", issueKey, category, err)
+			continue
+		}
+		if tid == "" {
+			t.Errorf("FindTransition(%s, %q) returned empty transition ID", issueKey, category)
+		}
+		t.Logf("FindTransition(%s, %q) = %q", issueKey, category, tid)
+	}
+}
+
+func TestE2E_VC4_FindTransition_InvalidCategory(t *testing.T) {
+	client := e2eClient(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	_, err := client.FindTransition(ctx, "VC-5", "nonexistent-category")
+	if err == nil {
+		t.Error("expected error for nonexistent category, got nil")
+	}
+}
+
 func statusNames(ss []Status) []string {
 	names := make([]string, len(ss))
 	for i, s := range ss {
