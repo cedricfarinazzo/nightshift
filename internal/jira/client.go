@@ -5,7 +5,10 @@ import (
 	"fmt"
 	"os"
 
+	"strings"
+
 	atlassianjira "github.com/ctreminiom/go-atlassian/v2/jira/v3"
+	model "github.com/ctreminiom/go-atlassian/v2/pkg/infra/models"
 	"github.com/marcus/nightshift/internal/logging"
 )
 
@@ -68,3 +71,46 @@ func (c *Client) ProjectKey() string { return c.cfg.Project }
 
 // Label returns the configured ticket filter label.
 func (c *Client) Label() string { return c.cfg.Label }
+
+// AddComment posts a comment on the given Jira issue using ADF format.
+// The body is split on blank lines into paragraphs; newlines within a paragraph
+// become ADF hardBreak nodes so the text renders correctly in Jira.
+func (c *Client) AddComment(ctx context.Context, issueKey, body string) error {
+	var adfContent []*model.CommentNodeScheme
+	for _, para := range strings.Split(body, "\n\n") {
+		if strings.TrimSpace(para) == "" {
+			continue
+		}
+		lines := strings.Split(para, "\n")
+		var nodes []*model.CommentNodeScheme
+		for i, line := range lines {
+			if i > 0 {
+				nodes = append(nodes, &model.CommentNodeScheme{Type: "hardBreak"})
+			}
+			if line != "" {
+				nodes = append(nodes, &model.CommentNodeScheme{Type: "text", Text: line})
+			}
+		}
+		adfContent = append(adfContent, &model.CommentNodeScheme{
+			Type:    "paragraph",
+			Content: nodes,
+		})
+	}
+	if len(adfContent) == 0 {
+		adfContent = []*model.CommentNodeScheme{
+			{Type: "paragraph", Content: []*model.CommentNodeScheme{{Type: "text", Text: body}}},
+		}
+	}
+	payload := &model.CommentPayloadScheme{
+		Body: &model.CommentNodeScheme{
+			Version: 1,
+			Type:    "doc",
+			Content: adfContent,
+		},
+	}
+	_, _, err := c.jira.Issue.Comment.Add(ctx, issueKey, payload, nil)
+	if err != nil {
+		return fmt.Errorf("jira: add comment to %s: %w", issueKey, err)
+	}
+	return nil
+}

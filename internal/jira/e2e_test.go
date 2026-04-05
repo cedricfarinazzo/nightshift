@@ -302,6 +302,84 @@ func TestE2E_VC4_FindTransition_InvalidCategory(t *testing.T) {
 	}
 }
 
+// ── VC-6: LLM-based ticket validation ────────────────────────────────────────
+
+func TestE2E_VC6_AddComment(t *testing.T) {
+	client := e2eClient(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	// Post a test comment on VC-6 itself.
+	err := client.AddComment(ctx, "VC-6", "🤖 Nightshift e2e test: AddComment — automated test comment, safe to ignore.")
+	if err != nil {
+		t.Fatalf("AddComment: %v", err)
+	}
+}
+
+func TestE2E_VC6_ValidateTicket_WithStubAgent(t *testing.T) {
+	client := e2eClient(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// Fetch a real ticket from Jira to validate the full pipeline.
+	tickets, err := client.FetchTodoTickets(ctx)
+	if err != nil {
+		t.Fatalf("FetchTodoTickets: %v", err)
+	}
+	if len(tickets) == 0 {
+		t.Skip("no todo tickets available; skipping ValidateTicket e2e test")
+	}
+	ticket := tickets[0]
+
+	// Use a stub agent so we don't require an LLM API key for e2e.
+	agent := &stubAgent{
+		name:   "stub-e2e",
+		output: `{"valid": true, "score": 8, "issues": [], "missing": [], "suggestions": []}`,
+	}
+
+	result, err := ValidateTicket(ctx, agent, ticket)
+	if err != nil {
+		t.Fatalf("ValidateTicket: %v", err)
+	}
+	if result.Score != 8 {
+		t.Errorf("Score = %d, want 8", result.Score)
+	}
+	t.Logf("ValidateTicket(%s): valid=%v score=%d issues=%v", ticket.Key, result.Valid, result.Score, result.Issues)
+}
+
+func TestE2E_VC6_ValidateTicket_RejectedFlow(t *testing.T) {
+	client := e2eClient(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	tickets, err := client.FetchTodoTickets(ctx)
+	if err != nil {
+		t.Fatalf("FetchTodoTickets: %v", err)
+	}
+	if len(tickets) == 0 {
+		t.Skip("no todo tickets available; skipping rejected flow e2e test")
+	}
+	ticket := tickets[0]
+
+	// Stub agent returns a low-quality response.
+	agent := &stubAgent{
+		name:   "stub-e2e",
+		output: `{"valid": false, "score": 3, "issues": ["synthetic test issue"], "missing": ["synthetic missing field"], "suggestions": ["synthetic suggestion"]}`,
+	}
+
+	result, err := ValidateTicket(ctx, agent, ticket)
+	if err != nil {
+		t.Fatalf("ValidateTicket: %v", err)
+	}
+	if result.Valid {
+		t.Error("expected Valid=false for stubbed low-score response")
+	}
+	if result.Score != 3 {
+		t.Errorf("Score = %d, want 3", result.Score)
+	}
+	t.Logf("ValidateTicket(%s) correctly flagged as invalid: score=%d issues=%v", ticket.Key, result.Score, result.Issues)
+}
+
 func statusNames(ss []Status) []string {
 	names := make([]string, len(ss))
 	for i, s := range ss {
