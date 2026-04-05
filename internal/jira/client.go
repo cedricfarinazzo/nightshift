@@ -6,6 +6,7 @@ import (
 	"os"
 
 	atlassianjira "github.com/ctreminiom/go-atlassian/v2/jira/v3"
+	model "github.com/ctreminiom/go-atlassian/v2/pkg/infra/models"
 	"github.com/marcus/nightshift/internal/logging"
 )
 
@@ -68,3 +69,26 @@ func (c *Client) ProjectKey() string { return c.cfg.Project }
 
 // Label returns the configured ticket filter label.
 func (c *Client) Label() string { return c.cfg.Label }
+
+// AddComment posts a plain-text comment on the given Jira issue.
+func (c *Client) AddComment(ctx context.Context, issueKey, body string) error {
+	payload := &model.CommentPayloadScheme{
+		Body: &model.CommentNodeScheme{
+			Version: 1,
+			Type:    "doc",
+			Content: []*model.CommentNodeScheme{
+				{
+					Type: "paragraph",
+					Content: []*model.CommentNodeScheme{
+						{Type: "text", Text: body},
+					},
+				},
+			},
+		},
+	}
+	_, _, err := c.jira.Issue.Comment.Add(ctx, issueKey, payload, nil)
+	if err != nil {
+		return fmt.Errorf("jira: add comment to %s: %w", issueKey, err)
+	}
+	return nil
+}
