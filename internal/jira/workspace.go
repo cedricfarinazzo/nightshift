@@ -5,9 +5,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 )
+
+var validTicketKey = regexp.MustCompile(`^[A-Z][A-Z0-9]+-\d+$`)
 
 // Workspace represents an isolated working directory for a single Jira ticket.
 type Workspace struct {
@@ -30,6 +33,14 @@ type RepoWorkspace struct {
 // Each configured repo is cloned into {WorkspaceRoot}/{ticketKey}/{repo.Name}
 // and checked out on feature/{ticketKey}.
 func SetupWorkspace(ctx context.Context, cfg JiraConfig, ticketKey string) (*Workspace, error) {
+	if !validTicketKey.MatchString(ticketKey) {
+		return nil, fmt.Errorf("invalid ticket key %q: must match ^[A-Z][A-Z0-9]+-\\d+$", ticketKey)
+	}
+	for _, r := range cfg.Repos {
+		if strings.ContainsAny(r.Name, `/\`) || strings.Contains(r.Name, "..") {
+			return nil, fmt.Errorf("repo name %q contains path separators or '..'", r.Name)
+		}
+	}
 	root, err := expandHome(cfg.WorkspaceRoot)
 	if err != nil {
 		return nil, fmt.Errorf("workspace root: %w", err)
@@ -43,7 +54,10 @@ func SetupWorkspace(ctx context.Context, cfg JiraConfig, ticketKey string) (*Wor
 	repos := make([]RepoWorkspace, 0, len(cfg.Repos))
 	for _, r := range cfg.Repos {
 		repoPath := filepath.Join(wsRoot, r.Name)
-		if _, err := os.Stat(repoPath); os.IsNotExist(err) {
+		if _, err := os.Stat(repoPath); err != nil {
+			if !os.IsNotExist(err) {
+				return nil, fmt.Errorf("stat repo path %s: %w", repoPath, err)
+			}
 			if _, err := gitExec(ctx, wsRoot, "clone", r.URL, r.Name); err != nil {
 				return nil, fmt.Errorf("clone %s: %w", r.Name, err)
 			}
@@ -83,6 +97,9 @@ func CleanupStaleWorkspaces(cfg JiraConfig) (int, error) {
 		}
 		return 0, fmt.Errorf("read workspace dir: %w", err)
 	}
+	if cfg.CleanupAfterDays <= 0 {
+		return 0, nil
+	}
 	cutoff := time.Now().AddDate(0, 0, -cfg.CleanupAfterDays)
 	removed := 0
 	for _, e := range entries {
@@ -103,14 +120,23 @@ func CleanupStaleWorkspaces(cfg JiraConfig) (int, error) {
 	return removed, nil
 }
 
-// expandHome replaces a leading "~" with the user's home directory.
+// expandHome replaces "~" or a leading "~/" prefix with the user's home directory.
+// It does not expand "~user" style paths.
 func expandHome(path string) (string, error) {
-	if !strings.HasPrefix(path, "~") {
+	if path == "~" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", err
+		}
+		return home, nil
+	}
+	sep := string(filepath.Separator)
+	if !strings.HasPrefix(path, "~/") && !strings.HasPrefix(path, "~"+sep) {
 		return path, nil
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(home, path[1:]), nil
+	return filepath.Join(home, path[2:]), nil
 }

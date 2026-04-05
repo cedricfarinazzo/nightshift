@@ -53,25 +53,34 @@ func CommitAndPush(ctx context.Context, repoPath, message string) error {
 	return nil
 }
 
-// setupBranch checks out branchName in repoPath, creating it from baseBranch if needed.
+// setupBranch checks out branchName in repoPath, creating it from origin/baseBranch if needed.
 // Returns isNew=true when the branch was freshly created.
 func setupBranch(ctx context.Context, repoPath, branchName, baseBranch string) (isNew bool, err error) {
 	if _, err = gitExec(ctx, repoPath, "checkout", branchName); err == nil {
 		return false, nil
 	}
-	if _, err = gitExec(ctx, repoPath, "checkout", "-b", branchName, baseBranch); err != nil {
-		return false, fmt.Errorf("git create branch %s: %w", branchName, err)
+	// Fetch so origin/<baseBranch> is available even on a fresh clone.
+	if _, err = gitExec(ctx, repoPath, "fetch", "origin", baseBranch); err != nil {
+		return false, fmt.Errorf("git fetch base branch %s: %w", baseBranch, err)
+	}
+	if _, err = gitExec(ctx, repoPath, "checkout", "-b", branchName, "origin/"+baseBranch); err != nil {
+		return false, fmt.Errorf("git create branch %s from origin/%s: %w", branchName, baseBranch, err)
 	}
 	return true, nil
 }
 
-// gitExec runs a git command in repoPath and returns trimmed stdout.
+// gitExec runs a git command in repoPath and returns trimmed combined output.
 func gitExec(ctx context.Context, repoPath string, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = repoPath
 	out, err := cmd.CombinedOutput()
+	trimmed := strings.TrimSpace(string(out))
 	if err != nil {
-		return "", fmt.Errorf("git %s: %w", args[0], err)
+		subcommand := strings.Join(args, " ")
+		if trimmed != "" {
+			return "", fmt.Errorf("git %s failed: %s: %w", subcommand, trimmed, err)
+		}
+		return "", fmt.Errorf("git %s failed: %w", subcommand, err)
 	}
-	return strings.TrimSpace(string(out)), nil
+	return trimmed, nil
 }
