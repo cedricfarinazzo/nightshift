@@ -76,10 +76,24 @@ func TestParseValidationResponse(t *testing.T) {
 			wantScore: 6,
 		},
 		{
-			name: "all fields populated",
-			input: `{"valid": false, "score": 4, "issues": ["vague objective"], "missing": ["acceptance criteria", "scope"], "suggestions": ["add AC", "add scope"]}`,
+			name:      "all fields populated",
+			input:     `{"valid": false, "score": 4, "issues": ["vague objective"], "missing": ["acceptance criteria", "scope"], "suggestions": ["add AC", "add scope"]}`,
 			wantValid: false,
 			wantScore: 4,
+		},
+		{
+			// LLM returns valid=false but score=7 — code must derive Valid from Score.
+			name:      "llm valid false overridden by score 7",
+			input:     `{"valid": false, "score": 7, "issues": [], "missing": [], "suggestions": []}`,
+			wantValid: true,
+			wantScore: 7,
+		},
+		{
+			// LLM returns valid=true but score=5 — code must derive Valid from Score.
+			name:      "llm valid true overridden by score 5",
+			input:     `{"valid": true, "score": 5, "issues": [], "missing": [], "suggestions": []}`,
+			wantValid: false,
+			wantScore: 5,
 		},
 	}
 
@@ -126,9 +140,10 @@ func TestParseValidationResponse_Fields(t *testing.T) {
 
 func TestBuildValidationPrompt(t *testing.T) {
 	ticket := Ticket{
-		Key:         "PROJ-42",
-		Summary:     "Add login feature",
-		Description: "Users should be able to log in with email and password.",
+		Key:                "PROJ-42",
+		Summary:            "Add login feature",
+		Description:        "Users should be able to log in with email and password.",
+		AcceptanceCriteria: "User can log in with valid credentials.",
 		Comments: []Comment{
 			{Author: "alice", Body: "Please add OAuth support too."},
 		},
@@ -136,12 +151,11 @@ func TestBuildValidationPrompt(t *testing.T) {
 
 	prompt := buildValidationPrompt(ticket)
 
-	for _, want := range []string{ticket.Key, ticket.Summary, ticket.Description} {
+	for _, want := range []string{ticket.Key, ticket.Summary, ticket.Description, ticket.AcceptanceCriteria} {
 		if !strings.Contains(prompt, want) {
 			t.Errorf("prompt missing %q", want)
 		}
 	}
-	// Comment should be included
 	if !strings.Contains(prompt, "alice") {
 		t.Error("prompt missing comment author")
 	}

@@ -56,6 +56,7 @@ Evaluate whether this Jira ticket has enough information for an AI agent to impl
 Ticket: %s
 Title: %s
 Description: %s
+Acceptance Criteria: %s
 Comments:
 %s
 Evaluate: CLEAR OBJECTIVE, SUFFICIENT CONTEXT, ACCEPTANCE CRITERIA, SCOPE, NO AMBIGUITY
@@ -67,6 +68,7 @@ A ticket is valid if score >= 6 and has no critical issues.`,
 		ticket.Key,
 		ticket.Summary,
 		ticket.Description,
+		ticket.AcceptanceCriteria,
 		comments.String(),
 	)
 }
@@ -96,41 +98,40 @@ func parseValidationResponse(output string) (*ValidationResult, error) {
 	if err := json.Unmarshal([]byte(cleaned), &vr); err != nil {
 		return nil, fmt.Errorf("not valid json: %w", err)
 	}
+	// Derive Valid from Score to avoid inconsistency with the LLM's boolean.
+	// A ticket is valid when score >= 6 and there are no critical issues.
+	vr.Valid = vr.Score >= 6
 	return &vr, nil
 }
 
 // HandleInvalidTicket posts a structured rejection comment and transitions
 // the ticket to the NEEDS INFO status.
 func (c *Client) HandleInvalidTicket(ctx context.Context, ticketKey string, result *ValidationResult) error {
+	// Build comment as plain text paragraphs (no markdown) so it renders
+	// correctly in Jira's ADF-based comment renderer.
 	var sb strings.Builder
-	sb.WriteString("❌ **Nightshift — Ticket Rejected**\n")
-	sb.WriteString("**Reason**: Not enough information for autonomous execution.\n\n")
+	sb.WriteString(fmt.Sprintf("❌ Nightshift — Ticket Rejected\nReason: Not enough information for autonomous execution.\nQuality score: %d/10", result.Score))
 
 	if len(result.Issues) > 0 {
-		sb.WriteString("**Issues found:**\n")
+		sb.WriteString("\n\nIssues found:\n")
 		for _, issue := range result.Issues {
-			sb.WriteString(fmt.Sprintf("- %s\n", issue))
+			sb.WriteString(fmt.Sprintf("• %s\n", issue))
 		}
-		sb.WriteString("\n")
 	}
 
 	if len(result.Missing) > 0 {
-		sb.WriteString("**To fix, please add:**\n")
+		sb.WriteString("\n\nTo fix, please add:\n")
 		for _, m := range result.Missing {
-			sb.WriteString(fmt.Sprintf("- %s\n", m))
+			sb.WriteString(fmt.Sprintf("• %s\n", m))
 		}
-		sb.WriteString("\n")
 	}
 
 	if len(result.Suggestions) > 0 {
-		sb.WriteString("**Suggestions:**\n")
+		sb.WriteString("\n\nSuggestions:\n")
 		for _, s := range result.Suggestions {
-			sb.WriteString(fmt.Sprintf("- %s\n", s))
+			sb.WriteString(fmt.Sprintf("• %s\n", s))
 		}
-		sb.WriteString("\n")
 	}
-
-	sb.WriteString(fmt.Sprintf("**Quality score:** %d/10", result.Score))
 
 	if err := c.AddComment(ctx, ticketKey, sb.String()); err != nil {
 		return fmt.Errorf("jira: handle invalid ticket %s: %w", ticketKey, err)
