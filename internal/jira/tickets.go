@@ -67,24 +67,24 @@ func (c *Client) FetchReviewTickets(ctx context.Context, statusMap *StatusMap) (
 	return c.fetchTickets(ctx, jql)
 }
 
-// fetchTickets executes a JQL query with pagination and returns all matching tickets.
+// fetchTickets executes a JQL query with cursor-based pagination and returns all matching tickets.
 func (c *Client) fetchTickets(ctx context.Context, jql string) ([]Ticket, error) {
 	var tickets []Ticket
-	startAt := 0
 	fields := []string{
 		"summary", "description", "comment", "labels", "status",
 		"issuelinks", "reporter", "assignee",
 	}
+	nextPageToken := ""
 	for {
-		page, _, err := c.jira.Issue.Search.Post(ctx, jql, fields, nil, startAt, searchPageSize, "")
+		page, _, err := c.jira.Issue.Search.SearchJQL(ctx, jql, fields, nil, searchPageSize, nextPageToken)
 		if err != nil {
-			return nil, fmt.Errorf("jira: searching issues (startAt=%d): %w", startAt, err)
+			return nil, fmt.Errorf("jira: searching issues: %w", err)
 		}
 		for _, issue := range page.Issues {
 			tickets = append(tickets, issueToTicket(issue))
 		}
-		startAt += len(page.Issues)
-		if startAt >= page.Total || len(page.Issues) == 0 {
+		nextPageToken = page.NextPageToken
+		if nextPageToken == "" || len(page.Issues) == 0 {
 			break
 		}
 	}
