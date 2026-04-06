@@ -3,6 +3,7 @@ package jira
 import (
 	"context"
 	"os"
+	"os/exec"
 	"testing"
 	"time"
 )
@@ -463,20 +464,34 @@ func TestE2E_VC11_PostComment(t *testing.T) {
 
 // ── VC-9: GitHub PR lifecycle management ────────────────────────────────────
 
-// e2eGHAvailable returns true when the gh CLI is authenticated and reachable.
+// e2eGHAvailable skips the test if NIGHTSHIFT_JIRA_TOKEN is unset or the gh CLI is not
+// authenticated. Returns true when both conditions are satisfied.
 func e2eGHAvailable(t *testing.T) bool {
 	t.Helper()
 	if os.Getenv("NIGHTSHIFT_JIRA_TOKEN") == "" {
 		t.Skip("NIGHTSHIFT_JIRA_TOKEN not set; skipping e2e test")
 	}
+	// Verify gh CLI is present and authenticated.
+	cmd := exec.CommandContext(context.Background(), "gh", "auth", "status")
+	if err := cmd.Run(); err != nil {
+		t.Skip("gh CLI not available or not authenticated (gh auth status failed)")
+	}
 	return true
+}
+
+// e2eTestPRURL returns the PR URL to use for VC-9 e2e tests.
+// Override via NIGHTSHIFT_TEST_PR_URL to avoid coupling tests to a specific PR number.
+func e2eTestPRURL() string {
+	if u := os.Getenv("NIGHTSHIFT_TEST_PR_URL"); u != "" {
+		return u
+	}
+	return "https://github.com/cedricfarinazzo/nightshift/pull/40"
 }
 
 func TestE2E_VC9_FetchPRReviewComments(t *testing.T) {
 	e2eGHAvailable(t)
 
-	// VC-9 PR opened as part of this feature's implementation.
-	const prURL = "https://github.com/cedricfarinazzo/nightshift/pull/40"
+	prURL := e2eTestPRURL()
 	repoPath := "."
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)

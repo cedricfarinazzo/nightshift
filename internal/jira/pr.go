@@ -36,20 +36,29 @@ type Review struct {
 	CreatedAt time.Time
 }
 
-// PRComment represents a comment left on a pull request (inline or general).
+// PRComment represents a pull request comment. When populated via FetchPRReviewComments
+// (which fetches general PR conversation comments), Path and Line are always empty/zero
+// because the underlying gh query does not request inline review comment metadata.
+// Extend the gh query with review thread data to populate Path and Line for inline comments.
 type PRComment struct {
-	Author    string
-	Body      string
-	Path      string
+	Author string
+	Body   string
+	// Path is the commented file path for inline review comments. Empty when the data
+	// source does not include inline review comment metadata (e.g., general PR comments).
+	Path string
+	// Line is the commented line number for inline review comments. Zero when the data
+	// source does not include inline review comment metadata.
 	Line      int
 	CreatedAt time.Time
 }
 
 // CreateOrUpdatePR creates a GitHub PR for the given ticket and repo, or updates it if one
-// already exists targeting the same head branch.
-func CreateOrUpdatePR(ctx context.Context, repo RepoWorkspace, ticket Ticket) (*PRInfo, error) {
+// already exists targeting the same head branch. jiraSite is the Atlassian site hostname or
+// full base URL (e.g. "sedinfra" or "https://sedinfra.atlassian.net") used to build the
+// Jira browse link in the PR body.
+func CreateOrUpdatePR(ctx context.Context, repo RepoWorkspace, ticket Ticket, jiraSite string) (*PRInfo, error) {
 	title := prTitle(ticket)
-	body := buildPRBody(ticket)
+	body := buildPRBody(ticket, jiraSite)
 
 	// Check whether a PR already exists for this branch.
 	existing, err := findExistingPR(ctx, repo.Path, repo.Branch)
@@ -96,11 +105,33 @@ func CreateOrUpdatePR(ctx context.Context, repo RepoWorkspace, ticket Ticket) (*
 	return info, nil
 }
 
-// buildPRBody constructs the PR description body for a Jira ticket.
-func buildPRBody(ticket Ticket) string {
+// jiraBrowseURL returns the Jira browse URL for a ticket key. jiraSite may be a bare
+// hostname ("sedinfra"), a hostname with domain ("sedinfra.atlassian.net"), or a full URL
+// ("https://sedinfra.atlassian.net"). Returns an empty string when jiraSite is empty.
+func jiraBrowseURL(jiraSite, ticketKey string) string {
+	base := strings.TrimSpace(jiraSite)
+	if base == "" {
+		return ""
+	}
+	if !strings.HasPrefix(base, "http://") && !strings.HasPrefix(base, "https://") {
+		// bare hostname — check if it looks like just a subdomain (e.g. "sedinfra")
+		if !strings.Contains(base, ".") {
+			base = base + ".atlassian.net"
+		}
+		base = "https://" + base
+	}
+	base = strings.TrimRight(base, "/")
+	return fmt.Sprintf("%s/browse/%s", base, ticketKey)
+}
+
+// buildPRBody constructs the PR description body for a Jira ticket. jiraSite is passed to
+// jiraBrowseURL to build the Jira ticket link; see jiraBrowseURL for accepted formats.
+func buildPRBody(ticket Ticket, jiraSite string) string {
 	var b strings.Builder
 	b.WriteString(fmt.Sprintf("## %s — %s\n\n", ticket.Key, ticket.Summary))
-	b.WriteString(fmt.Sprintf("**Jira ticket:** https://sedinfra.atlassian.net/browse/%s\n\n", ticket.Key))
+	if browseURL := jiraBrowseURL(jiraSite, ticket.Key); browseURL != "" {
+		b.WriteString(fmt.Sprintf("**Jira ticket:** %s\n\n", browseURL))
+	}
 	if ticket.Description != "" {
 		b.WriteString("### Description\n\n")
 		b.WriteString(ticket.Description)
@@ -116,7 +147,9 @@ func buildPRBody(ticket Ticket) string {
 	return b.String()
 }
 
-// FetchPRReviewComments fetches the current review state (reviews, comments) for a PR.
+// FetchPRReviewComments fetches the current review state for a PR using `gh pr view --json`.
+// The returned PRComment values represent general PR conversation comments; Path and Line
+// are always empty/zero because this query does not fetch inline review comment metadata.
 func FetchPRReviewComments(ctx context.Context, repoPath, prURL string) (*PRReviewState, error) {
 	out, err := ghExec(ctx, repoPath, "pr", "view", prURL,
 		"--json", "url,state,reviewDecision,reviews,comments")

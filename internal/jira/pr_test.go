@@ -6,6 +6,28 @@ import (
 	"time"
 )
 
+// ── jiraBrowseURL ────────────────────────────────────────────────────────────
+
+func TestJiraBrowseURL(t *testing.T) {
+	tests := []struct {
+		site, key, want string
+	}{
+		{"sedinfra", "VC-9", "https://sedinfra.atlassian.net/browse/VC-9"},
+		{"sedinfra.atlassian.net", "VC-1", "https://sedinfra.atlassian.net/browse/VC-1"},
+		{"https://sedinfra.atlassian.net", "VC-2", "https://sedinfra.atlassian.net/browse/VC-2"},
+		{"https://sedinfra.atlassian.net/", "VC-3", "https://sedinfra.atlassian.net/browse/VC-3"},
+		{"http://self-hosted.example.com", "PROJ-1", "http://self-hosted.example.com/browse/PROJ-1"},
+		{"", "VC-9", ""},
+		{"   ", "VC-9", ""},
+	}
+	for _, tt := range tests {
+		got := jiraBrowseURL(tt.site, tt.key)
+		if got != tt.want {
+			t.Errorf("jiraBrowseURL(%q, %q) = %q, want %q", tt.site, tt.key, got, tt.want)
+		}
+	}
+}
+
 // ── buildPRBody ───────────────────────────────────────────────────────────────
 
 func TestBuildPRBody(t *testing.T) {
@@ -15,7 +37,7 @@ func TestBuildPRBody(t *testing.T) {
 		Description:        "Manage GitHub PR creation and updates.",
 		AcceptanceCriteria: "PRs must include Jira link.",
 	}
-	body := buildPRBody(ticket)
+	body := buildPRBody(ticket, "sedinfra")
 
 	if !strings.Contains(body, "atlassian.net/browse/VC-9") {
 		t.Error("PR body must contain Jira browse URL")
@@ -50,7 +72,7 @@ func TestBuildPRBody_Sections(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ticket := Ticket{Key: "VC-1", Summary: "Test", Description: tt.description, AcceptanceCriteria: tt.acceptanceCriteria}
-			body := buildPRBody(ticket)
+			body := buildPRBody(ticket, "sedinfra")
 			hasDesc := strings.Contains(body, "### Description")
 			hasAC := strings.Contains(body, "### Acceptance Criteria")
 			if hasDesc != tt.wantDesc {
@@ -66,7 +88,7 @@ func TestBuildPRBody_Sections(t *testing.T) {
 func TestBuildPRBody_AlwaysHasJiraLinkAndAttribution(t *testing.T) {
 	keys := []string{"VC-1", "VC-9", "PROJ-123"}
 	for _, key := range keys {
-		body := buildPRBody(Ticket{Key: key, Summary: "s"})
+		body := buildPRBody(Ticket{Key: key, Summary: "s"}, "sedinfra")
 		if !strings.Contains(body, "atlassian.net/browse/"+key) {
 			t.Errorf("body missing Jira link for key %s", key)
 		}
