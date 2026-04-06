@@ -380,6 +380,66 @@ func TestE2E_VC6_ValidateTicket_RejectedFlow(t *testing.T) {
 	t.Logf("ValidateTicket(%s) correctly flagged as invalid: score=%d issues=%v", ticket.Key, result.Score, result.Issues)
 }
 
+// ── VC-7: Per-ticket workspace & branch management ───────────────────────────
+
+func TestE2E_VC7_BranchName(t *testing.T) {
+	if os.Getenv("NIGHTSHIFT_JIRA_TOKEN") == "" {
+		t.Skip("NIGHTSHIFT_JIRA_TOKEN not set; skipping e2e test")
+	}
+	got := BranchName("VC-7")
+	if got != "feature/VC-7" {
+		t.Errorf("BranchName(VC-7) = %q, want %q", got, "feature/VC-7")
+	}
+}
+
+func TestE2E_VC7_CommitMessage(t *testing.T) {
+	if os.Getenv("NIGHTSHIFT_JIRA_TOKEN") == "" {
+		t.Skip("NIGHTSHIFT_JIRA_TOKEN not set; skipping e2e test")
+	}
+	tests := []struct {
+		scope string
+		want  string
+	}{
+		{"api", "feat(api): VC-7: add workspace"},
+		{"", "feat: VC-7: add workspace"},
+	}
+	for _, tt := range tests {
+		got := CommitMessage("VC-7", tt.scope, "add workspace")
+		if got != tt.want {
+			t.Errorf("CommitMessage(VC-7, %q, ...) = %q, want %q", tt.scope, got, tt.want)
+		}
+	}
+}
+
+func TestE2E_VC7_SetupWorkspace_InvalidKey(t *testing.T) {
+	if os.Getenv("NIGHTSHIFT_JIRA_TOKEN") == "" {
+		t.Skip("NIGHTSHIFT_JIRA_TOKEN not set; skipping e2e test")
+	}
+	cfg := JiraConfig{
+		WorkspaceRoot:    t.TempDir(),
+		CleanupAfterDays: 30,
+		Repos:            []RepoConfig{{Name: "repo", URL: "git@github.com:org/repo.git", BaseBranch: "main"}},
+	}
+	_, err := SetupWorkspace(context.Background(), cfg, "invalid-key")
+	if err == nil {
+		t.Error("SetupWorkspace with invalid key should return error")
+	}
+}
+
+func TestE2E_VC7_CleanupStaleWorkspaces_Empty(t *testing.T) {
+	if os.Getenv("NIGHTSHIFT_JIRA_TOKEN") == "" {
+		t.Skip("NIGHTSHIFT_JIRA_TOKEN not set; skipping e2e test")
+	}
+	cfg := JiraConfig{WorkspaceRoot: t.TempDir(), CleanupAfterDays: 30}
+	n, err := CleanupStaleWorkspaces(cfg)
+	if err != nil {
+		t.Fatalf("CleanupStaleWorkspaces: %v", err)
+	}
+	if n != 0 {
+		t.Errorf("expected 0 removed, got %d", n)
+	}
+}
+
 func statusNames(ss []Status) []string {
 	names := make([]string, len(ss))
 	for i, s := range ss {
