@@ -440,6 +440,27 @@ func TestE2E_VC7_CleanupStaleWorkspaces_Empty(t *testing.T) {
 	}
 }
 
+// ── VC-11: Jira comment state management ────────────────────────────────────
+
+func TestE2E_VC11_PostComment(t *testing.T) {
+	client := e2eClient(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	comment := NightshiftComment{
+		Type:      CommentValidation,
+		Timestamp: time.Now().UTC(),
+		Provider:  "claude",
+		Model:     "claude-haiku-4-5",
+		Duration:  5 * time.Second,
+		Body:      "✅ e2e test: PostComment — automated test, safe to ignore.",
+		Metadata:  map[string]string{"score": "9", "valid": "true"},
+	}
+	if err := client.PostComment(ctx, "VC-11", comment); err != nil {
+		t.Fatalf("PostComment: %v", err)
+	}
+}
+
 func statusNames(ss []Status) []string {
 	names := make([]string, len(ss))
 	for i, s := range ss {
