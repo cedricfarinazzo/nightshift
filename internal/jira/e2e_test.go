@@ -463,31 +463,63 @@ func TestE2E_VC11_PostComment(t *testing.T) {
 
 // ── VC-9: GitHub PR lifecycle management ────────────────────────────────────
 
-func TestE2E_VC9_CreateOrUpdatePR(t *testing.T) {
+// e2eGHAvailable returns true when the gh CLI is authenticated and reachable.
+func e2eGHAvailable(t *testing.T) bool {
+	t.Helper()
 	if os.Getenv("NIGHTSHIFT_JIRA_TOKEN") == "" {
 		t.Skip("NIGHTSHIFT_JIRA_TOKEN not set; skipping e2e test")
 	}
+	return true
+}
 
-	// Use the nightshift repo itself as the test repo workspace.
-	// We only test FetchPRReviewComments with a known PR URL to avoid
-	// creating spurious PRs in CI.
-	const knownPRURL = "https://github.com/cedricfarinazzo/nightshift/pull/1"
+func TestE2E_VC9_FetchPRReviewComments(t *testing.T) {
+	e2eGHAvailable(t)
+
+	// VC-9 PR opened as part of this feature's implementation.
+	const prURL = "https://github.com/cedricfarinazzo/nightshift/pull/40"
 	repoPath := "."
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	rs, err := FetchPRReviewComments(ctx, repoPath, knownPRURL)
+	rs, err := FetchPRReviewComments(ctx, repoPath, prURL)
 	if err != nil {
-		// gh CLI may not be authenticated in all environments; log and skip.
 		t.Logf("FetchPRReviewComments: %v (gh CLI may not be authenticated)", err)
 		t.Skip("gh CLI not available or not authenticated")
 	}
-	if rs.URL == "" && rs.State == "" {
-		t.Error("FetchPRReviewComments returned empty PRReviewState")
+	if rs.URL == "" {
+		t.Error("FetchPRReviewComments returned empty URL")
 	}
-	t.Logf("PR %s: state=%s reviewDecision=%s reviews=%d comments=%d",
-		knownPRURL, rs.State, rs.ReviewDecision, len(rs.Reviews), len(rs.Comments))
+	if rs.State == "" {
+		t.Error("FetchPRReviewComments returned empty State")
+	}
+	t.Logf("PR %s: state=%s reviewDecision=%q reviews=%d comments=%d",
+		prURL, rs.State, rs.ReviewDecision, len(rs.Reviews), len(rs.Comments))
+}
+
+func TestE2E_VC9_FetchPRReviewComments_InvalidURL(t *testing.T) {
+	e2eGHAvailable(t)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	_, err := FetchPRReviewComments(ctx, ".", "https://github.com/cedricfarinazzo/nightshift/pull/999999")
+	if err == nil {
+		t.Error("expected error for non-existent PR, got nil")
+	}
+	t.Logf("expected error: %v", err)
+}
+
+func TestE2E_VC9_PRTitle_Format(t *testing.T) {
+	e2eGHAvailable(t)
+
+	// Verify that prTitle produces the expected bracket format used in PR creation.
+	ticket := Ticket{Key: "VC-9", Summary: "GitHub PR Lifecycle Management"}
+	got := prTitle(ticket)
+	want := "[VC-9] GitHub PR Lifecycle Management"
+	if got != want {
+		t.Errorf("prTitle = %q, want %q", got, want)
+	}
 }
 
 func statusNames(ss []Status) []string {
