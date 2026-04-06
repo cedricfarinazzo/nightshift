@@ -127,6 +127,7 @@ func jiraBrowseURL(jiraSite, ticketKey string) string {
 // buildPRBody constructs the PR description body for a Jira ticket. jiraSite is passed to
 // jiraBrowseURL to build the Jira ticket link; see jiraBrowseURL for accepted formats.
 func buildPRBody(ticket Ticket, jiraSite string) string {
+	// Jira browse link: https://<site>.atlassian.net/browse/<key>
 	var b strings.Builder
 	b.WriteString(fmt.Sprintf("## %s — %s\n\n", ticket.Key, ticket.Summary))
 	if browseURL := jiraBrowseURL(jiraSite, ticket.Key); browseURL != "" {
