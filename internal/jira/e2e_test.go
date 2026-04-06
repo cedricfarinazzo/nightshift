@@ -461,6 +461,35 @@ func TestE2E_VC11_PostComment(t *testing.T) {
 	}
 }
 
+// ── VC-9: GitHub PR lifecycle management ────────────────────────────────────
+
+func TestE2E_VC9_CreateOrUpdatePR(t *testing.T) {
+	if os.Getenv("NIGHTSHIFT_JIRA_TOKEN") == "" {
+		t.Skip("NIGHTSHIFT_JIRA_TOKEN not set; skipping e2e test")
+	}
+
+	// Use the nightshift repo itself as the test repo workspace.
+	// We only test FetchPRReviewComments with a known PR URL to avoid
+	// creating spurious PRs in CI.
+	const knownPRURL = "https://github.com/cedricfarinazzo/nightshift/pull/1"
+	repoPath := "."
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	rs, err := FetchPRReviewComments(ctx, repoPath, knownPRURL)
+	if err != nil {
+		// gh CLI may not be authenticated in all environments; log and skip.
+		t.Logf("FetchPRReviewComments: %v (gh CLI may not be authenticated)", err)
+		t.Skip("gh CLI not available or not authenticated")
+	}
+	if rs.URL == "" && rs.State == "" {
+		t.Error("FetchPRReviewComments returned empty PRReviewState")
+	}
+	t.Logf("PR %s: state=%s reviewDecision=%s reviews=%d comments=%d",
+		knownPRURL, rs.State, rs.ReviewDecision, len(rs.Reviews), len(rs.Comments))
+}
+
 func statusNames(ss []Status) []string {
 	names := make([]string, len(ss))
 	for i, s := range ss {

@@ -41,7 +41,7 @@ func TestCommitMessage(t *testing.T) {
 	}
 }
 
-func TestPRTitle(t *testing.T) {
+func TestPRTitleConventional(t *testing.T) {
 	tests := []struct {
 		ticketKey   string
 		scope       string
