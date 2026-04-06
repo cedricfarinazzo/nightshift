@@ -3,6 +3,7 @@ package jira
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"regexp"
 	"strings"
 	"time"
@@ -53,7 +54,7 @@ type NightshiftComment struct {
 	Provider  string // e.g., "claude"
 	Model     string // e.g., "claude-sonnet-4.5"
 	Duration  time.Duration
-	Body      string            // markdown body
+	Body      string            // human-readable body content only (no header/markers)
 	Metadata  map[string]string // machine-parseable key-value pairs
 }
 
@@ -78,7 +79,7 @@ func ParseNightshiftComments(comments []Comment) []NightshiftComment {
 		nc := NightshiftComment{
 			Type:      ct,
 			Timestamp: c.Created,
-			Body:      c.Body,
+			Body:      extractBody(c.Body),
 			Metadata:  meta,
 		}
 		if v, exists := meta["provider"]; exists {
@@ -86,6 +87,11 @@ func ParseNightshiftComments(comments []Comment) []NightshiftComment {
 		}
 		if v, exists := meta["model"]; exists {
 			nc.Model = v
+		}
+		if v, exists := meta["duration"]; exists {
+			if d, err := time.ParseDuration(v); err == nil {
+				nc.Duration = d
+			}
 		}
 		out = append(out, nc)
 	}
@@ -114,6 +120,7 @@ var (
 )
 
 // parseCommentMeta extracts the comment type and metadata from HTML comment markers.
+// Metadata values are URL-decoded (see formatComment for encoding).
 func parseCommentMeta(body string) (CommentType, map[string]string, bool) {
 	m := reTypeVal.FindStringSubmatch(body)
 	if m == nil {
@@ -122,25 +129,42 @@ func parseCommentMeta(body string) (CommentType, map[string]string, bool) {
 	ct := CommentType(m[1])
 
 	meta := map[string]string{}
-	// extract key=value pairs from the nightshift:type line (e.g. provider, model, duration)
+	// extract key=value pairs from the nightshift:type line (provider, model, duration)
 	if tl := reTypeLine.FindStringSubmatch(body); tl != nil {
 		for _, kv := range reKV.FindAllStringSubmatch(tl[1], -1) {
-			meta[kv[1]] = kv[2]
+			meta[kv[1]], _ = url.QueryUnescape(kv[2])
 		}
 	}
 	// extract additional key=value pairs from the nightshift:meta line
 	if mm := reMeta.FindStringSubmatch(body); mm != nil {
 		for _, kv := range reKV.FindAllStringSubmatch(mm[1], -1) {
-			meta[kv[1]] = kv[2]
+			meta[kv[1]], _ = url.QueryUnescape(kv[2])
 		}
 	}
 	return ct, meta, true
 }
 
+// extractBody returns only the human-readable body from a formatted nightshift comment,
+// stripping the 2-line header and the trailing <!-- nightshift:* --> markers.
+func extractBody(raw string) string {
+	// split off everything from the first nightshift marker onward
+	parts := strings.SplitN(raw, "\n\n<!-- nightshift:", 2)
+	// parts[0] is: "🤖 ...\nProvider: ...\n\n{body}"
+	// split header block from body on first blank line
+	sections := strings.SplitN(parts[0], "\n\n", 2)
+	if len(sections) < 2 {
+		return ""
+	}
+	return strings.TrimSpace(sections[1])
+}
+
+// formatComment builds the full Jira comment string for a NightshiftComment.
+// The format is plain text (no Markdown) since AddComment renders via ADF.
+// Metadata values are URL-encoded so spaces and special characters are safe.
 func formatComment(c NightshiftComment) string {
 	var b strings.Builder
 	ts := c.Timestamp.Format("2006-01-02 15:04")
-	fmt.Fprintf(&b, "🤖 **Nightshift — %s** (%s)\n", c.Type.Title(), ts)
+	fmt.Fprintf(&b, "🤖 Nightshift — %s (%s)\n", c.Type.Title(), ts)
 	fmt.Fprintf(&b, "Provider: %s | Model: %s | Duration: %s\n\n",
 		c.Provider, c.Model, c.Duration.Round(time.Second))
 	b.WriteString(c.Body)
@@ -149,7 +173,7 @@ func formatComment(c NightshiftComment) string {
 	if len(c.Metadata) > 0 {
 		b.WriteString("<!-- nightshift:meta")
 		for k, v := range c.Metadata {
-			fmt.Fprintf(&b, " %s=%s", k, v)
+			fmt.Fprintf(&b, " %s=%s", k, url.QueryEscape(v))
 		}
 		b.WriteString(" -->\n")
 	}
