@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -55,6 +56,10 @@ func runJira(cmd *cobra.Command, _ []string) error {
 	reviewOnly, _ := cmd.Flags().GetBool("review-only")
 	singleTicket, _ := cmd.Flags().GetString("ticket")
 
+	if todoOnly && reviewOnly {
+		return fmt.Errorf("--todo-only and --review-only are mutually exclusive")
+	}
+
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
@@ -71,18 +76,31 @@ func runJira(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("discover statuses: %w", err)
 	}
 
-	validationAgent := createJiraAgent(cfg.Jira.Validation)
-	implAgent := createJiraAgent(cfg.Jira.Implement)
-	reviewFixAgent := createJiraAgent(cfg.Jira.ReviewFix)
-
-	var orchOpts []jira.OrchestratorOption
-	if !skipValidation {
-		orchOpts = append(orchOpts, jira.WithValidationAgent(validationAgent))
+	validationAgent, err := createJiraAgent(cfg, cfg.Jira.Validation)
+	if err != nil {
+		return fmt.Errorf("validation agent: %w", err)
 	}
-	orchOpts = append(orchOpts,
+	implAgent, err := createJiraAgent(cfg, cfg.Jira.Implement)
+	if err != nil {
+		return fmt.Errorf("implement agent: %w", err)
+	}
+	reviewFixAgent, err := createJiraAgent(cfg, cfg.Jira.ReviewFix)
+	if err != nil {
+		return fmt.Errorf("review-fix agent: %w", err)
+	}
+
+	orchOpts := []jira.OrchestratorOption{
 		jira.WithImplAgent(implAgent),
 		jira.WithReviewFixAgent(reviewFixAgent),
-	)
+	}
+	// Always provide a validation agent; skip-validation requires orchestrator
+	// support (planned for a future story) and is accepted here as a no-op flag.
+	if !skipValidation {
+		orchOpts = append(orchOpts, jira.WithValidationAgent(validationAgent))
+	} else {
+		orchOpts = append(orchOpts, jira.WithValidationAgent(validationAgent))
+		log.Infof("skip-validation flag set; orchestrator-level skip support pending")
+	}
 	orch := jira.NewOrchestrator(client, cfg.Jira, orchOpts...)
 
 	printJiraPreflightSummary(cfg.Jira, statusMap)
@@ -92,109 +110,25 @@ func runJira(cmd *cobra.Command, _ []string) error {
 	start := time.Now()
 
 	if singleTicket != "" {
-		// Single-ticket mode: fetch all todo+review tickets and find the one requested.
-		todoTickets, err := client.FetchTodoTickets(ctx)
+		found, err := runSingleTicket(ctx, log, orch, client, cfg.Jira, statusMap, singleTicket, &results, &feedbackResults)
 		if err != nil {
-			return fmt.Errorf("fetch tickets: %w", err)
+			return err
 		}
-		reviewTickets, err := client.FetchReviewTickets(ctx, statusMap)
-		if err != nil {
-			return fmt.Errorf("fetch review tickets: %w", err)
-		}
-		for _, t := range todoTickets {
-			if t.Key == singleTicket {
-				ws, err := jira.SetupWorkspace(ctx, cfg.Jira, t.Key)
-				if err != nil {
-					log.Errorf("workspace setup: %v", err)
-					results = append(results, jira.TicketResult{TicketKey: t.Key, Status: jira.TicketFailed, Error: err.Error()})
-					break
-				}
-				result, err := orch.ProcessTicket(ctx, t, ws)
-				if err != nil {
-					log.Errorf("process ticket %s: %v", t.Key, err)
-				}
-				if result != nil {
-					results = append(results, *result)
-				}
-				break
-			}
-		}
-		for _, t := range reviewTickets {
-			if t.Key == singleTicket {
-				ws, err := jira.SetupWorkspace(ctx, cfg.Jira, t.Key)
-				if err != nil {
-					log.Errorf("workspace setup: %v", err)
-					break
-				}
-				result, err := orch.ProcessFeedback(ctx, t, ws)
-				if err != nil {
-					log.Errorf("process feedback %s: %v", t.Key, err)
-				}
-				if result != nil {
-					feedbackResults = append(feedbackResults, *result)
-				}
-				break
-			}
+		if !found {
+			return fmt.Errorf("ticket %s not found in TODO or ON REVIEW lists", singleTicket)
 		}
 	} else {
 		// Phase A: TODO tickets.
 		if !reviewOnly {
-			todoTickets, err := client.FetchTodoTickets(ctx)
-			if err != nil {
-				return fmt.Errorf("fetch todo tickets: %w", err)
-			}
-			log.Infof("todo tickets: %d found", len(todoTickets))
-
-			graph := jira.BuildDependencyGraph(todoTickets)
-			ready, blocked := graph.ResolveOrder()
-			for _, b := range blocked {
-				log.Infof("ticket %s blocked by %v, skipping", b.Ticket.Key, b.Blockers)
-			}
-
-			count := 0
-			for _, ticket := range ready {
-				if count >= cfg.Jira.MaxTickets {
-					break
-				}
-				ws, err := jira.SetupWorkspace(ctx, cfg.Jira, ticket.Key)
-				if err != nil {
-					log.Errorf("workspace %s: %v", ticket.Key, err)
-					results = append(results, jira.TicketResult{TicketKey: ticket.Key, Status: jira.TicketFailed, Error: err.Error()})
-					count++
-					continue
-				}
-				result, err := orch.ProcessTicket(ctx, ticket, ws)
-				if err != nil {
-					log.Errorf("process %s: %v", ticket.Key, err)
-				}
-				if result != nil {
-					results = append(results, *result)
-				}
-				count++
+			if err := runTodoPhase(ctx, log, orch, client, cfg.Jira, &results); err != nil {
+				return err
 			}
 		}
 
 		// Phase B: ON REVIEW feedback.
 		if !todoOnly {
-			reviewTickets, err := client.FetchReviewTickets(ctx, statusMap)
-			if err != nil {
-				return fmt.Errorf("fetch review tickets: %w", err)
-			}
-			log.Infof("review tickets: %d found", len(reviewTickets))
-
-			for _, ticket := range reviewTickets {
-				ws, err := jira.SetupWorkspace(ctx, cfg.Jira, ticket.Key)
-				if err != nil {
-					log.Errorf("workspace %s: %v", ticket.Key, err)
-					continue
-				}
-				result, err := orch.ProcessFeedback(ctx, ticket, ws)
-				if err != nil {
-					log.Errorf("process feedback %s: %v", ticket.Key, err)
-				}
-				if result != nil {
-					feedbackResults = append(feedbackResults, *result)
-				}
+			if err := runReviewPhase(ctx, log, orch, client, cfg.Jira, statusMap, &feedbackResults); err != nil {
+				return err
 			}
 		}
 	}
@@ -209,39 +143,228 @@ func runJira(cmd *cobra.Command, _ []string) error {
 	return nil
 }
 
-// createJiraAgent creates an agent for the given Jira phase config.
-// Defaults to Claude when the provider is empty or unrecognized.
-func createJiraAgent(phase jira.PhaseConfig) agents.Agent {
-	timeout, _ := time.ParseDuration(phase.Timeout)
+func runSingleTicket(
+	ctx context.Context,
+	log *logging.Logger,
+	orch *jira.Orchestrator,
+	client *jira.Client,
+	jiracfg jira.JiraConfig,
+	statusMap *jira.StatusMap,
+	key string,
+	results *[]jira.TicketResult,
+	feedbackResults *[]jira.FeedbackResult,
+) (found bool, err error) {
+	todoTickets, err := client.FetchTodoTickets(ctx)
+	if err != nil {
+		return false, fmt.Errorf("fetch tickets: %w", err)
+	}
+	reviewTickets, err := client.FetchReviewTickets(ctx, statusMap)
+	if err != nil {
+		return false, fmt.Errorf("fetch review tickets: %w", err)
+	}
 
-	switch phase.Provider {
+	for _, t := range todoTickets {
+		if t.Key != key {
+			continue
+		}
+		found = true
+		ws, err := jira.SetupWorkspace(ctx, jiracfg, t.Key)
+		if err != nil {
+			log.Errorf("workspace setup: %v", err)
+			*results = append(*results, jira.TicketResult{TicketKey: t.Key, Status: jira.TicketFailed, Error: err.Error()})
+			return found, nil
+		}
+		result, err := orch.ProcessTicket(ctx, t, ws)
+		if err != nil {
+			log.Errorf("process ticket %s: %v", t.Key, err)
+		}
+		if result != nil {
+			*results = append(*results, *result)
+		}
+		return found, nil
+	}
+
+	for _, t := range reviewTickets {
+		if t.Key != key {
+			continue
+		}
+		found = true
+		ws, err := jira.SetupWorkspace(ctx, jiracfg, t.Key)
+		if err != nil {
+			log.Errorf("workspace setup: %v", err)
+			*feedbackResults = append(*feedbackResults, jira.FeedbackResult{TicketKey: t.Key, Error: err.Error()})
+			return found, nil
+		}
+		result, err := orch.ProcessFeedback(ctx, t, ws)
+		if err != nil {
+			log.Errorf("process feedback %s: %v", t.Key, err)
+		}
+		if result != nil {
+			*feedbackResults = append(*feedbackResults, *result)
+		}
+		return found, nil
+	}
+
+	return false, nil
+}
+
+func runTodoPhase(
+	ctx context.Context,
+	log *logging.Logger,
+	orch *jira.Orchestrator,
+	client *jira.Client,
+	jiracfg jira.JiraConfig,
+	results *[]jira.TicketResult,
+) error {
+	todoTickets, err := client.FetchTodoTickets(ctx)
+	if err != nil {
+		return fmt.Errorf("fetch todo tickets: %w", err)
+	}
+	log.Infof("todo tickets: %d found", len(todoTickets))
+
+	graph := jira.BuildDependencyGraph(todoTickets)
+	ready, blocked := graph.ResolveOrder()
+	for _, b := range blocked {
+		log.Infof("ticket %s blocked by %v, skipping", b.Ticket.Key, b.Blockers)
+	}
+
+	count := 0
+	for _, ticket := range ready {
+		if count >= jiracfg.MaxTickets {
+			break
+		}
+		ws, err := jira.SetupWorkspace(ctx, jiracfg, ticket.Key)
+		if err != nil {
+			log.Errorf("workspace %s: %v", ticket.Key, err)
+			*results = append(*results, jira.TicketResult{TicketKey: ticket.Key, Status: jira.TicketFailed, Error: err.Error()})
+			count++
+			continue
+		}
+		result, err := orch.ProcessTicket(ctx, ticket, ws)
+		if err != nil {
+			log.Errorf("process %s: %v", ticket.Key, err)
+		}
+		if result != nil {
+			*results = append(*results, *result)
+		}
+		count++
+	}
+	return nil
+}
+
+func runReviewPhase(
+	ctx context.Context,
+	log *logging.Logger,
+	orch *jira.Orchestrator,
+	client *jira.Client,
+	jiracfg jira.JiraConfig,
+	statusMap *jira.StatusMap,
+	feedbackResults *[]jira.FeedbackResult,
+) error {
+	reviewTickets, err := client.FetchReviewTickets(ctx, statusMap)
+	if err != nil {
+		return fmt.Errorf("fetch review tickets: %w", err)
+	}
+	log.Infof("review tickets: %d found", len(reviewTickets))
+
+	for _, ticket := range reviewTickets {
+		ws, err := jira.SetupWorkspace(ctx, jiracfg, ticket.Key)
+		if err != nil {
+			log.Errorf("workspace %s: %v", ticket.Key, err)
+			*feedbackResults = append(*feedbackResults, jira.FeedbackResult{TicketKey: ticket.Key, Error: err.Error()})
+			continue
+		}
+		result, err := orch.ProcessFeedback(ctx, ticket, ws)
+		if err != nil {
+			log.Errorf("process feedback %s: %v", ticket.Key, err)
+		}
+		if result != nil {
+			*feedbackResults = append(*feedbackResults, *result)
+		}
+	}
+	return nil
+}
+
+// createJiraAgent creates an agent for the given Jira phase config, applying
+// both global provider settings (permissions, binary path) and phase-specific
+// overrides (model, timeout). Returns an error if the provider CLI is not
+// available or the timeout string is malformed.
+func createJiraAgent(cfg *config.Config, phase jira.PhaseConfig) (agents.Agent, error) {
+	provider := strings.ToLower(phase.Provider)
+	if provider == "" {
+		provider = "claude"
+	}
+
+	var timeout time.Duration
+	if phase.Timeout != "" {
+		var err error
+		timeout, err = time.ParseDuration(phase.Timeout)
+		if err != nil {
+			return nil, fmt.Errorf("invalid timeout %q: %w", phase.Timeout, err)
+		}
+	}
+
+	switch provider {
 	case "codex":
 		opts := []agents.CodexOption{}
-		if phase.Model != "" {
-			opts = append(opts, agents.WithCodexModel(phase.Model))
+		if cfg.Providers.Codex.DangerouslyBypassApprovalsAndSandbox {
+			opts = append(opts, agents.WithDangerouslyBypassApprovalsAndSandbox(true))
+		}
+		model := phase.Model
+		if model == "" {
+			model = cfg.Providers.Codex.Model
+		}
+		if model != "" {
+			opts = append(opts, agents.WithCodexModel(model))
 		}
 		if timeout > 0 {
 			opts = append(opts, agents.WithCodexDefaultTimeout(timeout))
 		}
-		return agents.NewCodexAgent(opts...)
+		a := agents.NewCodexAgent(opts...)
+		if !a.Available() {
+			return nil, fmt.Errorf("codex CLI not found in PATH")
+		}
+		return a, nil
+
 	case "copilot":
-		opts := []agents.CopilotOption{}
-		if phase.Model != "" {
-			opts = append(opts, agents.WithCopilotModel(phase.Model))
+		opts := []agents.CopilotOption{
+			agents.WithCopilotDangerouslySkipPermissions(cfg.Providers.Copilot.DangerouslySkipPermissions),
+		}
+		model := phase.Model
+		if model == "" {
+			model = cfg.Providers.Copilot.Model
+		}
+		if model != "" {
+			opts = append(opts, agents.WithCopilotModel(model))
 		}
 		if timeout > 0 {
 			opts = append(opts, agents.WithCopilotDefaultTimeout(timeout))
 		}
-		return agents.NewCopilotAgent(opts...)
-	default: // "claude" or empty
-		opts := []agents.ClaudeOption{}
-		if phase.Model != "" {
-			opts = append(opts, agents.WithModel(phase.Model))
+		a := agents.NewCopilotAgent(opts...)
+		if !a.Available() {
+			return nil, fmt.Errorf("copilot CLI not found in PATH")
+		}
+		return a, nil
+
+	default: // "claude" or unrecognized
+		opts := []agents.ClaudeOption{
+			agents.WithDangerouslySkipPermissions(cfg.Providers.Claude.DangerouslySkipPermissions),
+		}
+		model := phase.Model
+		if model == "" {
+			model = cfg.Providers.Claude.Model
+		}
+		if model != "" {
+			opts = append(opts, agents.WithModel(model))
 		}
 		if timeout > 0 {
 			opts = append(opts, agents.WithDefaultTimeout(timeout))
 		}
-		return agents.NewClaudeAgent(opts...)
+		a := agents.NewClaudeAgent(opts...)
+		if !a.Available() {
+			return nil, fmt.Errorf("claude CLI not found in PATH")
+		}
+		return a, nil
 	}
 }
 
@@ -258,13 +381,15 @@ func printJiraPreflightSummary(cfg jira.JiraConfig, _ *jira.StatusMap) {
 }
 
 func printJiraRunSummary(results []jira.TicketResult, feedback []jira.FeedbackResult, d time.Duration) {
-	completed, rejected, failed := 0, 0, 0
+	completed, rejected, skipped, failed := 0, 0, 0, 0
 	for _, r := range results {
 		switch r.Status {
 		case jira.TicketCompleted:
 			completed++
 		case jira.TicketRejected:
 			rejected++
+		case jira.TicketSkipped:
+			skipped++
 		default:
 			failed++
 		}
@@ -276,6 +401,9 @@ func printJiraRunSummary(results []jira.TicketResult, feedback []jira.FeedbackRe
 	fmt.Printf("  Tickets:      %d processed\n", len(results))
 	fmt.Printf("  ✅ Completed: %d\n", completed)
 	fmt.Printf("  ❌ Rejected:  %d\n", rejected)
+	if skipped > 0 {
+		fmt.Printf("  ⏭️  Skipped:  %d\n", skipped)
+	}
 	if failed > 0 {
 		fmt.Printf("  ⚠️  Failed:   %d\n", failed)
 	}

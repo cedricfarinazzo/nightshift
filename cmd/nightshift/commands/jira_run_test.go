@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/marcus/nightshift/internal/agents"
+	"github.com/marcus/nightshift/internal/config"
 	"github.com/marcus/nightshift/internal/jira"
 )
 
@@ -64,6 +64,19 @@ func TestPrintJiraRunSummary(t *testing.T) {
 	}
 }
 
+func TestPrintJiraRunSummary_Skipped(t *testing.T) {
+	results := []jira.TicketResult{
+		{TicketKey: "P-1", Status: jira.TicketCompleted},
+		{TicketKey: "P-2", Status: jira.TicketSkipped},
+	}
+	out := captureStdout(t, func() {
+		printJiraRunSummary(results, nil, time.Second)
+	})
+	if !strings.Contains(out, "Skipped") {
+		t.Errorf("run summary should show Skipped when tickets are skipped\nfull output:\n%s", out)
+	}
+}
+
 func TestRunJira_FlagParsing(t *testing.T) {
 	flags := []string{"max-tickets", "ticket", "skip-validation", "todo-only", "review-only"}
 	for _, name := range flags {
@@ -81,10 +94,15 @@ func TestRunJira_DryRunFlagAbsent(t *testing.T) {
 }
 
 func TestCreateJiraAgent_Claude(t *testing.T) {
+	cfg := &config.Config{}
 	phase := jira.PhaseConfig{Provider: "claude", Model: "claude-haiku-4.5", Timeout: "2m"}
-	a := createJiraAgent(phase)
-	if _, ok := a.(*agents.ClaudeAgent); !ok {
-		t.Errorf("expected *agents.ClaudeAgent, got %T", a)
+	a, err := createJiraAgent(cfg, phase)
+	if err != nil {
+		// claude binary may not be in PATH in CI; skip availability errors.
+		if strings.Contains(err.Error(), "not found in PATH") {
+			t.Skipf("claude CLI not available: %v", err)
+		}
+		t.Fatalf("unexpected error: %v", err)
 	}
 	if a.Name() != "claude" {
 		t.Errorf("expected name claude, got %s", a.Name())
@@ -92,36 +110,94 @@ func TestCreateJiraAgent_Claude(t *testing.T) {
 }
 
 func TestCreateJiraAgent_Codex(t *testing.T) {
+	cfg := &config.Config{}
 	phase := jira.PhaseConfig{Provider: "codex", Model: "o3", Timeout: "30m"}
-	a := createJiraAgent(phase)
-	if _, ok := a.(*agents.CodexAgent); !ok {
-		t.Errorf("expected *agents.CodexAgent, got %T", a)
+	a, err := createJiraAgent(cfg, phase)
+	if err != nil {
+		if strings.Contains(err.Error(), "not found in PATH") {
+			t.Skipf("codex CLI not available: %v", err)
+		}
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if a.Name() != "codex" {
+		t.Errorf("expected name codex, got %s", a.Name())
 	}
 }
 
 func TestCreateJiraAgent_Copilot(t *testing.T) {
+	cfg := &config.Config{}
 	phase := jira.PhaseConfig{Provider: "copilot", Model: "", Timeout: ""}
-	a := createJiraAgent(phase)
-	if _, ok := a.(*agents.CopilotAgent); !ok {
-		t.Errorf("expected *agents.CopilotAgent, got %T", a)
+	a, err := createJiraAgent(cfg, phase)
+	if err != nil {
+		if strings.Contains(err.Error(), "not found in PATH") {
+			t.Skipf("copilot CLI not available: %v", err)
+		}
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if a.Name() != "copilot" {
+		t.Errorf("expected name copilot, got %s", a.Name())
 	}
 }
 
 func TestCreateJiraAgent_Default(t *testing.T) {
 	// Empty provider should default to Claude.
+	cfg := &config.Config{}
 	phase := jira.PhaseConfig{Provider: "", Model: ""}
-	a := createJiraAgent(phase)
-	if _, ok := a.(*agents.ClaudeAgent); !ok {
-		t.Errorf("expected *agents.ClaudeAgent for empty provider, got %T", a)
+	a, err := createJiraAgent(cfg, phase)
+	if err != nil {
+		if strings.Contains(err.Error(), "not found in PATH") {
+			t.Skipf("claude CLI not available: %v", err)
+		}
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if a.Name() != "claude" {
+		t.Errorf("expected name claude for empty provider, got %s", a.Name())
 	}
 }
 
 func TestCreateJiraAgent_UnknownProvider(t *testing.T) {
-	phase := jira.PhaseConfig{Provider: "unknown-llm", Model: ""}
-	a := createJiraAgent(phase)
 	// Unknown provider falls back to Claude.
-	if _, ok := a.(*agents.ClaudeAgent); !ok {
-		t.Errorf("expected *agents.ClaudeAgent fallback for unknown provider, got %T", a)
+	cfg := &config.Config{}
+	phase := jira.PhaseConfig{Provider: "unknown-llm", Model: ""}
+	a, err := createJiraAgent(cfg, phase)
+	if err != nil {
+		if strings.Contains(err.Error(), "not found in PATH") {
+			t.Skipf("claude CLI not available: %v", err)
+		}
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if a.Name() != "claude" {
+		t.Errorf("expected claude fallback for unknown provider, got %s", a.Name())
+	}
+}
+
+func TestCreateJiraAgent_InvalidTimeout(t *testing.T) {
+	cfg := &config.Config{}
+	phase := jira.PhaseConfig{Provider: "claude", Timeout: "notaduration"}
+	_, err := createJiraAgent(cfg, phase)
+	if err == nil {
+		t.Error("expected error for invalid timeout, got nil")
+	}
+	if !strings.Contains(err.Error(), "invalid timeout") {
+		t.Errorf("expected 'invalid timeout' in error, got: %v", err)
+	}
+}
+
+func TestCreateJiraAgent_CaseInsensitiveProvider(t *testing.T) {
+	// Provider names should be normalized to lowercase.
+	cfg := &config.Config{}
+	for _, provider := range []string{"Claude", "CLAUDE", "claude"} {
+		phase := jira.PhaseConfig{Provider: provider, Model: ""}
+		a, err := createJiraAgent(cfg, phase)
+		if err != nil {
+			if strings.Contains(err.Error(), "not found in PATH") {
+				t.Skipf("claude CLI not available: %v", err)
+			}
+			t.Fatalf("provider %q: unexpected error: %v", provider, err)
+		}
+		if a.Name() != "claude" {
+			t.Errorf("provider %q: expected claude, got %s", provider, a.Name())
+		}
 	}
 }
 
