@@ -542,6 +542,21 @@ func TestE2E_VC9_PRTitle_Format(t *testing.T) {
 
 // ── VC-8: Jira orchestrator ──────────────────────────────────────────────────
 
+// noMutationJiraClient wraps a real Client for read operations but stubs out all
+// state-mutating calls (transitions, comments) so e2e tests do not alter real tickets.
+type noMutationJiraClient struct {
+	real *Client
+}
+
+func (n *noMutationJiraClient) PostComment(_ context.Context, _ string, _ NightshiftComment) error {
+	return nil
+}
+func (n *noMutationJiraClient) HandleInvalidTicket(_ context.Context, _ string, _ *ValidationResult) error {
+	return nil
+}
+func (n *noMutationJiraClient) TransitionToInProgress(_ context.Context, _ string) error { return nil }
+func (n *noMutationJiraClient) TransitionToReview(_ context.Context, _ string) error    { return nil }
+
 func TestE2E_VC8_ProcessTicket_WithStubAgents(t *testing.T) {
 	client := e2eClient(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
@@ -567,12 +582,26 @@ func TestE2E_VC8_ProcessTicket_WithStubAgents(t *testing.T) {
 		output: "e2e stub plan/impl output",
 	}
 
-	o := NewOrchestrator(client, client.cfg,
-		WithValidationAgent(va),
-		WithImplAgent(ia),
-	)
+	// Use noMutationJiraClient so no transitions or comments are posted to real Jira.
+	o := &Orchestrator{
+		client:          &noMutationJiraClient{real: client},
+		cfg:             client.cfg,
+		validationAgent: va,
+		implAgent:       ia,
+		fnHasChanges:    HasChanges,
+		fnCommitAndPush: CommitAndPush,
+		fnCreatePR:      CreateOrUpdatePR,
+		fnFindPR: func(ctx context.Context, repoPath, branch string) (*PRInfo, error) {
+			return findExistingPR(ctx, repoPath, branch)
+		},
+		fnFetchReviews: FetchPRReviewComments,
+		fnPostPRComment: func(ctx context.Context, repoPath, prURL, body string) error {
+			_, err := ghExec(ctx, repoPath, "pr", "comment", prURL, "--body", body)
+			return err
+		},
+	}
 
-	// Empty workspace — skips commit/PR phases, tests only the Jira API interactions.
+	// Empty workspace — skips commit/PR phases entirely.
 	ws := &Workspace{TicketKey: ticket.Key}
 
 	result, err := o.ProcessTicket(ctx, ticket, ws)
@@ -633,11 +662,14 @@ func TestE2E_VC10_ProcessFeedback_NoWorkspace(t *testing.T) {
 	defer cancel()
 
 	ra := &stubAgent{name: "e2e-fix", output: "e2e stub rework output"}
-	o := NewOrchestrator(client, client.cfg,
-		WithValidationAgent(ra),
-		WithImplAgent(ra),
-		WithReviewFixAgent(ra),
-	)
+	// Use noMutationJiraClient so no comments or transitions are posted to real Jira.
+	o := &Orchestrator{
+		client:          &noMutationJiraClient{real: client},
+		cfg:             client.cfg,
+		reviewFixAgent:  ra,
+		validationAgent: ra,
+		implAgent:       ra,
+	}
 
 	// Empty workspace — no repos to process. ProcessFeedback should return cleanly.
 	ws := &Workspace{TicketKey: "VC-10"}
@@ -660,11 +692,14 @@ func TestE2E_VC10_WithReviewFixAgent(t *testing.T) {
 
 	ra := &stubAgent{name: "e2e-review-fix"}
 	ia := &stubAgent{name: "e2e-impl"}
-	o := NewOrchestrator(client, client.cfg,
-		WithValidationAgent(ia),
-		WithImplAgent(ia),
-		WithReviewFixAgent(ra),
-	)
+	// Construct directly so we can use noMutationJiraClient (NewOrchestrator requires *Client).
+	o := &Orchestrator{
+		client:          &noMutationJiraClient{real: client},
+		cfg:             client.cfg,
+		validationAgent: ia,
+		implAgent:       ia,
+		reviewFixAgent:  ra,
+	}
 	if o.reviewFixAgent == nil {
 		t.Error("reviewFixAgent should not be nil after WithReviewFixAgent")
 	}
