@@ -53,6 +53,10 @@ cmd/
       time_parse.go     # Duration/time string parsing for CLI flags
       run_output.go     # TUI rendering for run command
       run_reporting.go  # Report writing during/after runs
+      jira.go           # `nightshift jira` — Jira sub-command root
+      jira_run.go       # `nightshift jira run` — autonomous Jira pipeline
+      jira_preview.go   # `nightshift jira preview` — dry-run: shows tickets, deps, budget, phases
+      jira_preview_output.go # TUI rendering for jira preview command
   provider-calibration/ # Standalone utility: compare Claude/Codex session costs
 
 internal/
@@ -95,8 +99,12 @@ internal/
     workspace.go        # Workspace/RepoWorkspace; SetupWorkspace(), CleanupStaleWorkspaces()
     branch.go           # BranchName(), CommitMessage(), HasChanges(), CommitAndPush()
     orchestrator.go     # Orchestrator: Phase/TicketStatus/TicketResult types; ProcessTicket() drives
-                        # validate→plan→implement→commit→PR→status; jiraClient interface for testability
-    pr.go               # PRInfo/PRReviewState; CreateOrUpdatePR(), FetchPRReviewComments()
+                        # validate→plan→implement→commit→PR→status; jiraClient interface for testability;
+                        # detectResumeState() reads NightshiftComments to skip already-completed phases;
+                        # phaseOrder map drives skip() logic; parsePRURLsFromComment() recovers PR URLs
+    pr.go               # PRInfo/PRReviewState; CreateOrUpdatePR(), FetchPRReviewComments();
+                        # findExistingPR uses --state open to avoid matching closed PRs; ghExec is a
+                        # package-level var for test substitution
     comments.go         # CommentType/NightshiftComment; PostComment(), ParseNightshiftComments()
 
   integrations/         # Readers for external config and task sources
@@ -305,3 +313,9 @@ Agents MUST follow these rules:
 - `internal/logging.Logger` does NOT use zerolog's chainable API (`.Error().Str().Msg()`). Use `log.Infof(format, args...)` / `log.Errorf(format, args...)` directly. The zerolog chain is internal.
 - `internal/jira.Orchestrator` stores `jiraClient` as an interface (not `*Client`) for testability. `*Client` satisfies the interface implicitly. The `log` field is lazily initialized inside `ProcessTicket` when nil — safe to omit in tests.
 - `NIGHTSHIFT_JIRA_TOKEN` must be set for all e2e tests in `internal/jira/e2e_test.go`. Tests skip automatically when it is absent.
+- **Jira resume logic** — `detectResumeState` reads `<!-- nightshift:type=... -->` HTML markers from ticket comments to determine the furthest completed phase. `ParseNightshiftComments` requires the `🤖` prefix on the comment body. If comments are missing or malformed, processing restarts from phase 1 (safe but wasteful).
+- **Jira repo URL must use SSH** (`git@github.com:...`). HTTPS remotes fail silently in non-interactive contexts (`fatal: could not read Username`). Set `url: git@github.com:org/repo.git` in `jira.repos`.
+- **Claude agent permissions** — for autonomous file writes, set `dangerously_bypass_approvals_and_sandbox: true` and `dangerously_skip_permissions: true` on the claude provider. Without these, the agent asks for approval mid-run and the implementation phase produces no changes.
+- **`nightshift jira preview` invocation** — do NOT use `go run ./cmd/nightshift -- jira preview` (the `--` causes cobra to show root help). Use `go run ./cmd/nightshift jira preview --plain`.
+- **Jira French status names** — the VC project uses "À faire" (todo), "En cours" (in-progress), "Revue en cours" (review), "Terminé" (done). `isReviewStatus` checks for "revue" keyword so it correctly classifies "Revue en cours". `TransitionToReview` is called in `PhaseStatus` after PR creation; if the pipeline fails at commit, `PhaseStatus` is never reached and the ticket stays "En cours".
+- **`findExistingPR` requires `--state open`** — without it, closed PRs on the same branch match and `gh pr edit` runs on a closed PR instead of creating a new one. Fixed in VC-44.
