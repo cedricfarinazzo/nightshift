@@ -358,6 +358,201 @@ func TestParseTimeout(t *testing.T) {
 	}
 }
 
+// ── TransitionToInProgress error ─────────────────────────────────────────────
+
+func TestProcessTicket_TransitionToInProgressError(t *testing.T) {
+	sc := &stubJiraClient{transitionErr: errors.New("jira unavailable")}
+	va := &stubAgent{
+		name:   "validator",
+		output: `{"valid": true, "score": 9, "issues": [], "missing": [], "suggestions": []}`,
+	}
+	ia := &stubAgent{name: "impl"}
+	o := &Orchestrator{
+		client:          sc,
+		cfg:             JiraConfig{},
+		validationAgent: va,
+		implAgent:       ia,
+	}
+
+	result, err := o.ProcessTicket(context.Background(), Ticket{Key: "TEST-6", Summary: "Test"}, &Workspace{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Status != TicketFailed {
+		t.Errorf("Status = %q, want %q", result.Status, TicketFailed)
+	}
+	if result.Error == "" {
+		t.Error("result.Error should be set on transition failure")
+	}
+}
+
+// ── TransitionToReview error ──────────────────────────────────────────────────
+
+func TestProcessTicket_TransitionToReviewError(t *testing.T) {
+	callCount := 0
+	// inprogress succeeds, review fails
+	sc := &stubJiraClientPerMethod{
+		inprogressErr: nil,
+		reviewErr:     errors.New("review transition failed"),
+	}
+	va := &stubAgent{
+		name:   "validator",
+		output: `{"valid": true, "score": 8, "issues": [], "missing": [], "suggestions": []}`,
+	}
+	// plan and impl both succeed
+	ia := &callCountAgent{
+		calls: []*agents.ExecuteResult{{Output: "plan text"}, {Output: "impl done"}},
+		errs:  []error{nil, nil},
+		count: &callCount,
+	}
+	o := &Orchestrator{
+		client:          sc,
+		cfg:             JiraConfig{},
+		validationAgent: va,
+		implAgent:       ia,
+	}
+
+	result, err := o.ProcessTicket(context.Background(), Ticket{Key: "TEST-7", Summary: "Test"}, &Workspace{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Status != TicketFailed {
+		t.Errorf("Status = %q, want %q", result.Status, TicketFailed)
+	}
+	if result.Phase != PhaseStatus {
+		t.Errorf("Phase = %q, want %q", result.Phase, PhaseStatus)
+	}
+}
+
+// ── PostComment error is non-fatal ────────────────────────────────────────────
+
+func TestProcessTicket_PostCommentErrorIsNonFatal(t *testing.T) {
+	sc := &stubJiraClient{postCommentErr: errors.New("comment API down")}
+	va := &stubAgent{
+		name:   "validator",
+		output: `{"valid": true, "score": 8, "issues": [], "missing": [], "suggestions": []}`,
+	}
+	ia := &stubAgent{name: "impl", output: "done"}
+	o := &Orchestrator{
+		client:          sc,
+		cfg:             JiraConfig{},
+		validationAgent: va,
+		implAgent:       ia,
+	}
+
+	// Even though PostComment always fails, ProcessTicket should complete.
+	result, err := o.ProcessTicket(context.Background(), Ticket{Key: "TEST-8", Summary: "Test"}, &Workspace{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Status != TicketCompleted {
+		t.Errorf("Status = %q, want %q", result.Status, TicketCompleted)
+	}
+}
+
+// ── Comment types are posted in order ────────────────────────────────────────
+
+func TestProcessTicket_CommentTypes(t *testing.T) {
+	sc := &stubJiraClient{}
+	va := &stubAgent{
+		name:   "validator",
+		output: `{"valid": true, "score": 8, "issues": [], "missing": [], "suggestions": []}`,
+	}
+	ia := &stubAgent{name: "impl", output: "impl output"}
+	o := &Orchestrator{
+		client:          sc,
+		cfg:             JiraConfig{},
+		validationAgent: va,
+		implAgent:       ia,
+	}
+
+	_, err := o.ProcessTicket(context.Background(), Ticket{Key: "TEST-9", Summary: "Test"}, &Workspace{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	wantTypes := []CommentType{CommentValidation, CommentPlan, CommentImplement, CommentStatusChange}
+	if len(sc.postCommentCalls) < len(wantTypes) {
+		t.Fatalf("expected at least %d comments, got %d", len(wantTypes), len(sc.postCommentCalls))
+	}
+	for i, want := range wantTypes {
+		if sc.postCommentCalls[i].Type != want {
+			t.Errorf("comment[%d].Type = %q, want %q", i, sc.postCommentCalls[i].Type, want)
+		}
+	}
+}
+
+// ── buildImplementPrompt edge cases ──────────────────────────────────────────
+
+func TestBuildImplementPrompt_NilWorkspace(t *testing.T) {
+	o := &Orchestrator{cfg: JiraConfig{}}
+	ticket := Ticket{Key: "X-1", Description: "desc"}
+	// Should not panic with nil workspace.
+	prompt := o.buildImplementPrompt(ticket, "plan", nil)
+	if !strings.Contains(prompt, "X-1") {
+		t.Error("prompt missing ticket key")
+	}
+}
+
+func TestBuildImplementPrompt_AcceptanceCriteria(t *testing.T) {
+	o := &Orchestrator{cfg: JiraConfig{}}
+	ticket := Ticket{
+		Key:                "X-2",
+		Description:        "do something",
+		AcceptanceCriteria: "must pass all tests",
+	}
+	prompt := o.buildImplementPrompt(ticket, "plan", &Workspace{})
+	if !strings.Contains(prompt, "must pass all tests") {
+		t.Error("prompt missing acceptance criteria")
+	}
+}
+
+// ── buildPlanPrompt edge cases ────────────────────────────────────────────────
+
+func TestBuildPlanPrompt_NoComments(t *testing.T) {
+	o := &Orchestrator{cfg: JiraConfig{}}
+	ticket := Ticket{Key: "X-3", Summary: "bare", Description: "just a description"}
+	prompt := o.buildPlanPrompt(ticket)
+	if !strings.Contains(prompt, ticket.Key) {
+		t.Error("prompt missing key")
+	}
+	if strings.Contains(prompt, "## Comments") {
+		t.Error("prompt should not contain Comments section when there are none")
+	}
+}
+
+func TestBuildPlanPrompt_NoAcceptanceCriteria(t *testing.T) {
+	o := &Orchestrator{cfg: JiraConfig{}}
+	ticket := Ticket{Key: "X-4", Summary: "bare", Description: "desc"}
+	prompt := o.buildPlanPrompt(ticket)
+	if strings.Contains(prompt, "Acceptance Criteria") {
+		t.Error("prompt should not contain Acceptance Criteria section when empty")
+	}
+}
+
+// ── stubJiraClientPerMethod ───────────────────────────────────────────────────
+
+// stubJiraClientPerMethod allows independent error control per transition method.
+type stubJiraClientPerMethod struct {
+	postCommentCalls []NightshiftComment
+	inprogressErr    error
+	reviewErr        error
+}
+
+func (s *stubJiraClientPerMethod) PostComment(_ context.Context, _ string, comment NightshiftComment) error {
+	s.postCommentCalls = append(s.postCommentCalls, comment)
+	return nil
+}
+func (s *stubJiraClientPerMethod) HandleInvalidTicket(_ context.Context, _ string, _ *ValidationResult) error {
+	return nil
+}
+func (s *stubJiraClientPerMethod) TransitionToInProgress(_ context.Context, _ string) error {
+	return s.inprogressErr
+}
+func (s *stubJiraClientPerMethod) TransitionToReview(_ context.Context, _ string) error {
+	return s.reviewErr
+}
+
 // ── helpers ───────────────────────────────────────────────────────────────────
 
 // callCountAgent returns different results on successive Execute calls.

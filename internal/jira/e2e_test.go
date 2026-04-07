@@ -537,6 +537,82 @@ func TestE2E_VC9_PRTitle_Format(t *testing.T) {
 	}
 }
 
+// ── VC-8: Jira orchestrator ──────────────────────────────────────────────────
+
+func TestE2E_VC8_ProcessTicket_WithStubAgents(t *testing.T) {
+	client := e2eClient(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	tickets, err := client.FetchTodoTickets(ctx)
+	if err != nil {
+		t.Fatalf("FetchTodoTickets: %v", err)
+	}
+	if len(tickets) == 0 {
+		t.Skip("no todo tickets available; skipping orchestrator e2e test")
+	}
+	ticket := tickets[0]
+	t.Logf("processing ticket %s: %s", ticket.Key, ticket.Summary)
+
+	// Both agents return canned responses — no LLM key required.
+	va := &stubAgent{
+		name:   "e2e-validator",
+		output: `{"valid": true, "score": 8, "issues": [], "missing": [], "suggestions": []}`,
+	}
+	ia := &stubAgent{
+		name:   "e2e-impl",
+		output: "e2e stub plan/impl output",
+	}
+
+	o := NewOrchestrator(client, client.cfg,
+		WithValidationAgent(va),
+		WithImplAgent(ia),
+	)
+
+	// Empty workspace — skips commit/PR phases, tests only the Jira API interactions.
+	ws := &Workspace{TicketKey: ticket.Key}
+
+	result, err := o.ProcessTicket(ctx, ticket, ws)
+	if err != nil {
+		t.Fatalf("ProcessTicket: %v", err)
+	}
+	t.Logf("result: status=%s phase=%s duration=%s error=%q", result.Status, result.Phase, result.Duration, result.Error)
+
+	if result.Status != TicketCompleted {
+		t.Errorf("Status = %q, want %q; error: %s", result.Status, TicketCompleted, result.Error)
+	}
+	if result.Plan == "" {
+		t.Error("Plan should not be empty")
+	}
+	if result.Duration == 0 {
+		t.Error("Duration should be > 0")
+	}
+}
+
+func TestE2E_VC8_NewOrchestrator_Defaults(t *testing.T) {
+	client := e2eClient(t)
+
+	va := &stubAgent{name: "va"}
+	ia := &stubAgent{name: "ia"}
+
+	o := NewOrchestrator(client, client.cfg,
+		WithValidationAgent(va),
+		WithImplAgent(ia),
+	)
+	if o == nil {
+		t.Fatal("NewOrchestrator returned nil")
+	}
+	if o.client == nil {
+		t.Error("client should not be nil")
+	}
+	if o.validationAgent == nil {
+		t.Error("validationAgent should not be nil")
+	}
+	if o.implAgent == nil {
+		t.Error("implAgent should not be nil")
+	}
+}
+
 func statusNames(ss []Status) []string {
 	names := make([]string, len(ss))
 	for i, s := range ss {
