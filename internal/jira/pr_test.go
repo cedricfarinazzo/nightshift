@@ -1,6 +1,7 @@
 package jira
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
@@ -280,5 +281,71 @@ func TestParsePRReviewState_MissingFields(t *testing.T) {
 	}
 	if rs.Reviews != nil || rs.Comments != nil {
 		t.Error("expected nil slices for missing fields")
+	}
+}
+
+// ── findExistingPR ────────────────────────────────────────────────────────────
+
+func TestFindExistingPR_OpenPR(t *testing.T) {
+	orig := ghExec
+	defer func() { ghExec = orig }()
+
+	ghExec = func(_ context.Context, _ string, args ...string) (string, error) {
+		return `[{"number":42,"url":"https://github.com/org/repo/pull/42"}]`, nil
+	}
+
+	pr, err := findExistingPR(context.Background(), "/repo", "feature/VC-44")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if pr == nil {
+		t.Fatal("expected PRInfo, got nil")
+	}
+	if pr.Number != 42 {
+		t.Errorf("Number = %d, want 42", pr.Number)
+	}
+	if pr.URL != "https://github.com/org/repo/pull/42" {
+		t.Errorf("URL = %q", pr.URL)
+	}
+}
+
+func TestFindExistingPR_NoPR(t *testing.T) {
+	orig := ghExec
+	defer func() { ghExec = orig }()
+
+	ghExec = func(_ context.Context, _ string, args ...string) (string, error) {
+		return `[]`, nil
+	}
+
+	pr, err := findExistingPR(context.Background(), "/repo", "feature/VC-44")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if pr != nil {
+		t.Errorf("expected nil for empty list, got %+v", pr)
+	}
+}
+
+func TestFindExistingPR_StateOpenFlagPassed(t *testing.T) {
+	orig := ghExec
+	defer func() { ghExec = orig }()
+
+	var capturedArgs []string
+	ghExec = func(_ context.Context, _ string, args ...string) (string, error) {
+		capturedArgs = args
+		return `[]`, nil
+	}
+
+	_, _ = findExistingPR(context.Background(), "/repo", "feature/VC-44")
+
+	found := false
+	for i, a := range capturedArgs {
+		if a == "--state" && i+1 < len(capturedArgs) && capturedArgs[i+1] == "open" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected --state open in gh pr list args, got: %v", capturedArgs)
 	}
 }
