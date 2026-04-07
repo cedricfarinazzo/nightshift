@@ -62,6 +62,11 @@ type Orchestrator struct {
 	reviewFixAgent  agents.Agent
 	statusMap       *StatusMap
 	log             *logging.Logger
+
+	// ops are injectable for testing; set to real functions by NewOrchestrator.
+	fnHasChanges    func(ctx context.Context, repoPath string) (bool, error)
+	fnCommitAndPush func(ctx context.Context, repoPath, message string) error
+	fnCreatePR      func(ctx context.Context, repo RepoWorkspace, ticket Ticket, jiraSite string) (*PRInfo, error)
 }
 
 // OrchestratorOption configures an Orchestrator.
@@ -90,9 +95,12 @@ func WithStatusMap(sm *StatusMap) OrchestratorOption {
 // NewOrchestrator creates an Orchestrator with the given client, config, and options.
 func NewOrchestrator(client *Client, cfg JiraConfig, opts ...OrchestratorOption) *Orchestrator {
 	o := &Orchestrator{
-		client: client,
-		cfg:    cfg,
-		log:    logging.Component("jira.orchestrator"),
+		client:          client,
+		cfg:             cfg,
+		log:             logging.Component("jira.orchestrator"),
+		fnHasChanges:    HasChanges,
+		fnCommitAndPush: CommitAndPush,
+		fnCreatePR:      CreateOrUpdatePR,
 	}
 	for _, opt := range opts {
 		opt(o)
@@ -106,6 +114,11 @@ func NewOrchestrator(client *Client, cfg JiraConfig, opts ...OrchestratorOption)
 func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Workspace) (*TicketResult, error) {
 	if o.log == nil {
 		o.log = logging.Component("jira.orchestrator")
+	}
+	if o.fnHasChanges == nil {
+		o.fnHasChanges = HasChanges
+		o.fnCommitAndPush = CommitAndPush
+		o.fnCreatePR = CreateOrUpdatePR
 	}
 
 	start := time.Now()
@@ -197,7 +210,7 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 	result.Phase = PhaseCommit
 	var changedRepos []RepoWorkspace
 	for _, repo := range ws.Repos {
-		changed, err := HasChanges(ctx, repo.Path)
+		changed, err := o.fnHasChanges(ctx, repo.Path)
 		if err != nil {
 			o.postErrorComment(ctx, ticket.Key, PhaseCommit, err)
 			result.Status = TicketFailed
@@ -209,7 +222,7 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 			continue
 		}
 		msg := CommitMessage(ticket.Key, "", ticket.Summary)
-		if err := CommitAndPush(ctx, repo.Path, msg); err != nil {
+		if err := o.fnCommitAndPush(ctx, repo.Path, msg); err != nil {
 			o.postErrorComment(ctx, ticket.Key, PhaseCommit, err)
 			result.Status = TicketFailed
 			result.Error = err.Error()
@@ -222,7 +235,7 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 	// Phase 5: PR
 	result.Phase = PhasePR
 	for _, repo := range changedRepos {
-		prInfo, err := CreateOrUpdatePR(ctx, repo, ticket, o.cfg.Site)
+		prInfo, err := o.fnCreatePR(ctx, repo, ticket, o.cfg.Site)
 		if err != nil {
 			o.postErrorComment(ctx, ticket.Key, PhasePR, err)
 			result.Status = TicketFailed

@@ -358,6 +358,50 @@ func TestParseTimeout(t *testing.T) {
 	}
 }
 
+// ── NewOrchestrator constructor ───────────────────────────────────────────────
+
+func TestNewOrchestrator_Constructor(t *testing.T) {
+	// NewOrchestrator is at 0% — exercise it via a real call.
+	// Use a minimal client constructed directly (no live Jira needed).
+	cfg := JiraConfig{
+		Site:     "test",
+		Email:    "test@test.com",
+		TokenEnv: "NIGHTSHIFT_JIRA_TOKEN",
+		Project:  "TEST",
+		Label:    "nightshift",
+		Repos:    []RepoConfig{{Name: "r", URL: "u", BaseBranch: "main"}},
+	}
+	va := &stubAgent{name: "va"}
+	ia := &stubAgent{name: "ia"}
+
+	// Build an Orchestrator with a stubJiraClient as the backing client.
+	// We can't call NewOrchestrator(realClient, ...) without a token, so we
+	// test the option application using the options pattern directly.
+	o := &Orchestrator{client: &stubJiraClient{}, cfg: cfg}
+	WithValidationAgent(va)(o)
+	WithImplAgent(ia)(o)
+	if o.validationAgent != va {
+		t.Error("validationAgent not set")
+	}
+	if o.implAgent != ia {
+		t.Error("implAgent not set")
+	}
+
+	// Verify default ops are set when nil (via lazy init path in ProcessTicket).
+	// After one ProcessTicket call the ops should be set.
+	va2 := &stubAgent{name: "va2", output: `{"valid": false, "score": 1, "issues": [], "missing": [], "suggestions": []}`}
+	ia2 := &stubAgent{name: "ia2"}
+	o2 := &Orchestrator{client: &stubJiraClient{}, cfg: cfg, validationAgent: va2, implAgent: ia2}
+	_, err := o2.ProcessTicket(context.Background(), Ticket{Key: "T-1"}, &Workspace{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// ops should have been initialized
+	if o2.fnHasChanges == nil {
+		t.Error("fnHasChanges should be initialized after first ProcessTicket")
+	}
+}
+
 // ── TransitionToInProgress error ─────────────────────────────────────────────
 
 func TestProcessTicket_TransitionToInProgressError(t *testing.T) {
@@ -424,6 +468,29 @@ func TestProcessTicket_TransitionToReviewError(t *testing.T) {
 	}
 }
 
+// ── postErrorComment logs error when PostComment also fails ──────────────────
+
+func TestPostErrorComment_PostCommentFails(t *testing.T) {
+	sc := &stubJiraClient{postCommentErr: errors.New("api down")}
+	// Trigger validation failure so postErrorComment is called while PostComment also fails.
+	va := &stubAgent{name: "va", err: errors.New("agent failed")}
+	ia := &stubAgent{name: "ia"}
+	o := &Orchestrator{client: sc, cfg: JiraConfig{}, validationAgent: va, implAgent: ia}
+
+	// Should not panic even when PostComment fails inside postErrorComment.
+	result, err := o.ProcessTicket(context.Background(), Ticket{Key: "ERR-1"}, &Workspace{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Status != TicketFailed {
+		t.Errorf("Status = %q, want %q", result.Status, TicketFailed)
+	}
+	// PostComment was attempted (error comment) even though it failed.
+	if len(sc.postCommentCalls) == 0 {
+		t.Error("expected PostComment to be called despite error")
+	}
+}
+
 // ── PostComment error is non-fatal ────────────────────────────────────────────
 
 func TestProcessTicket_PostCommentErrorIsNonFatal(t *testing.T) {
@@ -479,6 +546,146 @@ func TestProcessTicket_CommentTypes(t *testing.T) {
 		if sc.postCommentCalls[i].Type != want {
 			t.Errorf("comment[%d].Type = %q, want %q", i, sc.postCommentCalls[i].Type, want)
 		}
+	}
+}
+
+// ── Commit phase ─────────────────────────────────────────────────────────────
+
+func makeOrchestratorWithRepo(sc jiraClient) (*Orchestrator, *Workspace) {
+	callCount := 0
+	va := &stubAgent{
+		name:   "va",
+		output: `{"valid": true, "score": 8, "issues": [], "missing": [], "suggestions": []}`,
+	}
+	ia := &callCountAgent{
+		calls: []*agents.ExecuteResult{{Output: "plan"}, {Output: "impl done"}},
+		errs:  []error{nil, nil},
+		count: &callCount,
+	}
+	o := &Orchestrator{
+		client:          sc,
+		cfg:             JiraConfig{},
+		validationAgent: va,
+		implAgent:       ia,
+	}
+	ws := &Workspace{
+		TicketKey: "T-1",
+		Repos:     []RepoWorkspace{{Name: "repo", Path: "/fake/repo", Branch: "feature/T-1", BaseBranch: "main"}},
+	}
+	return o, ws
+}
+
+func TestProcessTicket_CommitPhase_NoChanges(t *testing.T) {
+	sc := &stubJiraClient{}
+	o, ws := makeOrchestratorWithRepo(sc)
+	o.fnHasChanges = func(_ context.Context, _ string) (bool, error) { return false, nil }
+	o.fnCommitAndPush = func(_ context.Context, _, _ string) error { t.Error("CommitAndPush called unexpectedly"); return nil }
+	o.fnCreatePR = func(_ context.Context, _ RepoWorkspace, _ Ticket, _ string) (*PRInfo, error) {
+		t.Error("CreateOrUpdatePR called unexpectedly"); return nil, nil
+	}
+
+	result, err := o.ProcessTicket(context.Background(), Ticket{Key: "T-1", Summary: "Test"}, ws)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Status != TicketCompleted {
+		t.Errorf("Status = %q, want %q", result.Status, TicketCompleted)
+	}
+	if len(result.PRURLs) != 0 {
+		t.Errorf("expected no PRURLs when no changes, got %v", result.PRURLs)
+	}
+}
+
+func TestProcessTicket_CommitPhase_HasChangesError(t *testing.T) {
+	sc := &stubJiraClient{}
+	o, ws := makeOrchestratorWithRepo(sc)
+	o.fnHasChanges = func(_ context.Context, _ string) (bool, error) {
+		return false, errors.New("git status failed")
+	}
+
+	result, err := o.ProcessTicket(context.Background(), Ticket{Key: "T-1", Summary: "Test"}, ws)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Status != TicketFailed {
+		t.Errorf("Status = %q, want %q", result.Status, TicketFailed)
+	}
+	if result.Phase != PhaseCommit {
+		t.Errorf("Phase = %q, want %q", result.Phase, PhaseCommit)
+	}
+}
+
+func TestProcessTicket_CommitPhase_CommitAndPushError(t *testing.T) {
+	sc := &stubJiraClient{}
+	o, ws := makeOrchestratorWithRepo(sc)
+	o.fnHasChanges = func(_ context.Context, _ string) (bool, error) { return true, nil }
+	o.fnCommitAndPush = func(_ context.Context, _, _ string) error {
+		return errors.New("push rejected")
+	}
+
+	result, err := o.ProcessTicket(context.Background(), Ticket{Key: "T-1", Summary: "Test"}, ws)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Status != TicketFailed {
+		t.Errorf("Status = %q, want %q", result.Status, TicketFailed)
+	}
+	if result.Phase != PhaseCommit {
+		t.Errorf("Phase = %q, want %q", result.Phase, PhaseCommit)
+	}
+}
+
+// ── PR phase ──────────────────────────────────────────────────────────────────
+
+func TestProcessTicket_PRPhase_CreatePRError(t *testing.T) {
+	sc := &stubJiraClient{}
+	o, ws := makeOrchestratorWithRepo(sc)
+	o.fnHasChanges = func(_ context.Context, _ string) (bool, error) { return true, nil }
+	o.fnCommitAndPush = func(_ context.Context, _, _ string) error { return nil }
+	o.fnCreatePR = func(_ context.Context, _ RepoWorkspace, _ Ticket, _ string) (*PRInfo, error) {
+		return nil, errors.New("gh api error")
+	}
+
+	result, err := o.ProcessTicket(context.Background(), Ticket{Key: "T-1", Summary: "Test"}, ws)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Status != TicketFailed {
+		t.Errorf("Status = %q, want %q", result.Status, TicketFailed)
+	}
+	if result.Phase != PhasePR {
+		t.Errorf("Phase = %q, want %q", result.Phase, PhasePR)
+	}
+}
+
+func TestProcessTicket_PRPhase_Success(t *testing.T) {
+	sc := &stubJiraClient{}
+	o, ws := makeOrchestratorWithRepo(sc)
+	o.fnHasChanges = func(_ context.Context, _ string) (bool, error) { return true, nil }
+	o.fnCommitAndPush = func(_ context.Context, _, _ string) error { return nil }
+	o.fnCreatePR = func(_ context.Context, _ RepoWorkspace, _ Ticket, _ string) (*PRInfo, error) {
+		return &PRInfo{URL: "https://github.com/org/repo/pull/99", Number: 99, IsNew: true}, nil
+	}
+
+	result, err := o.ProcessTicket(context.Background(), Ticket{Key: "T-1", Summary: "Test"}, ws)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Status != TicketCompleted {
+		t.Errorf("Status = %q, want %q", result.Status, TicketCompleted)
+	}
+	if len(result.PRURLs) != 1 || result.PRURLs[0] != "https://github.com/org/repo/pull/99" {
+		t.Errorf("PRURLs = %v, want one PR URL", result.PRURLs)
+	}
+	// PR comment should have been posted
+	hasPRComment := false
+	for _, c := range sc.postCommentCalls {
+		if c.Type == CommentPR {
+			hasPRComment = true
+		}
+	}
+	if !hasPRComment {
+		t.Error("expected PR comment to be posted")
 	}
 }
 

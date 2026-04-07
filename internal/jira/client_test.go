@@ -15,6 +15,20 @@ func validCfg() JiraConfig {
 	}
 }
 
+func TestClientAccessors(t *testing.T) {
+	c := &Client{cfg: JiraConfig{Project: "MYPROJ", Label: "nightshift"}}
+	if got := c.ProjectKey(); got != "MYPROJ" {
+		t.Errorf("ProjectKey() = %q, want MYPROJ", got)
+	}
+	if got := c.Label(); got != "nightshift" {
+		t.Errorf("Label() = %q, want nightshift", got)
+	}
+	// Raw() returns nil when no underlying client is set — just verify no panic.
+	if raw := c.Raw(); raw != nil {
+		t.Error("Raw() should be nil for uninitialized client")
+	}
+}
+
 func TestNewClient(t *testing.T) {
 	tests := []struct {
 		name    string
