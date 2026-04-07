@@ -454,9 +454,8 @@ func TestSelectProvider_IgnoreBudget_StillReturnsProvider(t *testing.T) {
 	}
 	if choice == nil {
 		t.Fatal("expected a provider choice, got nil")
-	}
-	// Should pick the first preference (claude by default)
-	if choice.name != "claude" {
+	} else if choice.name != "claude" {
+		// Should pick the first preference (claude by default)
 		t.Fatalf("provider = %s, want claude (first in default preference)", choice.name)
 	}
 }

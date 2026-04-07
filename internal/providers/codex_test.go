@@ -976,10 +976,8 @@ func TestCodexParseSessionTokenUsage_NegativeDeltaFallsBackToLatest(t *testing.T
 	}
 	if usage == nil {
 		t.Fatal("expected non-nil token usage")
-	}
-
-	// Falls back to latest event totals: (1000-800) + 200 + 50 = 450
-	if usage.TotalTokens != 450 {
+	} else if usage.TotalTokens != 450 {
+		// Falls back to latest event totals: (1000-800) + 200 + 50 = 450
 		t.Fatalf("TotalTokens = %d, want 450", usage.TotalTokens)
 	}
 }
@@ -1003,10 +1001,8 @@ func TestCodexParseSessionTokenUsage_ClampsNegativeNonCachedInput(t *testing.T) 
 	}
 	if usage == nil {
 		t.Fatal("expected non-nil token usage")
-	}
-
-	// non-cached input is clamped to 0, so total is output + reasoning.
-	if usage.TotalTokens != 50 {
+	} else if usage.TotalTokens != 50 {
+		// non-cached input is clamped to 0, so total is output + reasoning.
 		t.Fatalf("TotalTokens = %d, want 50", usage.TotalTokens)
 	}
 }
@@ -1405,19 +1401,19 @@ func TestCodexParseSessionTokenUsage_CachedExceedsInput(t *testing.T) {
 	}
 	if usage == nil {
 		t.Fatal("expected non-nil token usage")
-	}
-
-	// AC-1: CachedInputTokens must not exceed InputTokens
-	if usage.CachedInputTokens > usage.InputTokens {
-		t.Errorf("CachedInputTokens %d > InputTokens %d", usage.CachedInputTokens, usage.InputTokens)
-	}
-	// cached capped at input=500
-	if usage.CachedInputTokens != 500 {
-		t.Errorf("CachedInputTokens = %d, want 500 (capped at input)", usage.CachedInputTokens)
-	}
-	// TotalTokens = (500-500) non-cached + 100 output + 0 reasoning = 100
-	if usage.TotalTokens != 100 {
-		t.Errorf("TotalTokens = %d, want 100", usage.TotalTokens)
+	} else {
+		// AC-1: CachedInputTokens must not exceed InputTokens
+		if usage.CachedInputTokens > usage.InputTokens {
+			t.Errorf("CachedInputTokens %d > InputTokens %d", usage.CachedInputTokens, usage.InputTokens)
+		}
+		// cached capped at input=500
+		if usage.CachedInputTokens != 500 {
+			t.Errorf("CachedInputTokens = %d, want 500 (capped at input)", usage.CachedInputTokens)
+		}
+		// TotalTokens = (500-500) non-cached + 100 output + 0 reasoning = 100
+		if usage.TotalTokens != 100 {
+			t.Errorf("TotalTokens = %d, want 100", usage.TotalTokens)
+		}
 	}
 }
 

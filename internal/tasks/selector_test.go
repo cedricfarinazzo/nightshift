@@ -613,15 +613,16 @@ func TestSelectRandom(t *testing.T) {
 		task := sel.SelectRandom(1_000_000, project)
 		if task == nil {
 			t.Fatal("SelectRandom() returned nil")
-		}
-		seen[task.Definition.Type] = true
-		// Verify score is populated
-		if task.Score <= 0 {
-			t.Errorf("SelectRandom() Score = %f, want > 0", task.Score)
-		}
-		// Verify project is set
-		if task.Project != project {
-			t.Errorf("SelectRandom() Project = %s, want %s", task.Project, project)
+		} else {
+			seen[task.Definition.Type] = true
+			// Verify score is populated
+			if task.Score <= 0 {
+				t.Errorf("SelectRandom() Score = %f, want > 0", task.Score)
+			}
+			// Verify project is set
+			if task.Project != project {
+				t.Errorf("SelectRandom() Project = %s, want %s", task.Project, project)
+			}
 		}
 	}
 
@@ -662,8 +663,7 @@ func TestSelectRandomSingleTask(t *testing.T) {
 	task := sel.SelectRandom(100_000, project)
 	if task == nil {
 		t.Fatal("SelectRandom() returned nil with one eligible task")
-	}
-	if task.Definition.Type != TaskLintFix {
+	} else if task.Definition.Type != TaskLintFix {
 		t.Errorf("SelectRandom() = %s, want %s", task.Definition.Type, TaskLintFix)
 	}
 }
@@ -695,8 +695,7 @@ func TestSelectRandomRespectsFilters(t *testing.T) {
 		task := sel.SelectRandom(100_000, project)
 		if task == nil {
 			t.Fatal("SelectRandom() returned nil")
-		}
-		if task.Definition.Type != TaskDocsBackfill {
+		} else if task.Definition.Type != TaskDocsBackfill {
 			t.Errorf("SelectRandom() = %s, want %s (lint-fix on cooldown)", task.Definition.Type, TaskDocsBackfill)
 		}
 	}

@@ -85,6 +85,20 @@ internal/
     migrations.go       # Versioned schema migrations; auto-applied on Open()
     import.go           # Bulk data import utilities
 
+  jira/                 # Jira autonomous system — drives ticket lifecycle via AI agents
+    client.go           # Client struct wrapping go-atlassian; auth, Ping, AddComment
+    config.go           # JiraConfig, RepoConfig, PhaseConfig structs; Validate(), Defaults()
+    status.go           # Status/StatusMap; DiscoverStatuses(); TransitionTo{InProgress,Review,Done,NeedsInfo}()
+    tickets.go          # Ticket/Comment/IssueLink structs; FetchTodoTickets(), FetchReviewTickets()
+    dependencies.go     # DependencyGraph: BuildDependencyGraph(), ResolveOrder(), DetectCycles()
+    validation.go       # ValidateTicket() (LLM-based, score ≥6 = valid); HandleInvalidTicket()
+    workspace.go        # Workspace/RepoWorkspace; SetupWorkspace(), CleanupStaleWorkspaces()
+    branch.go           # BranchName(), CommitMessage(), HasChanges(), CommitAndPush()
+    orchestrator.go     # Orchestrator: Phase/TicketStatus/TicketResult types; ProcessTicket() drives
+                        # validate→plan→implement→commit→PR→status; jiraClient interface for testability
+    pr.go               # PRInfo/PRReviewState; CreateOrUpdatePR(), FetchPRReviewComments()
+    comments.go         # CommentType/NightshiftComment; PostComment(), ParseNightshiftComments()
+
   integrations/         # Readers for external config and task sources
     integrations.go     # Reader interface + Result/TaskItem/Hint types
     claudemd.go         # ClaudeMDReader: reads CLAUDE.md from project root; enabled via cfg.Integrations.ClaudeMD
@@ -288,3 +302,6 @@ Agents MUST follow these rules:
 - Agent binaries (`claude`, `codex`, `gh`) must be in PATH. Always use the `CommandRunner` interface for testability; never call `exec.Command` directly in agent code.
 - Credentials are **env-var only** — `CredentialManager` never reads from config files or disk.
 - `internal/integrations/agentsmd.go` still exists and looks for `AGENTS.md` at runtime. It returns `nil` if the file is absent — this is intentional and not an error.
+- `internal/logging.Logger` does NOT use zerolog's chainable API (`.Error().Str().Msg()`). Use `log.Infof(format, args...)` / `log.Errorf(format, args...)` directly. The zerolog chain is internal.
+- `internal/jira.Orchestrator` stores `jiraClient` as an interface (not `*Client`) for testability. `*Client` satisfies the interface implicitly. The `log` field is lazily initialized inside `ProcessTicket` when nil — safe to omit in tests.
+- `NIGHTSHIFT_JIRA_TOKEN` must be set for all e2e tests in `internal/jira/e2e_test.go`. Tests skip automatically when it is absent.

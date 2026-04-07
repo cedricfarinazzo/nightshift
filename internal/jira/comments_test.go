@@ -156,8 +156,7 @@ func TestGetLastCommentOfType(t *testing.T) {
 	last := GetLastCommentOfType(comments, CommentPlan)
 	if last == nil {
 		t.Fatal("expected non-nil result")
-	}
-	if last.Timestamp.Before(now.Add(-30 * time.Minute)) {
+	} else if last.Timestamp.Before(now.Add(-30 * time.Minute)) {
 		t.Error("should return the most recent plan comment")
 	}
 }

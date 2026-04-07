@@ -86,6 +86,18 @@ func TestBuildDependencyGraph_CycleDetection(t *testing.T) {
 	}
 }
 
+func TestContainsKey(t *testing.T) {
+	if !containsKey([]string{"a", "b", "c"}, "b") {
+		t.Error("containsKey should return true for existing key")
+	}
+	if containsKey([]string{"a", "b", "c"}, "z") {
+		t.Error("containsKey should return false for missing key")
+	}
+	if containsKey(nil, "a") {
+		t.Error("containsKey should return false for nil slice")
+	}
+}
+
 func TestBuildDependencyGraph_ExternalBlocker(t *testing.T) {
 	// A-1 is blocked by EXTERNAL-99 which is not in the set
 	tickets := []Ticket{
