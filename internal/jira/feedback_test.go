@@ -131,7 +131,7 @@ func newFeedbackOrchestrator(
 		cfg:            JiraConfig{},
 		reviewFixAgent: reviewAgent,
 		fnHasChanges: func(_ context.Context, _ string) (bool, error) {
-			return false, nil
+			return true, nil
 		},
 		fnCommitAndPush: fnCommitAndPush,
 		fnCreatePR: func(_ context.Context, _ RepoWorkspace, _ Ticket, _ string) (*PRInfo, error) {
@@ -317,6 +317,48 @@ func TestProcessFeedback_ChangesRequested(t *testing.T) {
 	}
 	if result.Duration == 0 {
 		t.Error("Duration should be > 0")
+	}
+}
+
+func TestProcessFeedback_ChangesRequestedNoFileChanges(t *testing.T) {
+	sc := &stubJiraClient{}
+	ra := &stubAgent{name: "fix", output: "no files touched"}
+
+	fnFindPR := func(_ context.Context, _, _ string) (*PRInfo, error) {
+		return &PRInfo{URL: "https://github.com/org/repo/pull/5", Number: 5}, nil
+	}
+	fnFetchReviews := func(_ context.Context, _, _ string) (*PRReviewState, error) {
+		return &PRReviewState{
+			ReviewDecision: "CHANGES_REQUESTED",
+			Reviews:        []Review{{Author: "alice", State: "CHANGES_REQUESTED", Body: "fix it"}},
+		}, nil
+	}
+	commitCalled := false
+	fnCommit := func(_ context.Context, _, _ string) error {
+		commitCalled = true
+		return nil
+	}
+
+	o := newFeedbackOrchestrator(sc, ra, fnFindPR, fnFetchReviews, fnCommit, noPRComment)
+	// Override fnHasChanges to report no changes.
+	o.fnHasChanges = func(_ context.Context, _ string) (bool, error) { return false, nil }
+
+	ws := &Workspace{
+		TicketKey: "X-1",
+		Repos:     []RepoWorkspace{{Name: "repo", Path: "/tmp/repo", Branch: "feature/X-1"}},
+	}
+	result, err := o.ProcessFeedback(context.Background(), Ticket{Key: "X-1"}, ws)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.FixesMade != 1 {
+		t.Errorf("FixesMade = %d, want 1 (agent ran)", result.FixesMade)
+	}
+	if result.PushedCommits != 0 {
+		t.Errorf("PushedCommits = %d, want 0 (no file changes)", result.PushedCommits)
+	}
+	if commitCalled {
+		t.Error("commit should not be called when agent produced no file changes")
 	}
 }
 

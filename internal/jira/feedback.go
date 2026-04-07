@@ -30,6 +30,24 @@ func (o *Orchestrator) ProcessFeedback(ctx context.Context, ticket Ticket, ws *W
 	if o.log == nil {
 		o.log = logging.Component("jira.orchestrator")
 	}
+	if o.fnHasChanges == nil {
+		o.fnHasChanges = HasChanges
+		o.fnCommitAndPush = CommitAndPush
+	}
+	if o.fnFindPR == nil {
+		o.fnFindPR = func(ctx context.Context, repoPath, branch string) (*PRInfo, error) {
+			return findExistingPR(ctx, repoPath, branch)
+		}
+	}
+	if o.fnFetchReviews == nil {
+		o.fnFetchReviews = FetchPRReviewComments
+	}
+	if o.fnPostPRComment == nil {
+		o.fnPostPRComment = func(ctx context.Context, repoPath, prURL, body string) error {
+			_, err := ghExec(ctx, repoPath, "pr", "comment", prURL, "--body", body)
+			return err
+		}
+	}
 
 	result := &FeedbackResult{TicketKey: ticket.Key}
 	start := time.Now()
@@ -78,13 +96,20 @@ func (o *Orchestrator) ProcessFeedback(ctx context.Context, ticket Ticket, ws *W
 				return nil, fmt.Errorf("jira: feedback: rework agent %s: %w", repo.Name, err)
 			}
 
-			// Commit and push the fixes.
-			msg := CommitMessage(ticket.Key, "", "address review feedback")
-			if err := o.fnCommitAndPush(ctx, repo.Path, msg); err != nil {
-				return nil, fmt.Errorf("jira: feedback: push fixes %s: %w", repo.Name, err)
-			}
-			result.PushedCommits++
 			result.FixesMade++
+
+			// Only commit when the agent produced file changes.
+			changed, err := o.fnHasChanges(ctx, repo.Path)
+			if err != nil {
+				return nil, fmt.Errorf("jira: feedback: check changes %s: %w", repo.Name, err)
+			}
+			if changed {
+				msg := CommitMessage(ticket.Key, "", "address review feedback")
+				if err := o.fnCommitAndPush(ctx, repo.Path, msg); err != nil {
+					return nil, fmt.Errorf("jira: feedback: push fixes %s: %w", repo.Name, err)
+				}
+				result.PushedCommits++
+			}
 
 			// Post a summary comment on the GitHub PR.
 			if err := o.fnPostPRComment(ctx, repo.Path, prInfo.URL, buildPRReworkComment(agentResult.Output)); err != nil {
@@ -93,7 +118,7 @@ func (o *Orchestrator) ProcessFeedback(ctx context.Context, ticket Ticket, ws *W
 		}
 	}
 
-	result.Summary = fmt.Sprintf("%d review item(s) addressed across %d commit(s).", result.FixesMade, result.PushedCommits)
+	result.Summary = fmt.Sprintf("Review feedback addressed in %d repo(s) across %d commit(s).", result.FixesMade, result.PushedCommits)
 
 	// Post a Jira rework comment when fixes were made.
 	if result.FixesMade > 0 {
