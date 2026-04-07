@@ -47,11 +47,18 @@ func renderJiraPreviewText(result *jiraPreviewResult, opts jiraPreviewTextOption
 	}
 	b.WriteString("\n")
 
-	// Budget.
+	// Budget (summary always shown; details behind --explain).
 	if result.Budget != nil {
 		b.WriteString(styles.Section.Render("Budget"))
 		b.WriteString("\n")
-		renderBudgetText(b, result.Budget, "  ")
+		if opts.Explain {
+			renderBudgetText(b, result.Budget, "  ")
+		} else {
+			fmt.Fprintf(b, "  %s available (%.1f%% used, source=%s)\n",
+				formatTokens64(result.Budget.Allowance),
+				result.Budget.UsedPercent,
+				result.Budget.BudgetSource)
+		}
 		b.WriteString("\n")
 	} else if result.BudgetErr != "" {
 		b.WriteString(styles.Section.Render("Budget"))
@@ -73,6 +80,13 @@ func renderJiraPreviewText(result *jiraPreviewResult, opts jiraPreviewTextOption
 			b.WriteString(styles.Accent.Render(fmt.Sprintf("  %d. %s", i+1, t.Key)))
 			fmt.Fprintf(b, "  %s\n", t.Summary)
 			fmt.Fprintf(b, "     Status: %s  Branch: %s\n", styles.Label.Render(t.Status), styles.Value.Render(t.BranchName))
+			if t.ValidationScore != nil {
+				scoreStyle := styles.Value
+				if t.ValidationMsg != "" {
+					scoreStyle = styles.Warn
+				}
+				fmt.Fprintf(b, "     Validation: %s\n", scoreStyle.Render(fmt.Sprintf("score %d/10", *t.ValidationScore)))
+			}
 			if len(t.Dependencies) > 0 {
 				fmt.Fprintf(b, "     Blocked by: %s\n", strings.Join(t.Dependencies, ", "))
 			}
@@ -130,11 +144,6 @@ func renderJiraPreviewText(result *jiraPreviewResult, opts jiraPreviewTextOption
 		for _, s := range result.SkippedTickets {
 			fmt.Fprintf(b, "  %s  %s\n", styles.Warn.Render(s.Key), s.Reason)
 		}
-		b.WriteString("\n")
-	}
-
-	if opts.Explain && result.Budget != nil {
-		b.WriteString(styles.Muted.Render("Budget details shown above. Token allowance is for the implement phase provider."))
 		b.WriteString("\n")
 	}
 

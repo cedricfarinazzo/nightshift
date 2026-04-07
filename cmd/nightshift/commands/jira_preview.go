@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/marcus/nightshift/internal/agents"
 	"github.com/marcus/nightshift/internal/budget"
 	"github.com/marcus/nightshift/internal/calibrator"
 	"github.com/marcus/nightshift/internal/db"
@@ -22,7 +23,7 @@ var jiraPreviewCmd = &cobra.Command{
 	Use:   "preview",
 	Short: "Preview what nightshift jira run would do",
 	Long: `Dry-run the Jira autonomous pipeline. Shows tickets, dependencies,
-validation status, and budget without executing anything.`,
+execution order, and budget without executing anything.`,
 	RunE: runJiraPreview,
 }
 
@@ -31,46 +32,46 @@ func init() {
 	jiraPreviewCmd.Flags().Bool("json", false, "Output as JSON")
 	jiraPreviewCmd.Flags().Bool("plain", false, "Disable TUI pager")
 	jiraPreviewCmd.Flags().Bool("validate", false, "Run LLM validation on each ticket (costs tokens)")
-	jiraPreviewCmd.Flags().Bool("explain", false, "Show detailed budget and filtering explanations")
+	jiraPreviewCmd.Flags().Bool("explain", false, "Show detailed budget breakdown")
 	jiraCmd.AddCommand(jiraPreviewCmd)
 }
 
 type jiraPreviewResult struct {
-	GeneratedAt    time.Time
-	JiraProject    string
-	JiraUser       string
-	ConnectionOK   bool
-	ConnectionErr  string
-	TodoTickets    []jiraPreviewTicket
-	ReviewTickets  []jiraPreviewTicket
-	ExecutionOrder []string // ticket keys in topo sort order
-	BlockedTickets []jiraPreviewBlocked
-	Budget         *budget.AllowanceResult
-	BudgetErr      string
-	SkippedTickets []jiraPreviewSkipped
-	Phases         map[string]string // phase name → provider
+	GeneratedAt    time.Time               `json:"generated_at"`
+	JiraProject    string                  `json:"jira_project"`
+	JiraUser       string                  `json:"jira_user"`
+	ConnectionOK   bool                    `json:"connection_ok"`
+	ConnectionErr  string                  `json:"connection_err,omitempty"`
+	TodoTickets    []jiraPreviewTicket     `json:"todo_tickets"`
+	ReviewTickets  []jiraPreviewTicket     `json:"review_tickets"`
+	ExecutionOrder []string                `json:"execution_order"`
+	BlockedTickets []jiraPreviewBlocked    `json:"blocked_tickets,omitempty"`
+	Budget         *budget.AllowanceResult `json:"budget,omitempty"`
+	BudgetErr      string                  `json:"budget_err,omitempty"`
+	SkippedTickets []jiraPreviewSkipped    `json:"skipped_tickets,omitempty"`
+	Phases         map[string]string       `json:"phases"`
 }
 
 type jiraPreviewTicket struct {
-	Key          string
-	Summary      string
-	Status       string
-	Dependencies []string // blocked-by keys
-	Blocks       []string
-	BranchName   string
-	Phases       map[string]string // phase → provider
-	CostTier     string
+	Key             string   `json:"key"`
+	Summary         string   `json:"summary"`
+	Status          string   `json:"status"`
+	Dependencies    []string `json:"dependencies,omitempty"`
+	Blocks          []string `json:"blocks,omitempty"`
+	BranchName      string   `json:"branch_name"`
+	ValidationScore *int     `json:"validation_score,omitempty"`
+	ValidationMsg   string   `json:"validation_msg,omitempty"`
 }
 
 type jiraPreviewBlocked struct {
-	Key      string
-	Reason   string
-	Blockers []string
+	Key      string   `json:"key"`
+	Reason   string   `json:"reason"`
+	Blockers []string `json:"blockers,omitempty"`
 }
 
 type jiraPreviewSkipped struct {
-	Key    string
-	Reason string
+	Key    string `json:"key"`
+	Reason string `json:"reason"`
 }
 
 func runJiraPreview(cmd *cobra.Command, _ []string) error {
@@ -78,6 +79,7 @@ func runJiraPreview(cmd *cobra.Command, _ []string) error {
 	jsonOutput, _ := cmd.Flags().GetBool("json")
 	plainOutput, _ := cmd.Flags().GetBool("plain")
 	explain, _ := cmd.Flags().GetBool("explain")
+	runValidate, _ := cmd.Flags().GetBool("validate")
 
 	cfg, err := loadConfig("")
 	if err != nil {
@@ -101,6 +103,20 @@ func runJiraPreview(cmd *cobra.Command, _ []string) error {
 			"implement":  cfg.Jira.Implement.Provider,
 			"review_fix": cfg.Jira.ReviewFix.Provider,
 		},
+	}
+
+	// Optionally prepare the validation agent up front.
+	var valAgent agents.Agent
+	if runValidate {
+		a, agentErr := createJiraAgent(cfg, cfg.Jira.Validation)
+		if agentErr != nil {
+			result.SkippedTickets = append(result.SkippedTickets, jiraPreviewSkipped{
+				Key:    "*",
+				Reason: fmt.Sprintf("create validation agent: %v", agentErr),
+			})
+		} else {
+			valAgent = a
+		}
 	}
 
 	// Connect to Jira.
@@ -133,10 +149,20 @@ func runJiraPreview(cmd *cobra.Command, _ []string) error {
 				graph := jira.BuildDependencyGraph(todoTickets)
 				ready, blocked := graph.ResolveOrder()
 
-				phases := result.Phases
 				for _, t := range ready {
 					result.ExecutionOrder = append(result.ExecutionOrder, t.Key)
-					result.TodoTickets = append(result.TodoTickets, buildJiraPreviewTicket(t, phases))
+					pt := buildJiraPreviewTicket(t)
+					if valAgent != nil {
+						vr, vErr := jira.ValidateTicket(ctx, valAgent, t)
+						if vErr == nil && vr != nil {
+							score := vr.Score
+							pt.ValidationScore = &score
+							if !vr.Valid {
+								pt.ValidationMsg = fmt.Sprintf("score %d/10 — below threshold", vr.Score)
+							}
+						}
+					}
+					result.TodoTickets = append(result.TodoTickets, pt)
 				}
 				for _, bt := range blocked {
 					result.BlockedTickets = append(result.BlockedTickets, jiraPreviewBlocked{
@@ -154,9 +180,8 @@ func runJiraPreview(cmd *cobra.Command, _ []string) error {
 					Reason: fmt.Sprintf("fetch review tickets: %v", err),
 				})
 			} else {
-				phases := result.Phases
 				for _, t := range reviewTickets {
-					result.ReviewTickets = append(result.ReviewTickets, buildJiraPreviewTicket(t, phases))
+					result.ReviewTickets = append(result.ReviewTickets, buildJiraPreviewTicket(t))
 				}
 			}
 		}
@@ -197,14 +222,12 @@ func runJiraPreview(cmd *cobra.Command, _ []string) error {
 	return writePreviewText(cmd.OutOrStdout(), text, previewPagerOptions{Plain: plainOutput})
 }
 
-func buildJiraPreviewTicket(t jira.Ticket, phases map[string]string) jiraPreviewTicket {
+func buildJiraPreviewTicket(t jira.Ticket) jiraPreviewTicket {
 	pt := jiraPreviewTicket{
 		Key:        t.Key,
 		Summary:    t.Summary,
 		Status:     t.Status.Name,
 		BranchName: jira.BranchName(t.Key),
-		Phases:     phases,
-		CostTier:   "Medium",
 	}
 	for _, link := range t.IssueLinks {
 		if link.Type != "Blocks" {
