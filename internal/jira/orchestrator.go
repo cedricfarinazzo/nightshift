@@ -59,12 +59,16 @@ type Orchestrator struct {
 	cfg             JiraConfig
 	validationAgent agents.Agent
 	implAgent       agents.Agent
+	reviewFixAgent  agents.Agent
 	log             *logging.Logger
 
 	// ops are injectable for testing; set to real functions by NewOrchestrator.
 	fnHasChanges    func(ctx context.Context, repoPath string) (bool, error)
 	fnCommitAndPush func(ctx context.Context, repoPath, message string) error
 	fnCreatePR      func(ctx context.Context, repo RepoWorkspace, ticket Ticket, jiraSite string) (*PRInfo, error)
+	fnFindPR        func(ctx context.Context, repoPath, branch string) (*PRInfo, error)
+	fnFetchReviews  func(ctx context.Context, repoPath, prURL string) (*PRReviewState, error)
+	fnPostPRComment func(ctx context.Context, repoPath, prURL, body string) error
 }
 
 // OrchestratorOption configures an Orchestrator.
@@ -80,6 +84,12 @@ func WithImplAgent(a agents.Agent) OrchestratorOption {
 	return func(o *Orchestrator) { o.implAgent = a }
 }
 
+// WithReviewFixAgent sets the agent used for addressing PR review feedback.
+// When not set, ProcessFeedback falls back to the impl agent.
+func WithReviewFixAgent(a agents.Agent) OrchestratorOption {
+	return func(o *Orchestrator) { o.reviewFixAgent = a }
+}
+
 // NewOrchestrator creates an Orchestrator with the given client, config, and options.
 func NewOrchestrator(client *Client, cfg JiraConfig, opts ...OrchestratorOption) *Orchestrator {
 	o := &Orchestrator{
@@ -89,6 +99,14 @@ func NewOrchestrator(client *Client, cfg JiraConfig, opts ...OrchestratorOption)
 		fnHasChanges:    HasChanges,
 		fnCommitAndPush: CommitAndPush,
 		fnCreatePR:      CreateOrUpdatePR,
+		fnFindPR: func(ctx context.Context, repoPath, branch string) (*PRInfo, error) {
+			return findExistingPR(ctx, repoPath, branch)
+		},
+		fnFetchReviews: FetchPRReviewComments,
+		fnPostPRComment: func(ctx context.Context, repoPath, prURL, body string) error {
+			_, err := ghExec(ctx, repoPath, "pr", "comment", prURL, "--body", body)
+			return err
+		},
 	}
 	for _, opt := range opts {
 		opt(o)
