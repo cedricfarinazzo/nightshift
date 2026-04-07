@@ -70,7 +70,7 @@ func newMockJiraClient(t *testing.T, cfg mockServerConfig) (*Client, *httptest.S
 	mux.HandleFunc("/rest/api/3/project/", func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(r.URL.Path, "/statuses") {
 			w.Header().Set("Content-Type", "application/json")
-			w.Write([]byte(cfg.statusesPayload))
+			_, _ = w.Write([]byte(cfg.statusesPayload))
 			return
 		}
 		http.NotFound(w, r)
@@ -94,14 +94,15 @@ func newMockJiraClient(t *testing.T, cfg mockServerConfig) (*Client, *httptest.S
 			_ = json.NewEncoder(w).Encode(map[string]string{"id": "999"})
 
 		case strings.HasSuffix(r.URL.Path, "/transitions"):
-			if r.Method == http.MethodGet {
+			switch r.Method {
+			case http.MethodGet:
 				if cfg.failTransitions {
 					http.Error(w, "transitions unavailable", http.StatusInternalServerError)
 					return
 				}
 				w.Header().Set("Content-Type", "application/json")
-				w.Write([]byte(cfg.transitionsGet))
-			} else if r.Method == http.MethodPost {
+				_, _ = w.Write([]byte(cfg.transitionsGet))
+			case http.MethodPost:
 				if cfg.transitionsPost != http.StatusNoContent {
 					http.Error(w, "transition failed", cfg.transitionsPost)
 					return
@@ -117,7 +118,7 @@ func newMockJiraClient(t *testing.T, cfg mockServerConfig) (*Client, *httptest.S
 	// POST /rest/api/3/search/jql  (fetchTickets via SearchJQL)
 	mux.HandleFunc("/rest/api/3/search/jql", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(cfg.searchPayload))
+		_, _ = w.Write([]byte(cfg.searchPayload))
 	})
 
 	srv := httptest.NewServer(mux)

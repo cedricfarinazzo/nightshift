@@ -601,15 +601,16 @@ func TestE2E_VC8_NewOrchestrator_Defaults(t *testing.T) {
 	)
 	if o == nil {
 		t.Fatal("NewOrchestrator returned nil")
-	}
-	if o.client == nil {
-		t.Error("client should not be nil")
-	}
-	if o.validationAgent == nil {
-		t.Error("validationAgent should not be nil")
-	}
-	if o.implAgent == nil {
-		t.Error("implAgent should not be nil")
+	} else {
+		if o.client == nil {
+			t.Error("client should not be nil")
+		}
+		if o.validationAgent == nil {
+			t.Error("validationAgent should not be nil")
+		}
+		if o.implAgent == nil {
+			t.Error("implAgent should not be nil")
+		}
 	}
 }
 

@@ -42,8 +42,7 @@ func TestCopilot_LoadUsageData_NoFile(t *testing.T) {
 	}
 	if data == nil {
 		t.Fatal("expected non-nil data for missing file")
-	}
-	if data.RequestCount != 0 {
+	} else if data.RequestCount != 0 {
 		t.Errorf("RequestCount = %d, want 0", data.RequestCount)
 	}
 

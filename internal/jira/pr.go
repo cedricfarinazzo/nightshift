@@ -129,9 +129,9 @@ func jiraBrowseURL(jiraSite, ticketKey string) string {
 func buildPRBody(ticket Ticket, jiraSite string) string {
 	// Jira browse link: https://<site>.atlassian.net/browse/<key>
 	var b strings.Builder
-	b.WriteString(fmt.Sprintf("## %s — %s\n\n", ticket.Key, ticket.Summary))
+	fmt.Fprintf(&b, "## %s — %s\n\n", ticket.Key, ticket.Summary)
 	if browseURL := jiraBrowseURL(jiraSite, ticket.Key); browseURL != "" {
-		b.WriteString(fmt.Sprintf("**Jira ticket:** %s\n\n", browseURL))
+		fmt.Fprintf(&b, "**Jira ticket:** %s\n\n", browseURL)
 	}
 	if ticket.Description != "" {
 		b.WriteString("### Description\n\n")

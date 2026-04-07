@@ -47,7 +47,7 @@ func ValidateTicket(ctx context.Context, agent agents.Agent, ticket Ticket) (*Va
 func buildValidationPrompt(ticket Ticket) string {
 	var comments strings.Builder
 	for _, c := range ticket.Comments {
-		comments.WriteString(fmt.Sprintf("- %s: %s\n", c.Author, c.Body))
+		fmt.Fprintf(&comments, "- %s: %s\n", c.Author, c.Body)
 	}
 
 	return fmt.Sprintf(`You are a ticket quality validator for an autonomous coding system.
@@ -110,26 +110,26 @@ func (c *Client) HandleInvalidTicket(ctx context.Context, ticketKey string, resu
 	// Build comment as plain text paragraphs (no markdown) so it renders
 	// correctly in Jira's ADF-based comment renderer.
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("❌ Nightshift — Ticket Rejected\nReason: Not enough information for autonomous execution.\nQuality score: %d/10", result.Score))
+	fmt.Fprintf(&sb, "❌ Nightshift — Ticket Rejected\nReason: Not enough information for autonomous execution.\nQuality score: %d/10", result.Score)
 
 	if len(result.Issues) > 0 {
 		sb.WriteString("\n\nIssues found:\n")
 		for _, issue := range result.Issues {
-			sb.WriteString(fmt.Sprintf("• %s\n", issue))
+			fmt.Fprintf(&sb, "• %s\n", issue)
 		}
 	}
 
 	if len(result.Missing) > 0 {
 		sb.WriteString("\n\nTo fix, please add:\n")
 		for _, m := range result.Missing {
-			sb.WriteString(fmt.Sprintf("• %s\n", m))
+			fmt.Fprintf(&sb, "• %s\n", m)
 		}
 	}
 
 	if len(result.Suggestions) > 0 {
 		sb.WriteString("\n\nSuggestions:\n")
 		for _, s := range result.Suggestions {
-			sb.WriteString(fmt.Sprintf("• %s\n", s))
+			fmt.Fprintf(&sb, "• %s\n", s)
 		}
 	}
 
