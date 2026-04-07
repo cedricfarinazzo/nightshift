@@ -59,8 +59,6 @@ type Orchestrator struct {
 	cfg             JiraConfig
 	validationAgent agents.Agent
 	implAgent       agents.Agent
-	reviewFixAgent  agents.Agent
-	statusMap       *StatusMap
 	log             *logging.Logger
 
 	// ops are injectable for testing; set to real functions by NewOrchestrator.
@@ -80,16 +78,6 @@ func WithValidationAgent(a agents.Agent) OrchestratorOption {
 // WithImplAgent sets the agent used for planning and implementation.
 func WithImplAgent(a agents.Agent) OrchestratorOption {
 	return func(o *Orchestrator) { o.implAgent = a }
-}
-
-// WithReviewFixAgent sets the agent used for addressing review feedback.
-func WithReviewFixAgent(a agents.Agent) OrchestratorOption {
-	return func(o *Orchestrator) { o.reviewFixAgent = a }
-}
-
-// WithStatusMap injects a pre-discovered status map.
-func WithStatusMap(sm *StatusMap) OrchestratorOption {
-	return func(o *Orchestrator) { o.statusMap = sm }
 }
 
 // NewOrchestrator creates an Orchestrator with the given client, config, and options.
@@ -186,7 +174,7 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 	result.Phase = PhaseImplement
 	implStart := time.Now()
 	workDir := ""
-	if len(ws.Repos) > 0 {
+	if ws != nil && len(ws.Repos) > 0 {
 		workDir = ws.Repos[0].Path
 	}
 	implResult, err := o.implAgent.Execute(ctx, agents.ExecuteOptions{
@@ -209,31 +197,34 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 	// Phase 4: Commit
 	result.Phase = PhaseCommit
 	var changedRepos []RepoWorkspace
-	for _, repo := range ws.Repos {
-		changed, err := o.fnHasChanges(ctx, repo.Path)
-		if err != nil {
-			o.postErrorComment(ctx, ticket.Key, PhaseCommit, err)
-			result.Status = TicketFailed
-			result.Error = err.Error()
-			result.Duration = time.Since(start)
-			return result, nil
+	if ws != nil {
+		for _, repo := range ws.Repos {
+			changed, err := o.fnHasChanges(ctx, repo.Path)
+			if err != nil {
+				o.postErrorComment(ctx, ticket.Key, PhaseCommit, err)
+				result.Status = TicketFailed
+				result.Error = err.Error()
+				result.Duration = time.Since(start)
+				return result, nil
+			}
+			if !changed {
+				continue
+			}
+			msg := CommitMessage(ticket.Key, "", ticket.Summary)
+			if err := o.fnCommitAndPush(ctx, repo.Path, msg); err != nil {
+				o.postErrorComment(ctx, ticket.Key, PhaseCommit, err)
+				result.Status = TicketFailed
+				result.Error = err.Error()
+				result.Duration = time.Since(start)
+				return result, nil
+			}
+			changedRepos = append(changedRepos, repo)
 		}
-		if !changed {
-			continue
-		}
-		msg := CommitMessage(ticket.Key, "", ticket.Summary)
-		if err := o.fnCommitAndPush(ctx, repo.Path, msg); err != nil {
-			o.postErrorComment(ctx, ticket.Key, PhaseCommit, err)
-			result.Status = TicketFailed
-			result.Error = err.Error()
-			result.Duration = time.Since(start)
-			return result, nil
-		}
-		changedRepos = append(changedRepos, repo)
 	}
 
 	// Phase 5: PR
 	result.Phase = PhasePR
+	prStart := time.Now()
 	for _, repo := range changedRepos {
 		prInfo, err := o.fnCreatePR(ctx, repo, ticket, o.cfg.Site)
 		if err != nil {
@@ -248,7 +239,7 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 	if len(result.PRURLs) > 0 {
 		o.postPhaseComment(ctx, ticket.Key, CommentPR,
 			fmt.Sprintf("PRs created:\n%s", strings.Join(result.PRURLs, "\n")),
-			time.Since(implStart))
+			time.Since(prStart))
 	}
 
 	// Phase 6: Status
@@ -320,13 +311,28 @@ func (o *Orchestrator) buildImplementPrompt(ticket Ticket, plan string, ws *Work
 	return b.String()
 }
 
+// providerForCommentType selects provider/model metadata based on the comment type.
+// Plan comments use the plan phase config; everything else uses the implement config.
+func (o *Orchestrator) providerForCommentType(ct CommentType) (provider, model string) {
+	if ct == CommentPlan {
+		return o.cfg.Plan.Provider, o.cfg.Plan.Model
+	}
+	return o.cfg.Implement.Provider, o.cfg.Implement.Model
+}
+
 // postErrorComment posts an error comment to the Jira ticket.
 func (o *Orchestrator) postErrorComment(ctx context.Context, ticketKey string, phase Phase, err error) {
+	// Select provider/model based on which phase failed.
+	ct := CommentError
+	provider, model := o.providerForCommentType(CommentImplement)
+	if phase == PhasePlan {
+		provider, model = o.providerForCommentType(CommentPlan)
+	}
 	comment := NightshiftComment{
-		Type:      CommentError,
+		Type:      ct,
 		Timestamp: time.Now(),
-		Provider:  o.cfg.Implement.Provider,
-		Model:     o.cfg.Implement.Model,
+		Provider:  provider,
+		Model:     model,
 		Body:      fmt.Sprintf("Error during %s phase: %s", phase, err.Error()),
 	}
 	if pErr := o.client.PostComment(ctx, ticketKey, comment); pErr != nil {
@@ -336,11 +342,12 @@ func (o *Orchestrator) postErrorComment(ctx context.Context, ticketKey string, p
 
 // postPhaseComment posts a success comment for a completed phase.
 func (o *Orchestrator) postPhaseComment(ctx context.Context, ticketKey string, ct CommentType, body string, duration time.Duration) {
+	provider, model := o.providerForCommentType(ct)
 	comment := NightshiftComment{
 		Type:      ct,
 		Timestamp: time.Now(),
-		Provider:  o.cfg.Implement.Provider,
-		Model:     o.cfg.Implement.Model,
+		Provider:  provider,
+		Model:     model,
 		Duration:  duration,
 		Body:      body,
 	}

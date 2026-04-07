@@ -46,26 +46,16 @@ func (s *stubJiraClient) TransitionToReview(_ context.Context, issueKey string) 
 func TestNewOrchestrator_Options(t *testing.T) {
 	va := &stubAgent{name: "validator"}
 	ia := &stubAgent{name: "impl"}
-	ra := &stubAgent{name: "reviewer"}
-	sm := &StatusMap{}
 
 	o := &Orchestrator{}
 	WithValidationAgent(va)(o)
 	WithImplAgent(ia)(o)
-	WithReviewFixAgent(ra)(o)
-	WithStatusMap(sm)(o)
 
 	if o.validationAgent != va {
 		t.Error("WithValidationAgent not set")
 	}
 	if o.implAgent != ia {
 		t.Error("WithImplAgent not set")
-	}
-	if o.reviewFixAgent != ra {
-		t.Error("WithReviewFixAgent not set")
-	}
-	if o.statusMap != sm {
-		t.Error("WithStatusMap not set")
 	}
 }
 
