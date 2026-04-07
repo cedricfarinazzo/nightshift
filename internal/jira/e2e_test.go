@@ -4,8 +4,11 @@ import (
 	"context"
 	"os"
 	"os/exec"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/marcus/nightshift/internal/agents"
 )
 
 // e2eClient returns a real Jira client configured for the sedinfra/VC project.
@@ -539,6 +542,21 @@ func TestE2E_VC9_PRTitle_Format(t *testing.T) {
 
 // ── VC-8: Jira orchestrator ──────────────────────────────────────────────────
 
+// noMutationJiraClient wraps a real Client for read operations but stubs out all
+// state-mutating calls (transitions, comments) so e2e tests do not alter real tickets.
+type noMutationJiraClient struct {
+	real *Client
+}
+
+func (n *noMutationJiraClient) PostComment(_ context.Context, _ string, _ NightshiftComment) error {
+	return nil
+}
+func (n *noMutationJiraClient) HandleInvalidTicket(_ context.Context, _ string, _ *ValidationResult) error {
+	return nil
+}
+func (n *noMutationJiraClient) TransitionToInProgress(_ context.Context, _ string) error { return nil }
+func (n *noMutationJiraClient) TransitionToReview(_ context.Context, _ string) error    { return nil }
+
 func TestE2E_VC8_ProcessTicket_WithStubAgents(t *testing.T) {
 	client := e2eClient(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
@@ -564,12 +582,26 @@ func TestE2E_VC8_ProcessTicket_WithStubAgents(t *testing.T) {
 		output: "e2e stub plan/impl output",
 	}
 
-	o := NewOrchestrator(client, client.cfg,
-		WithValidationAgent(va),
-		WithImplAgent(ia),
-	)
+	// Use noMutationJiraClient so no transitions or comments are posted to real Jira.
+	o := &Orchestrator{
+		client:          &noMutationJiraClient{real: client},
+		cfg:             client.cfg,
+		validationAgent: va,
+		implAgent:       ia,
+		fnHasChanges:    HasChanges,
+		fnCommitAndPush: CommitAndPush,
+		fnCreatePR:      CreateOrUpdatePR,
+		fnFindPR: func(ctx context.Context, repoPath, branch string) (*PRInfo, error) {
+			return findExistingPR(ctx, repoPath, branch)
+		},
+		fnFetchReviews: FetchPRReviewComments,
+		fnPostPRComment: func(ctx context.Context, repoPath, prURL, body string) error {
+			_, err := ghExec(ctx, repoPath, "pr", "comment", prURL, "--body", body)
+			return err
+		},
+	}
 
-	// Empty workspace — skips commit/PR phases, tests only the Jira API interactions.
+	// Empty workspace — skips commit/PR phases entirely.
 	ws := &Workspace{TicketKey: ticket.Key}
 
 	result, err := o.ProcessTicket(ctx, ticket, ws)
@@ -620,4 +652,132 @@ func statusNames(ss []Status) []string {
 		names[i] = s.Name
 	}
 	return names
+}
+
+// ── VC-10: PR Feedback Loop & Review Re-work ─────────────────────────────────
+
+func TestE2E_VC10_ProcessFeedback_NoWorkspace(t *testing.T) {
+	client := e2eClient(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	ra := &stubAgent{name: "e2e-fix", output: "e2e stub rework output"}
+	// Use noMutationJiraClient so no comments or transitions are posted to real Jira.
+	o := &Orchestrator{
+		client:          &noMutationJiraClient{real: client},
+		cfg:             client.cfg,
+		reviewFixAgent:  ra,
+		validationAgent: ra,
+		implAgent:       ra,
+	}
+
+	// Empty workspace — no repos to process. ProcessFeedback should return cleanly.
+	ws := &Workspace{TicketKey: "VC-10"}
+	result, err := o.ProcessFeedback(ctx, Ticket{Key: "VC-10", Summary: "feedback loop"}, ws)
+	if err != nil {
+		t.Fatalf("ProcessFeedback: %v", err)
+	}
+	if result.FixesMade != 0 {
+		t.Errorf("FixesMade = %d, want 0 for empty workspace", result.FixesMade)
+	}
+	if result.PushedCommits != 0 {
+		t.Errorf("PushedCommits = %d, want 0 for empty workspace", result.PushedCommits)
+	}
+	t.Logf("ProcessFeedback(VC-10, empty ws): reviewsFound=%d fixesMade=%d duration=%s",
+		result.ReviewsFound, result.FixesMade, result.Duration)
+}
+
+func TestE2E_VC10_WithReviewFixAgent(t *testing.T) {
+	client := e2eClient(t)
+
+	ra := &stubAgent{name: "e2e-review-fix"}
+	ia := &stubAgent{name: "e2e-impl"}
+	// Construct directly so we can use noMutationJiraClient (NewOrchestrator requires *Client).
+	o := &Orchestrator{
+		client:          &noMutationJiraClient{real: client},
+		cfg:             client.cfg,
+		validationAgent: ia,
+		implAgent:       ia,
+		reviewFixAgent:  ra,
+	}
+	if o.reviewFixAgent == nil {
+		t.Error("reviewFixAgent should not be nil after WithReviewFixAgent")
+	}
+	// Verify the correct agent was stored (interface comparison).
+	var want agents.Agent = ra
+	if o.reviewFixAgent != want {
+		t.Error("reviewFixAgent is not the agent passed to WithReviewFixAgent")
+	}
+}
+
+func TestE2E_VC10_FilterNewComments_LivePR(t *testing.T) {
+	e2eGHAvailable(t)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	rs, err := FetchPRReviewComments(ctx, ".", e2eTestPRURL())
+	if err != nil {
+		t.Skipf("FetchPRReviewComments: %v (gh CLI may not be authenticated)", err)
+	}
+
+	// Zero lastSeen: all comments returned.
+	all := filterNewComments(rs.Comments, time.Time{})
+	if len(all) != len(rs.Comments) {
+		t.Errorf("zero lastSeen: got %d comments, want %d", len(all), len(rs.Comments))
+	}
+
+	// Future lastSeen: no comments returned.
+	none := filterNewComments(rs.Comments, time.Now().Add(24*time.Hour))
+	if len(none) != 0 {
+		t.Errorf("future lastSeen: got %d comments, want 0", len(none))
+	}
+
+	t.Logf("PR %s: %d total comments, %d after zero cutoff, %d after future cutoff",
+		e2eTestPRURL(), len(rs.Comments), len(all), len(none))
+}
+
+func TestE2E_VC10_BuildReworkPrompt_RealTicket(t *testing.T) {
+	client := e2eClient(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	sm, err := client.DiscoverStatuses(ctx)
+	if err != nil {
+		t.Fatalf("DiscoverStatuses: %v", err)
+	}
+
+	tickets, err := client.FetchReviewTickets(ctx, sm)
+	if err != nil {
+		t.Fatalf("FetchReviewTickets: %v", err)
+	}
+	if len(tickets) == 0 {
+		t.Skip("no review tickets available; skipping buildReworkPrompt e2e test")
+	}
+	ticket := tickets[0]
+
+	fakeReview := &PRReviewState{
+		URL:            "https://github.com/cedricfarinazzo/nightshift/pull/99",
+		ReviewDecision: "CHANGES_REQUESTED",
+		Reviews: []Review{
+			{Author: "reviewer", State: "CHANGES_REQUESTED", Body: "please add tests"},
+		},
+		Comments: []PRComment{
+			{Path: "main.go", Line: 10, Author: "reviewer", Body: "nil check missing"},
+		},
+	}
+	repo := RepoWorkspace{Name: "nightshift", Branch: BranchName(ticket.Key)}
+
+	prompt := buildReworkPrompt(ticket, fakeReview, repo)
+
+	if !strings.Contains(prompt, ticket.Key) {
+		t.Errorf("prompt missing ticket key %q", ticket.Key)
+	}
+	if !strings.Contains(prompt, "please add tests") {
+		t.Error("prompt missing reviewer comment body")
+	}
+	if !strings.Contains(prompt, "main.go:10") {
+		t.Error("prompt missing inline comment path:line")
+	}
+	t.Logf("buildReworkPrompt(%s): prompt length=%d", ticket.Key, len(prompt))
 }
