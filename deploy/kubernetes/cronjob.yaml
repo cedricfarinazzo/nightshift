@@ -1,0 +1,112 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: nightshift
+  namespace: nightshift
+  labels:
+    app: nightshift
+spec:
+  # Run at 02:00 UTC every day. Adjust to fit your timezone and token reset schedule.
+  schedule: "0 2 * * *"
+
+  # Prevent overlapping runs if a job is still executing.
+  concurrencyPolicy: Forbid
+
+  # Keep the last 3 successful and 1 failed job for log inspection.
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 1
+
+  # If a scheduled run is missed by more than 1 hour, skip it.
+  startingDeadlineSeconds: 3600
+
+  jobTemplate:
+    spec:
+      # Retry at most once on failure.
+      backoffLimit: 1
+
+      # Hard timeout: 6 hours. Adjust based on expected run duration.
+      activeDeadlineSeconds: 21600
+
+      template:
+        metadata:
+          labels:
+            app: nightshift
+        spec:
+          serviceAccountName: nightshift
+          restartPolicy: OnFailure
+
+          # Mount the SSH/git credentials needed to push branches/PRs.
+          # Replace with your own secret name if different.
+          volumes:
+            - name: config
+              configMap:
+                name: nightshift-config
+            - name: data
+              persistentVolumeClaim:
+                claimName: nightshift-data
+            - name: git-credentials
+              secret:
+                secretName: nightshift-git-credentials
+                optional: true
+
+          containers:
+            - name: nightshift
+              # Pin to a specific release tag in production, e.g. :v0.3.4
+              # Images are published to GHCR by the Docker CI workflow on every
+              # push to main (:latest) and on every version tag (:v1.2.3).
+              image: ghcr.io/cedricfarinazzo/nightshift:latest
+
+              # In Kubernetes, nightshift is invoked as a one-shot command.
+              # --yes skips the interactive confirmation prompt.
+              # --ignore-budget can be added if budget tracking is not applicable.
+              args:
+                - run
+                - --yes
+
+              env:
+                - name: ANTHROPIC_API_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: nightshift-secrets
+                      key: ANTHROPIC_API_KEY
+                      optional: true
+                - name: OPENAI_API_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: nightshift-secrets
+                      key: OPENAI_API_KEY
+                      optional: true
+                # Tell nightshift where to find its config inside the container.
+                - name: NIGHTSHIFT_CONFIG
+                  value: /etc/nightshift/config.yaml
+                # Logging
+                - name: NIGHTSHIFT_LOG_LEVEL
+                  value: info
+
+              volumeMounts:
+                - name: config
+                  mountPath: /etc/nightshift
+                  readOnly: true
+                - name: data
+                  mountPath: /data
+                - name: git-credentials
+                  mountPath: /home/nightshift/.gitconfig
+                  subPath: .gitconfig
+                  readOnly: true
+
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 128Mi
+                limits:
+                  cpu: 500m
+                  memory: 512Mi
+
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: false  # provider CLIs write to home dir
+                runAsNonRoot: true
+                runAsUser: 1000
+                capabilities:
+                  drop:
+                    - ALL

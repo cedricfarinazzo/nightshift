@@ -256,6 +256,28 @@ Each task has a default cooldown interval to prevent the same task from running 
 
 `skill-groom` is enabled by default. Add it to `tasks.disabled` if you want to opt out. It updates project-local skills under `.claude/skills` and `.codex/skills` using `README.md` as project context and starts Agent Skills docs lookup from `https://agentskills.io/llms.txt`.
 
+## Kubernetes / Cloud Deployment
+
+Nightshift can run as a **Kubernetes CronJob** instead of a systemd service. In this mode
+the CronJob schedule drives execution and nightshift is invoked as a one-shot
+`nightshift run --yes` command.
+
+Manifests are in [`deploy/kubernetes/`](deploy/kubernetes/):
+
+```bash
+# Deploy with Kustomize
+kubectl apply -k deploy/kubernetes/
+
+# Trigger a manual run
+kubectl create job --from=cronjob/nightshift nightshift-manual -n nightshift
+
+# Stream logs
+kubectl logs -n nightshift -l app=nightshift -f
+```
+
+See [docs/guides/kubernetes-cronjob.md](docs/guides/kubernetes-cronjob.md) for the full
+setup guide including image building, secrets, Git credentials, and repo mounting strategies.
+
 ## Development
 
 ### Pre-commit hooks
