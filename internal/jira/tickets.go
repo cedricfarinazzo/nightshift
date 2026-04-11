@@ -18,6 +18,7 @@ type Ticket struct {
 	AcceptanceCriteria string
 	Labels             []string
 	Status             Status
+	IssueType          string // e.g. "Bug", "Story", "Task"
 	IssueLinks         []IssueLink
 	Reporter           string
 	Assignee           string
@@ -72,7 +73,7 @@ func (c *Client) fetchTickets(ctx context.Context, jql string) ([]Ticket, error)
 	var tickets []Ticket
 	fields := []string{
 		"summary", "description", "comment", "labels", "status",
-		"issuelinks", "reporter", "assignee",
+		"issuelinks", "reporter", "assignee", "issuetype",
 	}
 	nextPageToken := ""
 	for {
@@ -113,6 +114,9 @@ func issueToTicket(issue *model.IssueScheme) Ticket {
 			if f.Status.StatusCategory != nil {
 				t.Status.CategoryKey = f.Status.StatusCategory.Key
 			}
+		}
+		if f.IssueType != nil {
+			t.IssueType = f.IssueType.Name
 		}
 		if f.Reporter != nil {
 			t.Reporter = f.Reporter.DisplayName

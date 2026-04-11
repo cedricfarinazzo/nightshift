@@ -87,7 +87,11 @@ func renderJiraPreviewText(result *jiraPreviewResult, opts jiraPreviewTextOption
 		for i, t := range result.TodoTickets {
 			b.WriteString(styles.Accent.Render(fmt.Sprintf("  %d. %s", i+1, t.Key)))
 			fmt.Fprintf(b, "  %s\n", t.Summary)
-			fmt.Fprintf(b, "     Status: %s  Branch: %s\n", styles.Label.Render(t.Status), styles.Value.Render(t.BranchName))
+			typeStr := ""
+			if t.IssueType != "" {
+				typeStr = fmt.Sprintf("  Type: %s", styles.Label.Render(t.IssueType))
+			}
+			fmt.Fprintf(b, "     Status: %s  Branch: %s%s\n", styles.Label.Render(t.Status), styles.Value.Render(t.BranchName), typeStr)
 			if t.ValidationScore != nil {
 				scoreStyle := styles.Value
 				if t.ValidationMsg != "" {
@@ -105,28 +109,29 @@ func renderJiraPreviewText(result *jiraPreviewResult, opts jiraPreviewTextOption
 	}
 	b.WriteString("\n")
 
-	// Execution order.
-	if len(result.ExecutionOrder) > 0 {
-		b.WriteString(styles.Section.Render("Execution Order"))
-		b.WriteString("\n")
-		for i, key := range result.ExecutionOrder {
-			fmt.Fprintf(b, "  %d. %s\n", i+1, key)
+	// Full execution order: ready tickets + blocked tickets together.
+	if len(result.FullOrder) > 0 {
+		readyCount := len(result.ExecutionOrder)
+		blockedCount := len(result.FullOrder) - readyCount
+		title := fmt.Sprintf("Execution Order (%d ready", readyCount)
+		if blockedCount > 0 {
+			title += fmt.Sprintf(", %d blocked", blockedCount)
 		}
+		title += ")"
+		b.WriteString(styles.Section.Render(title))
 		b.WriteString("\n")
-	}
-
-	// Blocked tickets.
-	if len(result.BlockedTickets) > 0 {
-		b.WriteString(styles.Section.Render(fmt.Sprintf("Blocked Tickets (%d)", len(result.BlockedTickets))))
-		b.WriteString("\n")
-		for _, bt := range result.BlockedTickets {
-			b.WriteString("  ")
-			b.WriteString(styles.Warn.Render(bt.Key))
-			fmt.Fprintf(b, "  reason=%s", bt.Reason)
-			if len(bt.Blockers) > 0 {
-				fmt.Fprintf(b, "  blockers=[%s]", strings.Join(bt.Blockers, ", "))
+		for i, entry := range result.FullOrder {
+			if entry.Ready {
+				fmt.Fprintf(b, "  %2d. %s\n", i+1, styles.Accent.Render(entry.Key))
+			} else {
+				blocker := entry.Blocker
+				if blocker == "" {
+					blocker = entry.Reason
+				}
+				fmt.Fprintf(b, "  %2d. %s  %s\n", i+1,
+					styles.Warn.Render(entry.Key),
+					styles.Muted.Render("⊘ blocked by "+blocker))
 			}
-			b.WriteString("\n")
 		}
 		b.WriteString("\n")
 	}

@@ -80,8 +80,13 @@ func TestRenderJiraPreviewText_BlockedTickets(t *testing.T) {
 		GeneratedAt:  time.Now(),
 		JiraProject:  "PROJ",
 		ConnectionOK: true,
+		ExecutionOrder: []string{"PROJ-1"},
+		FullOrder: []jiraPreviewOrderEntry{
+			{Key: "PROJ-1", Ready: true},
+			{Key: "PROJ-2", Ready: false, Reason: "waiting for dependency", Blocker: "PROJ-1"},
+		},
 		BlockedTickets: []jiraPreviewBlocked{
-			{Key: "PROJ-2", Reason: "missing dependency", Blockers: []string{"PROJ-1"}},
+			{Key: "PROJ-2", Reason: "waiting for dependency", Blockers: []string{"PROJ-1"}},
 		},
 		Phases: []jiraPreviewPhase{},
 	}
@@ -91,6 +96,9 @@ func TestRenderJiraPreviewText_BlockedTickets(t *testing.T) {
 	}
 	if !strings.Contains(out, "PROJ-1") {
 		t.Errorf("missing blocker key:\n%s", out)
+	}
+	if !strings.Contains(out, "blocked") {
+		t.Errorf("expected 'blocked' in execution order:\n%s", out)
 	}
 }
 
