@@ -51,7 +51,7 @@ func renderJiraPreviewText(result *jiraPreviewResult, opts jiraPreviewTextOption
 		if timeout == "" {
 			timeout = "30m"
 		}
-		fmt.Fprintf(b, "  %-12s → %-10s  %s  (%s)\n", p.Name, provider, styles.Muted.Render(model), timeout)
+		fmt.Fprintf(b, "  %-12s → %-10s  %s  timeout=%s\n", p.Name, provider, styles.Muted.Render(model), timeout)
 	}
 	b.WriteString("\n")
 
