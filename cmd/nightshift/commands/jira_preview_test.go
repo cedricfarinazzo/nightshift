@@ -18,11 +18,11 @@ func TestRenderJiraPreviewText_ConnectionOK(t *testing.T) {
 		JiraProject:  "PROJ",
 		JiraUser:     "user@example.com",
 		ConnectionOK: true,
-		Phases: map[string]string{
-			"validation": "claude",
-			"plan":       "claude",
-			"implement":  "claude",
-			"review_fix": "claude",
+		Phases: []jiraPreviewPhase{
+			{Name: "validation", Provider: "claude", Model: "claude-haiku-4-5"},
+			{Name: "plan", Provider: "claude", Model: "claude-sonnet-4-6"},
+			{Name: "implement", Provider: "claude", Model: "claude-sonnet-4-6"},
+			{Name: "review_fix", Provider: "claude", Model: "claude-sonnet-4-6"},
 		},
 	}
 	out := renderJiraPreviewText(result, jiraPreviewTextOptions{})
@@ -38,7 +38,7 @@ func TestRenderJiraPreviewText_ConnectionFailed(t *testing.T) {
 		GeneratedAt:   time.Now(),
 		JiraProject:   "PROJ",
 		ConnectionErr: "401 Unauthorized",
-		Phases:        map[string]string{},
+		Phases:        []jiraPreviewPhase{},
 	}
 	out := renderJiraPreviewText(result, jiraPreviewTextOptions{})
 	if !strings.Contains(out, "FAILED") {
@@ -65,7 +65,7 @@ func TestRenderJiraPreviewText_TodoTickets(t *testing.T) {
 			},
 		},
 		ExecutionOrder: []string{"PROJ-1"},
-		Phases:         map[string]string{},
+		Phases:         []jiraPreviewPhase{},
 	}
 	out := renderJiraPreviewText(result, jiraPreviewTextOptions{})
 	for _, want := range []string{"PROJ-1", "Fix the thing", "feature/PROJ-1", "score 8/10"} {
@@ -83,7 +83,7 @@ func TestRenderJiraPreviewText_BlockedTickets(t *testing.T) {
 		BlockedTickets: []jiraPreviewBlocked{
 			{Key: "PROJ-2", Reason: "missing dependency", Blockers: []string{"PROJ-1"}},
 		},
-		Phases: map[string]string{},
+		Phases: []jiraPreviewPhase{},
 	}
 	out := renderJiraPreviewText(result, jiraPreviewTextOptions{})
 	if !strings.Contains(out, "PROJ-2") {
@@ -102,7 +102,7 @@ func TestRenderJiraPreviewText_ReviewTickets(t *testing.T) {
 		ReviewTickets: []jiraPreviewTicket{
 			{Key: "PROJ-3", Summary: "Needs rework", Status: "Revue en cours"},
 		},
-		Phases: map[string]string{},
+		Phases: []jiraPreviewPhase{},
 	}
 	out := renderJiraPreviewText(result, jiraPreviewTextOptions{})
 	if !strings.Contains(out, "PROJ-3") || !strings.Contains(out, "Needs rework") {
@@ -121,7 +121,7 @@ func TestRenderJiraPreviewText_BudgetSummary(t *testing.T) {
 			UsedPercent:  30.5,
 			BudgetSource: "calibrated",
 		},
-		Phases: map[string]string{},
+		Phases: []jiraPreviewPhase{},
 	}
 
 	// Without --explain: show summary line only.
@@ -145,7 +145,7 @@ func TestRenderJiraPreviewText_BudgetExplain(t *testing.T) {
 			UsedPercent:  30.5,
 			BudgetSource: "calibrated",
 		},
-		Phases: map[string]string{},
+		Phases: []jiraPreviewPhase{},
 	}
 
 	// With --explain: should show expanded budget section.
@@ -161,7 +161,7 @@ func TestRenderJiraPreviewText_BudgetError(t *testing.T) {
 		JiraProject:  "PROJ",
 		ConnectionOK: true,
 		BudgetErr:    "db not found",
-		Phases:       map[string]string{},
+		Phases:       []jiraPreviewPhase{},
 	}
 	out := renderJiraPreviewText(result, jiraPreviewTextOptions{})
 	if !strings.Contains(out, "budget unavailable") {
@@ -177,7 +177,7 @@ func TestRenderJiraPreviewText_SkippedTickets(t *testing.T) {
 		SkippedTickets: []jiraPreviewSkipped{
 			{Key: "*", Reason: "create validation agent: binary not found"},
 		},
-		Phases: map[string]string{},
+		Phases: []jiraPreviewPhase{},
 	}
 	out := renderJiraPreviewText(result, jiraPreviewTextOptions{})
 	if !strings.Contains(out, "Skipped") {
@@ -193,7 +193,7 @@ func TestRenderJiraPreviewText_NoTodoTickets(t *testing.T) {
 		GeneratedAt:  time.Now(),
 		JiraProject:  "PROJ",
 		ConnectionOK: true,
-		Phases:       map[string]string{},
+		Phases: []jiraPreviewPhase{},
 	}
 	out := renderJiraPreviewText(result, jiraPreviewTextOptions{})
 	if !strings.Contains(out, "none") {
@@ -206,15 +206,20 @@ func TestRenderJiraPreviewText_PhaseAssignments(t *testing.T) {
 		GeneratedAt:  time.Now(),
 		JiraProject:  "PROJ",
 		ConnectionOK: true,
-		Phases: map[string]string{
-			"validation": "claude",
-			"plan":       "codex",
-			"implement":  "copilot",
-			"review_fix": "claude",
+		Phases: []jiraPreviewPhase{
+			{Name: "validation", Provider: "claude", Model: "claude-haiku-4-5", Timeout: "2m"},
+			{Name: "plan", Provider: "codex", Model: "o3", Timeout: "5m"},
+			{Name: "implement", Provider: "copilot", Model: "", Timeout: "30m"},
+			{Name: "review_fix", Provider: "claude", Model: "claude-sonnet-4-6", Timeout: "20m"},
 		},
 	}
 	out := renderJiraPreviewText(result, jiraPreviewTextOptions{})
-	for _, want := range []string{"validation", "plan", "implement", "review_fix", "claude", "codex", "copilot"} {
+	for _, want := range []string{
+		"validation", "plan", "implement", "review_fix",
+		"claude", "codex", "copilot",
+		"claude-haiku-4-5", "o3", "claude-sonnet-4-6",
+		"2m", "5m", "20m",
+	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("phase assignments missing %q:\n%s", want, out)
 		}
@@ -235,7 +240,7 @@ func TestWriteJiraPreviewJSON(t *testing.T) {
 			{Key: "PROJ-1", Summary: "Fix something", Status: "À faire", BranchName: "feature/PROJ-1", ValidationScore: &score},
 		},
 		ExecutionOrder: []string{"PROJ-1"},
-		Phases:         map[string]string{"validation": "claude"},
+		Phases:         []jiraPreviewPhase{{Name: "validation", Provider: "claude", Model: "claude-haiku-4-5"}},
 	}
 
 	var buf strings.Builder
@@ -262,7 +267,7 @@ func TestWriteJiraPreviewJSON_EmptyResult(t *testing.T) {
 	result := &jiraPreviewResult{
 		GeneratedAt: time.Now(),
 		JiraProject: "PROJ",
-		Phases:      map[string]string{},
+		Phases:      []jiraPreviewPhase{},
 	}
 	var buf strings.Builder
 	if err := writeJiraPreviewJSON(&buf, result); err != nil {

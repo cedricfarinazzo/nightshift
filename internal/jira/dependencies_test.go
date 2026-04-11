@@ -36,31 +36,31 @@ func TestBuildDependencyGraph_NoDependencies(t *testing.T) {
 
 func TestBuildDependencyGraph_SimpleChain(t *testing.T) {
 	// linear chain: A-1 blocks A-2 blocks A-3
-	// A-1 should be ready first; A-2 and A-3 blocked by predecessors
+	// Only A-1 (no in-graph blockers) is immediately ready.
+	// A-2 and A-3 are "waiting for dependency".
 	tickets := []Ticket{
 		makeTicket("A-1", []IssueLink{blocksLink("A-1", "A-2")}),
 		makeTicket("A-2", []IssueLink{blocksLink("A-2", "A-3")}),
 		makeTicket("A-3", nil),
 	}
 	g := BuildDependencyGraph(tickets)
-	cycles := g.DetectCycles()
-	if len(cycles) != 0 {
+	if cycles := g.DetectCycles(); len(cycles) != 0 {
 		t.Errorf("expected no cycles in simple linear chain, got %v", cycles)
 	}
 	ready, blocked := g.ResolveOrder()
 	if len(ready)+len(blocked) != 3 {
 		t.Errorf("expected 3 total tickets, got ready=%d blocked=%d", len(ready), len(blocked))
 	}
-	// A-1 has no blockers, so it must appear in ready
-	found := false
-	for _, r := range ready {
-		if r.Key == "A-1" {
-			found = true
-			break
-		}
+	if len(ready) != 1 || ready[0].Key != "A-1" {
+		t.Errorf("expected only A-1 in ready, got %v", ready)
 	}
-	if !found {
-		t.Error("expected A-1 (chain root) to be ready")
+	if len(blocked) != 2 {
+		t.Errorf("expected A-2 and A-3 blocked (waiting for dependency), got %d blocked", len(blocked))
+	}
+	for _, b := range blocked {
+		if b.Reason != "waiting for dependency" {
+			t.Errorf("ticket %s: expected reason 'waiting for dependency', got %q", b.Ticket.Key, b.Reason)
+		}
 	}
 }
 

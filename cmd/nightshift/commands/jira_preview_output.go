@@ -35,15 +35,23 @@ func renderJiraPreviewText(result *jiraPreviewResult, opts jiraPreviewTextOption
 	}
 	b.WriteString("\n")
 
-	// Phase → provider table.
+	// Phase → provider + model table.
 	b.WriteString(styles.Section.Render("Phase Assignments"))
 	b.WriteString("\n")
-	for _, phase := range []string{"validation", "plan", "implement", "review_fix"} {
-		provider := result.Phases[phase]
+	for _, p := range result.Phases {
+		provider := p.Provider
 		if provider == "" {
 			provider = "claude"
 		}
-		fmt.Fprintf(b, "  %-12s → %s\n", phase, provider)
+		model := p.Model
+		if model == "" {
+			model = "default"
+		}
+		timeout := p.Timeout
+		if timeout == "" {
+			timeout = "30m"
+		}
+		fmt.Fprintf(b, "  %-12s → %-10s  %s  (%s)\n", p.Name, provider, styles.Muted.Render(model), timeout)
 	}
 	b.WriteString("\n")
 

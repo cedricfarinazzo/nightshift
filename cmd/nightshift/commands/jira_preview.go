@@ -49,7 +49,14 @@ type jiraPreviewResult struct {
 	Budget         *budget.AllowanceResult `json:"budget,omitempty"`
 	BudgetErr      string                  `json:"budget_err,omitempty"`
 	SkippedTickets []jiraPreviewSkipped    `json:"skipped_tickets,omitempty"`
-	Phases         map[string]string       `json:"phases"`
+	Phases         []jiraPreviewPhase      `json:"phases"`
+}
+
+type jiraPreviewPhase struct {
+	Name     string `json:"name"`
+	Provider string `json:"provider"`
+	Model    string `json:"model"`
+	Timeout  string `json:"timeout,omitempty"`
 }
 
 type jiraPreviewTicket struct {
@@ -97,11 +104,11 @@ func runJiraPreview(cmd *cobra.Command, _ []string) error {
 	result := &jiraPreviewResult{
 		GeneratedAt: time.Now(),
 		JiraProject: cfg.Jira.Project,
-		Phases: map[string]string{
-			"validation": cfg.Jira.Validation.Provider,
-			"plan":       cfg.Jira.Plan.Provider,
-			"implement":  cfg.Jira.Implement.Provider,
-			"review_fix": cfg.Jira.ReviewFix.Provider,
+		Phases: []jiraPreviewPhase{
+			{Name: "validation", Provider: cfg.Jira.Validation.Provider, Model: cfg.Jira.Validation.Model, Timeout: cfg.Jira.Validation.Timeout},
+			{Name: "plan", Provider: cfg.Jira.Plan.Provider, Model: cfg.Jira.Plan.Model, Timeout: cfg.Jira.Plan.Timeout},
+			{Name: "implement", Provider: cfg.Jira.Implement.Provider, Model: cfg.Jira.Implement.Model, Timeout: cfg.Jira.Implement.Timeout},
+			{Name: "review_fix", Provider: cfg.Jira.ReviewFix.Provider, Model: cfg.Jira.ReviewFix.Model, Timeout: cfg.Jira.ReviewFix.Timeout},
 		},
 	}
 
