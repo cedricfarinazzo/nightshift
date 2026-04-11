@@ -107,10 +107,9 @@ nightshift jira preview --plain         # No TUI pager
 |------|-------------|
 | `--ticket` | Process a single ticket by key |
 | `--max-tickets` | Max tickets to process (default from config) |
-| `--skip-validation` | Skip LLM quality validation |
+| `--skip-validation` | Accepted for compatibility; validation is still performed |
 | `--todo-only` | Only process TODO-status tickets |
 | `--review-only` | Only process review-feedback tickets |
-| `--yes`, `-y` | Skip confirmation prompt |
 
 ### `nightshift jira preview` flags
 
@@ -121,6 +120,7 @@ nightshift jira preview --plain         # No TUI pager
 | `--explain` | Show detailed budget breakdown |
 | `--json` | Output as JSON |
 | `--plain` | Disable TUI pager |
+| `--type` | Filter tickets by issue type (e.g. Bug, Story) |
 
 ## Global Flags
 

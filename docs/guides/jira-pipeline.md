@@ -21,12 +21,12 @@ validate → plan → implement → commit → pr → status
 
 | Phase | What happens |
 |-------|-------------|
-| **validate** | LLM scores ticket 1–10. Score < 6 → `HandleInvalidTicket` → ticket rejected. |
-| **plan** | LLM writes an implementation plan and posts it as a Jira comment. Ticket transitions to "En cours" (in-progress). |
+| **validate** | LLM scores ticket 1–10. Score < 6 → `HandleInvalidTicket` → ticket rejected. Successful validation transitions the ticket to "En cours" (in-progress). |
+| **plan** | LLM writes an implementation plan and posts it as a Jira comment. |
 | **implement** | LLM runs in the workspace directory and makes code changes. |
 | **commit** | Staged changes are committed with `git commit` and pushed to the feature branch. |
-| **pr** | `gh pr create` (or `gh pr edit` for existing open PR) creates the pull request. Ticket transitions to review. |
-| **status** | Summary comment posted; ticket marked completed internally. |
+| **pr** | `gh pr create` (or `gh pr edit` for existing open PR) creates the pull request. |
+| **status** | Summary comment posted; ticket transitions to review and is marked completed internally. |
 
 ### Review Phase (separate loop)
 

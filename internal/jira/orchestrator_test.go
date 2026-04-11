@@ -851,8 +851,49 @@ func TestDetectResumeState_AlreadyComplete(t *testing.T) {
 		nightshiftComment(CommentStatusChange, "complete"),
 	}}
 	rs := detectResumeState(ticket)
-	if rs.startPhase != PhaseStatus {
-		t.Errorf("want PhaseStatus (complete), got %s", rs.startPhase)
+	if !rs.alreadyDone {
+		t.Error("want alreadyDone=true for ticket with status-change comment")
+	}
+}
+
+func TestProcessTicket_AlreadyComplete_EarlyExit(t *testing.T) {
+	client := &stubJiraClient{}
+	implAgent := &stubAgent{output: "plan"}
+	validationAgent := &stubAgent{output: `{"score": 9, "valid": true, "reasoning": "ok"}`}
+	o := &Orchestrator{
+		client:          client,
+		validationAgent: validationAgent,
+		implAgent:       implAgent,
+		fnHasChanges:    func(_ context.Context, _ string) (bool, error) { return false, nil },
+		fnCommitAndPush: func(_ context.Context, _, _ string) error { return nil },
+		fnCreatePR:      func(_ context.Context, _ RepoWorkspace, _ Ticket, _ string) (*PRInfo, error) { return &PRInfo{URL: "u"}, nil },
+		fnFindPR:        func(_ context.Context, _, _ string) (*PRInfo, error) { return nil, nil },
+		fnFetchReviews:  func(_ context.Context, _, _ string) (*PRReviewState, error) { return nil, nil },
+		fnPostPRComment: func(_ context.Context, _, _, _ string) error { return nil },
+	}
+	ticket := Ticket{
+		Key: "T-99",
+		Comments: []Comment{
+			nightshiftComment(CommentValidation, "ok"),
+			nightshiftComment(CommentPlan, "plan"),
+			nightshiftComment(CommentImplement, "done"),
+			nightshiftComment(CommentPR, "PRs created:\nhttps://github.com/org/repo/pull/1"),
+			nightshiftComment(CommentStatusChange, "Ticket processing complete."),
+		},
+	}
+	result, err := o.ProcessTicket(context.Background(), ticket, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Status != TicketCompleted {
+		t.Errorf("status = %s, want completed", result.Status)
+	}
+	// No new comments or transitions should have been posted.
+	if len(client.postCommentCalls) != 0 {
+		t.Errorf("expected no new comments for already-complete ticket, got %d", len(client.postCommentCalls))
+	}
+	if len(client.transitionCalls) != 0 {
+		t.Errorf("expected no transitions for already-complete ticket, got %d", len(client.transitionCalls))
 	}
 }
 

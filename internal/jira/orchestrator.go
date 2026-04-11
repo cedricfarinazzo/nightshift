@@ -127,8 +127,9 @@ var phaseOrder = map[Phase]int{
 // resumeState holds the phase to start from and any data recovered from prior
 // nightshift comments on the ticket.
 type resumeState struct {
-	startPhase    Phase
-	recoveredPlan string   // non-empty when resuming from PhaseImplement or later
+	startPhase      Phase
+	alreadyDone     bool
+	recoveredPlan   string   // non-empty when resuming from PhaseImplement or later
 	recoveredPRURLs []string // non-empty when resuming from PhaseStatus
 }
 
@@ -148,8 +149,9 @@ func detectResumeState(ticket Ticket) resumeState {
 
 	switch {
 	case hasStatus:
-		// Already fully completed; nothing to do.
-		return resumeState{startPhase: PhaseStatus}
+		// Already fully completed; signal early exit so ProcessTicket skips all phases
+		// and avoids duplicate status comments/transitions.
+		return resumeState{alreadyDone: true}
 
 	case hasPR:
 		// PRs exist; only the status transition remains.
@@ -219,6 +221,13 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 	}
 
 	rs := detectResumeState(ticket)
+	if rs.alreadyDone {
+		o.log.Infof("ticket %s: already completed, skipping", ticket.Key)
+		result.Status = TicketCompleted
+		result.Summary = "already completed"
+		result.Duration = time.Since(start)
+		return result, nil
+	}
 	if rs.startPhase != PhaseValidate {
 		o.log.Infof("ticket %s: resuming from phase %s", ticket.Key, rs.startPhase)
 	}
@@ -229,6 +238,19 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 
 	skip := func(phase Phase) bool {
 		return phaseOrder[phase] < phaseOrder[rs.startPhase]
+	}
+
+	// When resuming past the validate phase, ensure the ticket is in-progress
+	// if it is still in the TODO status category (the validate phase handles this
+	// for a fresh run, but a crash before the transition can leave it behind).
+	if skip(PhaseValidate) && ticket.Status.CategoryKey == "new" {
+		if err := o.client.TransitionToInProgress(ctx, ticket.Key); err != nil {
+			o.postErrorComment(ctx, ticket.Key, rs.startPhase, err)
+			result.Status = TicketFailed
+			result.Error = err.Error()
+			result.Duration = time.Since(start)
+			return result, nil
+		}
 	}
 
 	// Phase 1: Validate
@@ -364,14 +386,22 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 				time.Since(prStart))
 		}
 	} else if skip(PhaseCommit) && !skip(PhaseStatus) {
-		// Resuming at PhaseStatus with PR URLs recovered from comments; find any
-		// additional open PRs in the workspace repos in case the comment was incomplete.
-		if ws != nil && len(rs.recoveredPRURLs) == 0 {
+		// Resuming at PhaseStatus: scan workspace repos for open PRs and merge with
+		// any URLs recovered from comments, deduplicating to avoid duplicates when
+		// the comment contained only a subset of the actual PRs.
+		if ws != nil {
 			branch := BranchName(ticket.Key)
+			seenURLs := make(map[string]struct{}, len(result.PRURLs))
+			for _, url := range result.PRURLs {
+				seenURLs[url] = struct{}{}
+			}
 			for _, repo := range ws.Repos {
 				pr, err := o.fnFindPR(ctx, repo.Path, branch)
 				if err == nil && pr != nil {
-					result.PRURLs = append(result.PRURLs, pr.URL)
+					if _, seen := seenURLs[pr.URL]; !seen {
+						result.PRURLs = append(result.PRURLs, pr.URL)
+						seenURLs[pr.URL] = struct{}{}
+					}
 				}
 			}
 		}

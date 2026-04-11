@@ -331,6 +331,7 @@ func TestJiraPreviewCmd_Flags(t *testing.T) {
 		{"plain"},
 		{"validate"},
 		{"explain"},
+		{"type"},
 	}
 	for _, f := range flags {
 		if jiraPreviewCmd.Flags().Lookup(f.name) == nil {
