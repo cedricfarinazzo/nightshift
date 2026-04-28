@@ -27,6 +27,7 @@ type PRReviewState struct {
 	ReviewDecision string
 	Reviews        []Review
 	Comments       []PRComment
+	InlineFetchErr error // non-nil when inline comment fetch failed (non-fatal)
 }
 
 // Review represents a single pull request review.
@@ -167,10 +168,10 @@ func FetchPRReviewComments(ctx context.Context, repoPath, prURL string) (*PRRevi
 	}
 
 	// Also fetch inline review thread comments via the GitHub API.
-	inline, err := fetchInlineReviewComments(ctx, repoPath, rs.Number)
-	if err != nil {
-		// Non-fatal: log and continue with only general comments.
-		_ = err
+	inline, inlineErr := fetchInlineReviewComments(ctx, repoPath, rs.Number)
+	if inlineErr != nil {
+		// Non-fatal: include error in result so callers can log it.
+		rs.InlineFetchErr = inlineErr
 	} else {
 		rs.Comments = append(rs.Comments, inline...)
 	}

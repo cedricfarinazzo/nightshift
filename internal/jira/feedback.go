@@ -63,13 +63,16 @@ func (o *Orchestrator) ProcessFeedback(ctx context.Context, ticket Ticket, ws *W
 	if ws != nil {
 		for _, repo := range ws.Repos {
 			// Find the PR for this ticket's branch.
-			prInfo, err := o.fnFindPR(ctx, repo.Path, BranchName(ticket.Key))
+			branch := BranchName(ticket.Key)
+			prInfo, err := o.fnFindPR(ctx, repo.Path, branch)
 			if err != nil {
 				return nil, fmt.Errorf("jira: feedback: find pr %s: %w", repo.Name, err)
 			}
 			if prInfo == nil {
+				o.log.Infof("ticket %s: no open PR found for branch %s in repo %s", ticket.Key, branch, repo.Name)
 				continue
 			}
+			o.log.Infof("ticket %s: found PR %s in repo %s", ticket.Key, prInfo.URL, repo.Name)
 			result.PRURLs = append(result.PRURLs, prInfo.URL)
 
 			// Fetch the current review state.
@@ -77,12 +80,27 @@ func (o *Orchestrator) ProcessFeedback(ctx context.Context, ticket Ticket, ws *W
 			if err != nil {
 				return nil, fmt.Errorf("jira: feedback: fetch reviews %s: %w", repo.Name, err)
 			}
+			inlineCount := 0
+			for _, c := range reviewState.Comments {
+				if c.Path != "" {
+					inlineCount++
+				}
+			}
+			if reviewState.InlineFetchErr != nil {
+				o.log.Errorf("ticket %s: fetch inline comments %s: %v", ticket.Key, prInfo.URL, reviewState.InlineFetchErr)
+			}
+			o.log.Infof("ticket %s: PR %s — reviewDecision=%q reviews=%d comments=%d inline=%d actionable=%v",
+				ticket.Key, prInfo.URL, reviewState.ReviewDecision,
+				len(reviewState.Reviews), len(reviewState.Comments), inlineCount,
+				hasActionableComments(reviewState))
 			result.ReviewsFound += len(reviewState.Reviews) + len(reviewState.Comments)
 
 			// Trigger rework when changes are explicitly requested OR when there
-			// are unresolved non-outdated inline review comments (e.g. Copilot
-			// posts COMMENTED reviews, not CHANGES_REQUESTED).
+			// are inline review comments (e.g. Copilot posts COMMENTED reviews,
+			// not CHANGES_REQUESTED). Outdated comments are included — position=null
+			// means the diff moved after a push, not that the suggestion was resolved.
 			if reviewState.ReviewDecision != "CHANGES_REQUESTED" && !hasActionableComments(reviewState) {
+				o.log.Infof("ticket %s: skipping rework — no actionable comments", ticket.Key)
 				continue
 			}
 
