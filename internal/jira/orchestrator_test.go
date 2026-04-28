@@ -959,3 +959,31 @@ func TestProcessTicket_SkipsValidationWhenAlreadyValidated(t *testing.T) {
 		t.Errorf("status = %s, want completed", result.Status)
 	}
 }
+
+func TestProviderForPhase(t *testing.T) {
+	cfg := JiraConfig{
+		Validation: PhaseConfig{Provider: "claude", Model: "claude-haiku-4.5"},
+		Plan:       PhaseConfig{Provider: "claude", Model: "claude-opus-4"},
+		Implement:  PhaseConfig{Provider: "codex", Model: "o3"},
+	}
+	o := &Orchestrator{cfg: cfg}
+
+	cases := []struct {
+		phase    Phase
+		wantProv string
+		wantMod  string
+	}{
+		{PhaseValidate, "claude", "claude-haiku-4.5"},
+		{PhasePlan, "claude", "claude-opus-4"},
+		{PhaseImplement, "codex", "o3"},
+		{PhaseCommit, "codex", "o3"},
+		{PhasePR, "codex", "o3"},
+		{PhaseStatus, "codex", "o3"},
+	}
+	for _, tc := range cases {
+		prov, mod := o.providerForPhase(tc.phase)
+		if prov != tc.wantProv || mod != tc.wantMod {
+			t.Errorf("phase %s: got %s/%s, want %s/%s", tc.phase, prov, mod, tc.wantProv, tc.wantMod)
+		}
+	}
+}

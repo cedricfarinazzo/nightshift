@@ -559,14 +559,22 @@ func (o *Orchestrator) providerForCommentType(ct CommentType) (provider, model s
 	return o.cfg.Implement.Provider, o.cfg.Implement.Model
 }
 
+// providerForPhase returns the provider/model for the agent that runs a given phase.
+func (o *Orchestrator) providerForPhase(phase Phase) (provider, model string) {
+	switch phase {
+	case PhaseValidate:
+		return o.cfg.Validation.Provider, o.cfg.Validation.Model
+	case PhasePlan:
+		return o.cfg.Plan.Provider, o.cfg.Plan.Model
+	default: // PhaseImplement, PhaseCommit, PhasePR, PhaseStatus
+		return o.cfg.Implement.Provider, o.cfg.Implement.Model
+	}
+}
+
 // postErrorComment posts an error comment to the Jira ticket.
 func (o *Orchestrator) postErrorComment(ctx context.Context, ticketKey string, phase Phase, err error) {
-	// Select provider/model based on which phase failed.
 	ct := CommentError
-	provider, model := o.providerForCommentType(CommentImplement)
-	if phase == PhasePlan {
-		provider, model = o.providerForCommentType(CommentPlan)
-	}
+	provider, model := o.providerForPhase(phase)
 	comment := NightshiftComment{
 		Type:      ct,
 		Timestamp: time.Now(),
