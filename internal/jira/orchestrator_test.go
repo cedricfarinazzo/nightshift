@@ -1014,3 +1014,27 @@ func TestProviderForCommentType(t *testing.T) {
 		}
 	}
 }
+
+func TestValidationCommentMetadataMatchesPhase(t *testing.T) {
+	sc := &stubJiraClient{}
+	o := &Orchestrator{
+		client: sc,
+		cfg: JiraConfig{
+			Validation: PhaseConfig{Provider: "claude", Model: "claude-haiku-4.5"},
+			Plan:       PhaseConfig{Provider: "claude", Model: "claude-opus-4"},
+			Implement:  PhaseConfig{Provider: "codex", Model: "o3"},
+		},
+	}
+
+	o.postPhaseComment(context.Background(), "T-1", CommentValidation, "Ticket validated.", time.Second)
+	o.postErrorComment(context.Background(), "T-1", PhaseValidate, errors.New("validation failed"))
+
+	if len(sc.postCommentCalls) != 2 {
+		t.Fatalf("expected 2 comments, got %d", len(sc.postCommentCalls))
+	}
+	for i, c := range sc.postCommentCalls {
+		if c.Provider != "claude" || c.Model != "claude-haiku-4.5" {
+			t.Errorf("comment[%d] metadata = %s/%s, want claude/claude-haiku-4.5", i, c.Provider, c.Model)
+		}
+	}
+}
