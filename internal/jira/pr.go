@@ -22,6 +22,7 @@ type PRInfo struct {
 // PRReviewState captures the current review state of a pull request.
 type PRReviewState struct {
 	URL            string
+	Number         int
 	State          string
 	ReviewDecision string
 	Reviews        []Review
@@ -148,22 +149,79 @@ func buildPRBody(ticket Ticket, jiraSite string) string {
 	return b.String()
 }
 
-// FetchPRReviewComments fetches the current review state for a PR using `gh pr view --json`.
-// The returned PRComment values represent general PR conversation comments; Path and Line
-// are always empty/zero because this query does not fetch inline review comment metadata.
+// FetchPRReviewComments fetches the current review state for a PR using `gh pr view --json`
+// and appends inline review thread comments from the GitHub API. PRComment.Path and .Line
+// are populated for inline comments.
 func FetchPRReviewComments(ctx context.Context, repoPath, prURL string) (*PRReviewState, error) {
 	out, err := ghExec(ctx, repoPath, "pr", "view", prURL,
-		"--json", "url,state,reviewDecision,reviews,comments")
+		"--json", "url,state,reviewDecision,reviews,comments,number")
 	if err != nil {
 		return nil, fmt.Errorf("jira: pr: fetch review state: %w", err)
 	}
-	return parsePRReviewState(out)
+	rs, err := parsePRReviewState(out)
+	if err != nil {
+		return nil, err
+	}
+
+	// Also fetch inline review thread comments via the GitHub API.
+	inline, err := fetchInlineReviewComments(ctx, repoPath, rs.Number)
+	if err != nil {
+		// Non-fatal: log and continue with only general comments.
+		_ = err
+	} else {
+		rs.Comments = append(rs.Comments, inline...)
+	}
+	return rs, nil
+}
+
+// fetchInlineReviewComments fetches per-line review comments using the GitHub API.
+func fetchInlineReviewComments(ctx context.Context, repoPath string, prNumber int) ([]PRComment, error) {
+	if prNumber == 0 {
+		return nil, nil
+	}
+	out, err := ghExec(ctx, repoPath, "api",
+		fmt.Sprintf("repos/{owner}/{repo}/pulls/%d/comments", prNumber),
+		"--jq", `.[].{author: .user.login, body: .body, path: .path, line: (.line // .original_line), created_at: .created_at}`)
+	if err != nil {
+		return nil, fmt.Errorf("gh api inline comments: %w", err)
+	}
+	return parseInlineComments(out)
+}
+
+// parseInlineComments parses newline-delimited JSON objects from `gh api --jq` output.
+func parseInlineComments(raw string) ([]PRComment, error) {
+	var comments []PRComment
+	for _, line := range strings.Split(strings.TrimSpace(raw), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		var v struct {
+			Author    string    `json:"author"`
+			Body      string    `json:"body"`
+			Path      string    `json:"path"`
+			Line      int       `json:"line"`
+			CreatedAt time.Time `json:"created_at"`
+		}
+		if err := json.Unmarshal([]byte(line), &v); err != nil {
+			continue // skip malformed lines
+		}
+		comments = append(comments, PRComment{
+			Author:    v.Author,
+			Body:      v.Body,
+			Path:      v.Path,
+			Line:      v.Line,
+			CreatedAt: v.CreatedAt,
+		})
+	}
+	return comments, nil
 }
 
 // parsePRReviewState decodes the JSON output of `gh pr view --json ...` into a PRReviewState.
 func parsePRReviewState(raw string) (*PRReviewState, error) {
 	var v struct {
 		URL            string `json:"url"`
+		Number         int    `json:"number"`
 		State          string `json:"state"`
 		ReviewDecision string `json:"reviewDecision"`
 		Reviews        []struct {
@@ -187,6 +245,7 @@ func parsePRReviewState(raw string) (*PRReviewState, error) {
 	}
 	rs := &PRReviewState{
 		URL:            v.URL,
+		Number:         v.Number,
 		State:          v.State,
 		ReviewDecision: v.ReviewDecision,
 	}
