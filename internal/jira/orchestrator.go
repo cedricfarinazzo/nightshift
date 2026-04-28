@@ -551,12 +551,15 @@ func buildPRImplementationComment(ticket Ticket, summary, jiraSite string) strin
 }
 
 // providerForCommentType selects provider/model metadata based on the comment type.
-// Plan comments use the plan phase config; everything else uses the implement config.
 func (o *Orchestrator) providerForCommentType(ct CommentType) (provider, model string) {
-	if ct == CommentPlan {
+	switch ct {
+	case CommentValidation:
+		return o.cfg.Validation.Provider, o.cfg.Validation.Model
+	case CommentPlan:
 		return o.cfg.Plan.Provider, o.cfg.Plan.Model
+	default:
+		return o.cfg.Implement.Provider, o.cfg.Implement.Model
 	}
-	return o.cfg.Implement.Provider, o.cfg.Implement.Model
 }
 
 // providerForPhase returns the provider/model for the agent that runs a given phase.

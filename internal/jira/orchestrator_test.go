@@ -987,3 +987,30 @@ func TestProviderForPhase(t *testing.T) {
 		}
 	}
 }
+
+func TestProviderForCommentType(t *testing.T) {
+	cfg := JiraConfig{
+		Validation: PhaseConfig{Provider: "claude", Model: "claude-haiku-4.5"},
+		Plan:       PhaseConfig{Provider: "claude", Model: "claude-opus-4"},
+		Implement:  PhaseConfig{Provider: "codex", Model: "o3"},
+	}
+	o := &Orchestrator{cfg: cfg}
+
+	cases := []struct {
+		ct       CommentType
+		wantProv string
+		wantMod  string
+	}{
+		{CommentValidation, "claude", "claude-haiku-4.5"},
+		{CommentPlan, "claude", "claude-opus-4"},
+		{CommentImplement, "codex", "o3"},
+		{CommentPR, "codex", "o3"},
+		{CommentStatusChange, "codex", "o3"},
+	}
+	for _, tc := range cases {
+		prov, mod := o.providerForCommentType(tc.ct)
+		if prov != tc.wantProv || mod != tc.wantMod {
+			t.Errorf("comment type %s: got %s/%s, want %s/%s", tc.ct, prov, mod, tc.wantProv, tc.wantMod)
+		}
+	}
+}
