@@ -218,7 +218,8 @@ func prTitle(ticket Ticket) string {
 func findExistingPR(ctx context.Context, repoPath, branch string) (*PRInfo, error) {
 	out, err := ghExec(ctx, repoPath, "pr", "list",
 		"--head", branch,
-		"--json", "number,url,state",
+		"--state", "open",
+		"--json", "number,url",
 		"--limit", "1")
 	if err != nil {
 		return nil, fmt.Errorf("gh pr list: %w", err)
@@ -226,7 +227,6 @@ func findExistingPR(ctx context.Context, repoPath, branch string) (*PRInfo, erro
 	var prs []struct {
 		Number int    `json:"number"`
 		URL    string `json:"url"`
-		State  string `json:"state"`
 	}
 	if err := json.Unmarshal([]byte(out), &prs); err != nil {
 		return nil, fmt.Errorf("parse pr list: %w", err)
@@ -254,7 +254,8 @@ func fetchPRInfo(ctx context.Context, repoPath, prURL string) (*PRInfo, error) {
 }
 
 // ghExec runs a gh command in repoPath and returns trimmed combined output.
-func ghExec(ctx context.Context, repoPath string, args ...string) (string, error) {
+// It is a variable so tests can substitute a fake implementation.
+var ghExec = func(ctx context.Context, repoPath string, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, "gh", args...)
 	cmd.Dir = repoPath
 	out, err := cmd.CombinedOutput()
