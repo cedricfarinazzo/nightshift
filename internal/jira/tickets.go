@@ -22,6 +22,9 @@ type Ticket struct {
 	IssueLinks         []IssueLink
 	Reporter           string
 	Assignee           string
+	ParentKey          string
+	ParentSummary      string
+	ParentDescription  string
 }
 
 // Comment represents a single comment on a Jira issue.
@@ -49,7 +52,11 @@ func (c *Client) FetchTodoTickets(ctx context.Context) ([]Ticket, error) {
 		`project = "%s" AND statusCategory = "To Do" AND labels = "%s" ORDER BY created ASC`,
 		c.cfg.Project, c.cfg.Label,
 	)
-	return c.fetchTickets(ctx, jql)
+	tickets, err := c.fetchTickets(ctx, jql)
+	if err != nil {
+		return nil, err
+	}
+	return c.fetchParentDescriptions(ctx, tickets), nil
 }
 
 // FetchReviewTickets fetches issues that are in a review status, filtered by the configured label.
@@ -65,7 +72,11 @@ func (c *Client) FetchReviewTickets(ctx context.Context, statusMap *StatusMap) (
 		`project = "%s" AND status in (%s) AND labels = "%s" ORDER BY created ASC`,
 		c.cfg.Project, strings.Join(names, ", "), c.cfg.Label,
 	)
-	return c.fetchTickets(ctx, jql)
+	tickets, err := c.fetchTickets(ctx, jql)
+	if err != nil {
+		return nil, err
+	}
+	return c.fetchParentDescriptions(ctx, tickets), nil
 }
 
 // fetchTickets executes a JQL query with cursor-based pagination and returns all matching tickets.
@@ -73,7 +84,7 @@ func (c *Client) fetchTickets(ctx context.Context, jql string) ([]Ticket, error)
 	var tickets []Ticket
 	fields := []string{
 		"summary", "description", "comment", "labels", "status",
-		"issuelinks", "reporter", "assignee", "issuetype",
+		"issuelinks", "reporter", "assignee", "issuetype", "parent",
 	}
 	nextPageToken := ""
 	for {
@@ -132,8 +143,43 @@ func issueToTicket(issue *model.IssueScheme) Ticket {
 		for _, link := range f.IssueLinks {
 			t.IssueLinks = append(t.IssueLinks, issueLinkToLink(issue.Key, link))
 		}
+		if f.Parent != nil {
+			t.ParentKey = f.Parent.Key
+			if f.Parent.Fields != nil {
+				t.ParentSummary = f.Parent.Fields.Summary
+			}
+		}
 	}
 	return t
+}
+
+// fetchParentDescriptions fetches the description for each unique parent key and
+// populates ParentDescription on the tickets that reference it. Failures are
+// non-fatal: the ticket is still usable, just without parent description.
+func (c *Client) fetchParentDescriptions(ctx context.Context, tickets []Ticket) []Ticket {
+	// Deduplicate parent keys.
+	parentDescs := make(map[string]string)
+	for _, t := range tickets {
+		if t.ParentKey != "" {
+			parentDescs[t.ParentKey] = ""
+		}
+	}
+	for key := range parentDescs {
+		issue, _, err := c.jira.Issue.Get(ctx, key, []string{"description"}, nil)
+		if err != nil {
+			c.log.Errorf("fetch parent %s description: %v", key, err)
+			continue
+		}
+		if issue != nil && issue.Fields != nil && issue.Fields.Description != nil {
+			parentDescs[key] = extractText(issue.Fields.Description)
+		}
+	}
+	for i, t := range tickets {
+		if t.ParentKey != "" {
+			tickets[i].ParentDescription = parentDescs[t.ParentKey]
+		}
+	}
+	return tickets
 }
 
 // commentToComment maps an IssueCommentScheme to a Comment.

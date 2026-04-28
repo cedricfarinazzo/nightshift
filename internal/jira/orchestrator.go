@@ -34,14 +34,15 @@ const (
 
 // TicketResult holds the outcome of processing a single Jira ticket.
 type TicketResult struct {
-	TicketKey string        `json:"ticket_key"`
-	Status    TicketStatus  `json:"status"`
-	Phase     Phase         `json:"phase"`
-	PRURLs    []string      `json:"pr_urls,omitempty"`
-	Plan      string        `json:"plan,omitempty"`
-	Summary   string        `json:"summary,omitempty"`
-	Error     string        `json:"error,omitempty"`
-	Duration  time.Duration `json:"duration"`
+	TicketKey              string        `json:"ticket_key"`
+	Status                 TicketStatus  `json:"status"`
+	Phase                  Phase         `json:"phase"`
+	PRURLs                 []string      `json:"pr_urls,omitempty"`
+	Plan                   string        `json:"plan,omitempty"`
+	ImplementationSummary  string        `json:"implementation_summary,omitempty"`
+	Summary                string        `json:"summary,omitempty"`
+	Error                  string        `json:"error,omitempty"`
+	Duration               time.Duration `json:"duration"`
 }
 
 // jiraClient defines the Jira operations needed by the orchestrator.
@@ -60,6 +61,7 @@ type Orchestrator struct {
 	validationAgent agents.Agent
 	implAgent       agents.Agent
 	reviewFixAgent  agents.Agent
+	skipValidation  bool
 	log             *logging.Logger
 
 	// ops are injectable for testing; set to real functions by NewOrchestrator.
@@ -88,6 +90,12 @@ func WithImplAgent(a agents.Agent) OrchestratorOption {
 // When not set, ProcessFeedback falls back to the impl agent.
 func WithReviewFixAgent(a agents.Agent) OrchestratorOption {
 	return func(o *Orchestrator) { o.reviewFixAgent = a }
+}
+
+// WithSkipValidation disables the LLM validation phase. The ticket is transitioned
+// to in-progress directly, skipping the quality-score check.
+func WithSkipValidation() OrchestratorOption {
+	return func(o *Orchestrator) { o.skipValidation = true }
 }
 
 // NewOrchestrator creates an Orchestrator with the given client, config, and options.
@@ -212,6 +220,12 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 		o.fnCommitAndPush = CommitAndPush
 		o.fnCreatePR = CreateOrUpdatePR
 	}
+	if o.fnPostPRComment == nil {
+		o.fnPostPRComment = func(ctx context.Context, repoPath, prURL, body string) error {
+			_, err := ghExec(ctx, repoPath, "pr", "comment", prURL, "--body", body)
+			return err
+		}
+	}
 
 	start := time.Now()
 	result := &TicketResult{TicketKey: ticket.Key}
@@ -256,28 +270,32 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 	// Phase 1: Validate
 	if !skip(PhaseValidate) {
 		result.Phase = PhaseValidate
-		vr, err := ValidateTicket(ctx, o.validationAgent, ticket)
-		if err != nil {
-			o.postErrorComment(ctx, ticket.Key, PhaseValidate, err)
-			result.Status = TicketFailed
-			result.Error = err.Error()
-			result.Duration = time.Since(start)
-			o.log.Errorf("ticket %s: validation failed: %v", ticket.Key, err)
-			return result, nil
-		}
-		if !vr.Valid {
-			if hErr := o.client.HandleInvalidTicket(ctx, ticket.Key, vr); hErr != nil {
-				o.log.Errorf("ticket %s: handle invalid: %v", ticket.Key, hErr)
+		if !o.skipValidation {
+			vr, err := ValidateTicket(ctx, o.validationAgent, ticket)
+			if err != nil {
+				o.postErrorComment(ctx, ticket.Key, PhaseValidate, err)
+				result.Status = TicketFailed
+				result.Error = err.Error()
+				result.Duration = time.Since(start)
+				o.log.Errorf("ticket %s: validation failed: %v", ticket.Key, err)
+				return result, nil
 			}
-			result.Status = TicketRejected
-			result.Summary = fmt.Sprintf("rejected: score %d/10", vr.Score)
-			result.Duration = time.Since(start)
-			o.log.Infof("ticket %s rejected (score %d/10)", ticket.Key, vr.Score)
-			return result, nil
+			if !vr.Valid {
+				if hErr := o.client.HandleInvalidTicket(ctx, ticket.Key, vr); hErr != nil {
+					o.log.Errorf("ticket %s: handle invalid: %v", ticket.Key, hErr)
+				}
+				result.Status = TicketRejected
+				result.Summary = fmt.Sprintf("rejected: score %d/10", vr.Score)
+				result.Duration = time.Since(start)
+				o.log.Infof("ticket %s rejected (score %d/10)", ticket.Key, vr.Score)
+				return result, nil
+			}
+			o.postPhaseComment(ctx, ticket.Key, CommentValidation,
+				fmt.Sprintf("Ticket validated (score %d/10).", vr.Score), time.Since(start))
+			o.log.Infof("ticket %s validated (score %d/10)", ticket.Key, vr.Score)
+		} else {
+			o.log.Infof("ticket %s: validation skipped", ticket.Key)
 		}
-		o.postPhaseComment(ctx, ticket.Key, CommentValidation,
-			fmt.Sprintf("Ticket validated (score %d/10).", vr.Score), time.Since(start))
-		o.log.Infof("ticket %s validated (score %d/10)", ticket.Key, vr.Score)
 
 		// Transition to In Progress
 		if err := o.client.TransitionToInProgress(ctx, ticket.Key); err != nil {
@@ -333,6 +351,7 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 			o.log.Errorf("ticket %s: implement failed: %v", ticket.Key, err)
 			return result, nil
 		}
+		result.ImplementationSummary = implResult.Output
 		o.postPhaseComment(ctx, ticket.Key, CommentImplement, implResult.Output, time.Since(implStart))
 		o.log.Infof("ticket %s: implementation complete", ticket.Key)
 	}
@@ -369,6 +388,11 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 		// Phase 5: PR
 		result.Phase = PhasePR
 		prStart := time.Now()
+		type repoPR struct {
+			repo RepoWorkspace
+			url  string
+		}
+		var repoPRs []repoPR
 		for _, repo := range changedRepos {
 			prInfo, err := o.fnCreatePR(ctx, repo, ticket, o.cfg.Site)
 			if err != nil {
@@ -379,11 +403,21 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 				return result, nil
 			}
 			result.PRURLs = append(result.PRURLs, prInfo.URL)
+			repoPRs = append(repoPRs, repoPR{repo: repo, url: prInfo.URL})
 		}
 		if len(result.PRURLs) > 0 {
 			o.postPhaseComment(ctx, ticket.Key, CommentPR,
 				fmt.Sprintf("PRs created:\n%s", strings.Join(result.PRURLs, "\n")),
 				time.Since(prStart))
+			// Post implementation summary as PR comment so reviewers have full context.
+			if result.ImplementationSummary != "" {
+				prComment := buildPRImplementationComment(ticket, result.ImplementationSummary, o.cfg.Site)
+				for _, rpr := range repoPRs {
+					if err := o.fnPostPRComment(ctx, rpr.repo.Path, rpr.url, prComment); err != nil {
+						o.log.Errorf("ticket %s: post impl summary on PR %s: %v", ticket.Key, rpr.url, err)
+					}
+				}
+			}
 		}
 	} else if skip(PhaseCommit) && !skip(PhaseStatus) {
 		// Resuming at PhaseStatus: scan workspace repos for open PRs and merge with
@@ -422,29 +456,49 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 	result.Status = TicketCompleted
 	result.Summary = fmt.Sprintf("completed: %d PRs", len(result.PRURLs))
 	result.Duration = time.Since(start)
-	o.postPhaseComment(ctx, ticket.Key, CommentStatusChange,
-		fmt.Sprintf("Ticket processing complete. Duration: %s. PRs: %d.",
-			result.Duration.Round(time.Second), len(result.PRURLs)),
-		result.Duration)
+	statusBody := fmt.Sprintf("Ticket processing complete. Duration: %s. PRs: %d.",
+		result.Duration.Round(time.Second), len(result.PRURLs))
+	if len(result.PRURLs) > 0 {
+		statusBody += "\n\n" + strings.Join(result.PRURLs, "\n")
+	}
+	o.postPhaseComment(ctx, ticket.Key, CommentStatusChange, statusBody, result.Duration)
 	o.log.Infof("ticket %s: completed in %s", ticket.Key, result.Duration.Round(time.Second))
 	return result, nil
+}
+
+// buildParentSection appends a parent ticket section to b when the ticket has a parent.
+func buildParentSection(b *strings.Builder, ticket Ticket) {
+	if ticket.ParentKey == "" {
+		return
+	}
+	fmt.Fprintf(b, "\n## Parent Ticket\nKey: %s\nSummary: %s\n", ticket.ParentKey, ticket.ParentSummary)
+	if ticket.ParentDescription != "" {
+		fmt.Fprintf(b, "Description:\n%s\n", ticket.ParentDescription)
+	}
+}
+
+// buildCommentsSection appends a comments section to b when the ticket has comments.
+func buildCommentsSection(b *strings.Builder, ticket Ticket) {
+	if len(ticket.Comments) == 0 {
+		return
+	}
+	b.WriteString("\n## Comments\n")
+	for _, c := range ticket.Comments {
+		fmt.Fprintf(b, "- %s: %s\n", c.Author, c.Body)
+	}
 }
 
 // buildPlanPrompt constructs the prompt for the plan phase.
 func (o *Orchestrator) buildPlanPrompt(ticket Ticket) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "You are a planning agent. Create a detailed implementation plan for this Jira ticket.\n\n")
-	fmt.Fprintf(&b, "## Ticket\nKey: %s\nTitle: %s\n", ticket.Key, ticket.Summary)
+	buildParentSection(&b, ticket)
+	fmt.Fprintf(&b, "\n## Ticket\nKey: %s\nTitle: %s\n", ticket.Key, ticket.Summary)
 	fmt.Fprintf(&b, "Description:\n%s\n", ticket.Description)
 	if ticket.AcceptanceCriteria != "" {
 		fmt.Fprintf(&b, "\nAcceptance Criteria:\n%s\n", ticket.AcceptanceCriteria)
 	}
-	if len(ticket.Comments) > 0 {
-		b.WriteString("\n## Comments\n")
-		for _, c := range ticket.Comments {
-			fmt.Fprintf(&b, "- %s: %s\n", c.Author, c.Body)
-		}
-	}
+	buildCommentsSection(&b, ticket)
 	b.WriteString("\n## Instructions\n")
 	b.WriteString("1. Break the work into clear, ordered steps\n")
 	b.WriteString("2. Identify files to create or modify\n")
@@ -457,11 +511,13 @@ func (o *Orchestrator) buildPlanPrompt(ticket Ticket) string {
 func (o *Orchestrator) buildImplementPrompt(ticket Ticket, plan string, ws *Workspace) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "You are an implementation agent. Implement the following Jira ticket.\n\n")
-	fmt.Fprintf(&b, "## Ticket\nKey: %s\nTitle: %s\n", ticket.Key, ticket.Summary)
+	buildParentSection(&b, ticket)
+	fmt.Fprintf(&b, "\n## Ticket\nKey: %s\nTitle: %s\n", ticket.Key, ticket.Summary)
 	fmt.Fprintf(&b, "Description:\n%s\n", ticket.Description)
 	if ticket.AcceptanceCriteria != "" {
 		fmt.Fprintf(&b, "\nAcceptance Criteria:\n%s\n", ticket.AcceptanceCriteria)
 	}
+	buildCommentsSection(&b, ticket)
 	fmt.Fprintf(&b, "\n## Plan\n%s\n", plan)
 	if ws != nil && len(ws.Repos) > 0 {
 		b.WriteString("\n## Workspace\n")
@@ -471,10 +527,26 @@ func (o *Orchestrator) buildImplementPrompt(ticket Ticket, plan string, ws *Work
 		}
 	}
 	b.WriteString("\n## Instructions\n")
-	b.WriteString("1. Implement the plan step by step\n")
+	b.WriteString("1. Implement the plan step by step — complete EVERY step before stopping\n")
 	b.WriteString("2. Make all necessary code changes\n")
-	b.WriteString("3. Ensure tests pass\n")
-	b.WriteString("4. Do not commit or push — that will be handled separately\n")
+	b.WriteString("3. Run tests and fix all failures before stopping\n")
+	b.WriteString("4. Verify ALL acceptance criteria are met before stopping\n")
+	b.WriteString("5. Do not commit or push — that will be handled separately\n")
+	b.WriteString("6. If you encounter ambiguity, make a reasonable assumption and document it in a comment\n")
+	b.WriteString("7. Do NOT stop early — continue until the entire plan is implemented and tests pass\n")
+	return b.String()
+}
+
+// buildPRImplementationComment builds the GitHub PR comment body with the agent's
+// implementation summary so reviewers have full context inline.
+func buildPRImplementationComment(ticket Ticket, summary, jiraSite string) string {
+	var b strings.Builder
+	b.WriteString("🤖 **Nightshift — Implementation Summary**\n\n")
+	fmt.Fprintf(&b, "**Ticket:** [%s — %s](%s)\n\n", ticket.Key, ticket.Summary, jiraBrowseURL(jiraSite, ticket.Key))
+	b.WriteString("### What was done\n\n")
+	b.WriteString(summary)
+	b.WriteString("\n\n---\n")
+	b.WriteString("*Generated automatically by [Nightshift](https://github.com/cedricfarinazzo/nightshift)*\n")
 	return b.String()
 }
 

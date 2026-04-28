@@ -96,14 +96,10 @@ func runJira(cmd *cobra.Command, _ []string) error {
 	orchOpts := []jira.OrchestratorOption{
 		jira.WithImplAgent(implAgent),
 		jira.WithReviewFixAgent(reviewFixAgent),
+		jira.WithValidationAgent(validationAgent),
 	}
-	// Always provide a validation agent; skip-validation requires orchestrator
-	// support (planned for a future story) and is accepted here as a no-op flag.
-	if !skipValidation {
-		orchOpts = append(orchOpts, jira.WithValidationAgent(validationAgent))
-	} else {
-		orchOpts = append(orchOpts, jira.WithValidationAgent(validationAgent))
-		log.Infof("skip-validation flag set; orchestrator-level skip support pending")
+	if skipValidation {
+		orchOpts = append(orchOpts, jira.WithSkipValidation())
 	}
 	orch := jira.NewOrchestrator(client, cfg.Jira, orchOpts...)
 
