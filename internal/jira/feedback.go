@@ -142,11 +142,13 @@ func (o *Orchestrator) ProcessFeedback(ctx context.Context, ticket Ticket, ws *W
 }
 
 // hasActionableComments returns true when the review state has at least one
-// unresolved, non-outdated inline comment — used to trigger rework even when
-// ReviewDecision is not CHANGES_REQUESTED (e.g. Copilot COMMENTED reviews).
+// inline comment — used to trigger rework even when ReviewDecision is not
+// CHANGES_REQUESTED (e.g. Copilot COMMENTED reviews). Outdated comments are
+// included: position=null means the diff moved after a push, not that the
+// suggestion was resolved.
 func hasActionableComments(rs *PRReviewState) bool {
 	for _, c := range rs.Comments {
-		if c.Path != "" && !c.Outdated {
+		if c.Path != "" {
 			return true
 		}
 	}
@@ -166,8 +168,12 @@ func buildReworkPrompt(ticket Ticket, review *PRReviewState, repo RepoWorkspace)
 	}
 	b.WriteString("### Inline Comments\n\n")
 	for _, c := range review.Comments {
-		if c.Path != "" && !c.Outdated {
-			fmt.Fprintf(&b, "**%s:%d** (%s):\n%s\n\n", c.Path, c.Line, c.Author, c.Body)
+		if c.Path != "" {
+			if c.Outdated {
+				fmt.Fprintf(&b, "**%s:%d** (%s) [OUTDATED — verify if still applies to current code]:\n%s\n\n", c.Path, c.Line, c.Author, c.Body)
+			} else {
+				fmt.Fprintf(&b, "**%s:%d** (%s):\n%s\n\n", c.Path, c.Line, c.Author, c.Body)
+			}
 		}
 	}
 	b.WriteString("### Instructions\n")
