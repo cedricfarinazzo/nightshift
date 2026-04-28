@@ -49,7 +49,10 @@ type PRComment struct {
 	Path string
 	// Line is the commented line number for inline review comments. Zero when the data
 	// source does not include inline review comment metadata.
-	Line      int
+	Line int
+	// Outdated is true when the comment was made on a diff that no longer applies
+	// (GitHub sets position=null for such comments).
+	Outdated  bool
 	CreatedAt time.Time
 }
 
@@ -175,13 +178,15 @@ func FetchPRReviewComments(ctx context.Context, repoPath, prURL string) (*PRRevi
 }
 
 // fetchInlineReviewComments fetches per-line review comments using the GitHub API.
+// position is null for outdated comments (code no longer in the diff); those are
+// marked PRComment.Outdated = true.
 func fetchInlineReviewComments(ctx context.Context, repoPath string, prNumber int) ([]PRComment, error) {
 	if prNumber == 0 {
 		return nil, nil
 	}
 	out, err := ghExec(ctx, repoPath, "api",
 		fmt.Sprintf("repos/{owner}/{repo}/pulls/%d/comments", prNumber),
-		"--jq", `.[].{author: .user.login, body: .body, path: .path, line: (.line // .original_line), created_at: .created_at}`)
+		"--jq", `.[].{author: .user.login, body: .body, path: .path, line: (.line // .original_line), position: .position, created_at: .created_at}`)
 	if err != nil {
 		return nil, fmt.Errorf("gh api inline comments: %w", err)
 	}
@@ -201,6 +206,7 @@ func parseInlineComments(raw string) ([]PRComment, error) {
 			Body      string    `json:"body"`
 			Path      string    `json:"path"`
 			Line      int       `json:"line"`
+			Position  *int      `json:"position"` // null = outdated comment
 			CreatedAt time.Time `json:"created_at"`
 		}
 		if err := json.Unmarshal([]byte(line), &v); err != nil {
@@ -211,6 +217,7 @@ func parseInlineComments(raw string) ([]PRComment, error) {
 			Body:      v.Body,
 			Path:      v.Path,
 			Line:      v.Line,
+			Outdated:  v.Position == nil,
 			CreatedAt: v.CreatedAt,
 		})
 	}

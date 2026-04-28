@@ -79,8 +79,10 @@ func (o *Orchestrator) ProcessFeedback(ctx context.Context, ticket Ticket, ws *W
 			}
 			result.ReviewsFound += len(reviewState.Reviews) + len(reviewState.Comments)
 
-			// Skip repos where the reviewer has not requested changes.
-			if reviewState.ReviewDecision != "CHANGES_REQUESTED" {
+			// Trigger rework when changes are explicitly requested OR when there
+			// are unresolved non-outdated inline review comments (e.g. Copilot
+			// posts COMMENTED reviews, not CHANGES_REQUESTED).
+			if reviewState.ReviewDecision != "CHANGES_REQUESTED" && !hasActionableComments(reviewState) {
 				continue
 			}
 
@@ -139,6 +141,18 @@ func (o *Orchestrator) ProcessFeedback(ctx context.Context, ticket Ticket, ws *W
 	return result, nil
 }
 
+// hasActionableComments returns true when the review state has at least one
+// unresolved, non-outdated inline comment — used to trigger rework even when
+// ReviewDecision is not CHANGES_REQUESTED (e.g. Copilot COMMENTED reviews).
+func hasActionableComments(rs *PRReviewState) bool {
+	for _, c := range rs.Comments {
+		if c.Path != "" && !c.Outdated {
+			return true
+		}
+	}
+	return false
+}
+
 // buildReworkPrompt constructs the agent prompt from PR review comments.
 func buildReworkPrompt(ticket Ticket, review *PRReviewState, repo RepoWorkspace) string {
 	var b strings.Builder
@@ -152,7 +166,7 @@ func buildReworkPrompt(ticket Ticket, review *PRReviewState, repo RepoWorkspace)
 	}
 	b.WriteString("### Inline Comments\n\n")
 	for _, c := range review.Comments {
-		if c.Path != "" {
+		if c.Path != "" && !c.Outdated {
 			fmt.Fprintf(&b, "**%s:%d** (%s):\n%s\n\n", c.Path, c.Line, c.Author, c.Body)
 		}
 	}
