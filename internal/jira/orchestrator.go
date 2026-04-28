@@ -114,7 +114,93 @@ func NewOrchestrator(client *Client, cfg JiraConfig, opts ...OrchestratorOption)
 	return o
 }
 
+// phaseOrder defines the processing order of lifecycle phases.
+var phaseOrder = map[Phase]int{
+	PhaseValidate:  0,
+	PhasePlan:      1,
+	PhaseImplement: 2,
+	PhaseCommit:    3,
+	PhasePR:        4,
+	PhaseStatus:    5,
+}
+
+// resumeState holds the phase to start from and any data recovered from prior
+// nightshift comments on the ticket.
+type resumeState struct {
+	startPhase      Phase
+	alreadyDone     bool
+	recoveredPlan   string   // non-empty when resuming from PhaseImplement or later
+	recoveredPRURLs []string // non-empty when resuming from PhaseStatus
+}
+
+// detectResumeState inspects existing nightshift comments on the ticket and
+// returns the phase to start from plus any previously recorded data needed to
+// continue processing. This allows a re-run to skip phases that already succeeded.
+func detectResumeState(ticket Ticket) resumeState {
+	comments := ParseNightshiftComments(ticket.Comments)
+
+	// Walk the phase sequence from latest to earliest to find the furthest
+	// completed phase.
+	hasPR := GetLastCommentOfType(comments, CommentPR) != nil
+	hasImpl := GetLastCommentOfType(comments, CommentImplement) != nil
+	hasPlan := GetLastCommentOfType(comments, CommentPlan) != nil
+	hasValidation := GetLastCommentOfType(comments, CommentValidation) != nil
+	hasStatus := GetLastCommentOfType(comments, CommentStatusChange) != nil
+
+	switch {
+	case hasStatus:
+		// Already fully completed; signal early exit so ProcessTicket skips all phases
+		// and avoids duplicate status comments/transitions.
+		return resumeState{alreadyDone: true}
+
+	case hasPR:
+		// PRs exist; only the status transition remains.
+		// Recover PR URLs from the comment body ("PRs created:\nurl1\nurl2\n...").
+		prComment := GetLastCommentOfType(comments, CommentPR)
+		return resumeState{
+			startPhase:      PhaseStatus,
+			recoveredPRURLs: parsePRURLsFromComment(prComment.Body),
+		}
+
+	case hasImpl:
+		// Implementation done; resume from commit.
+		// Also recover the plan in case it is needed for context.
+		plan := ""
+		if c := GetLastCommentOfType(comments, CommentPlan); c != nil {
+			plan = c.Body
+		}
+		return resumeState{startPhase: PhaseCommit, recoveredPlan: plan}
+
+	case hasPlan:
+		// Plan done; resume from implement with the recorded plan.
+		c := GetLastCommentOfType(comments, CommentPlan)
+		return resumeState{startPhase: PhaseImplement, recoveredPlan: c.Body}
+
+	case hasValidation:
+		// Validated but not yet planned; resume from plan.
+		return resumeState{startPhase: PhasePlan}
+
+	default:
+		return resumeState{startPhase: PhaseValidate}
+	}
+}
+
+// parsePRURLsFromComment extracts PR URLs from a CommentPR body.
+// The body format is "PRs created:\nurl1\nurl2\n...".
+func parsePRURLsFromComment(body string) []string {
+	var urls []string
+	for _, line := range strings.Split(body, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "http://") || strings.HasPrefix(line, "https://") {
+			urls = append(urls, line)
+		}
+	}
+	return urls
+}
+
 // ProcessTicket drives a ticket through all lifecycle phases.
+// It inspects existing nightshift comments to resume from the furthest completed
+// phase, so re-runs skip phases that already succeeded.
 // Phase failures are captured in the result (TicketFailed/TicketRejected);
 // a non-nil error is only returned for infrastructure issues (nil agents).
 func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Workspace) (*TicketResult, error) {
@@ -134,140 +220,203 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 		return nil, fmt.Errorf("jira: orchestrator: validation and impl agents are required")
 	}
 
-	// Phase 1: Validate
-	result.Phase = PhaseValidate
-	vr, err := ValidateTicket(ctx, o.validationAgent, ticket)
-	if err != nil {
-		o.postErrorComment(ctx, ticket.Key, PhaseValidate, err)
-		result.Status = TicketFailed
-		result.Error = err.Error()
-		result.Duration = time.Since(start)
-		o.log.Errorf("ticket %s: validation failed: %v", ticket.Key, err)
-		return result, nil
-	}
-	if !vr.Valid {
-		if hErr := o.client.HandleInvalidTicket(ctx, ticket.Key, vr); hErr != nil {
-			o.log.Errorf("ticket %s: handle invalid: %v", ticket.Key, hErr)
-		}
-		result.Status = TicketRejected
-		result.Summary = fmt.Sprintf("rejected: score %d/10", vr.Score)
-		result.Duration = time.Since(start)
-		o.log.Infof("ticket %s rejected (score %d/10)", ticket.Key, vr.Score)
-		return result, nil
-	}
-	o.postPhaseComment(ctx, ticket.Key, CommentValidation,
-		fmt.Sprintf("Ticket validated (score %d/10).", vr.Score), time.Since(start))
-	o.log.Infof("ticket %s validated (score %d/10)", ticket.Key, vr.Score)
-
-	// Transition to In Progress
-	if err := o.client.TransitionToInProgress(ctx, ticket.Key); err != nil {
-		o.postErrorComment(ctx, ticket.Key, PhaseValidate, err)
-		result.Status = TicketFailed
-		result.Error = err.Error()
+	rs := detectResumeState(ticket)
+	if rs.alreadyDone {
+		o.log.Infof("ticket %s: already completed, skipping", ticket.Key)
+		result.Status = TicketCompleted
+		result.Summary = "already completed"
 		result.Duration = time.Since(start)
 		return result, nil
 	}
-
-	// Phase 2: Plan
-	result.Phase = PhasePlan
-	planStart := time.Now()
-	planResult, err := o.implAgent.Execute(ctx, agents.ExecuteOptions{
-		Prompt:  o.buildPlanPrompt(ticket),
-		Timeout: parseTimeout(o.cfg.Plan.Timeout, 5*time.Minute),
-		Model:   o.cfg.Plan.Model,
-	})
-	if err != nil {
-		o.postErrorComment(ctx, ticket.Key, PhasePlan, err)
-		result.Status = TicketFailed
-		result.Error = err.Error()
-		result.Duration = time.Since(start)
-		o.log.Errorf("ticket %s: plan failed: %v", ticket.Key, err)
-		return result, nil
-	}
-	result.Plan = planResult.Output
-	o.postPhaseComment(ctx, ticket.Key, CommentPlan, planResult.Output, time.Since(planStart))
-	o.log.Infof("ticket %s: plan complete", ticket.Key)
-
-	// Phase 3: Implement
-	result.Phase = PhaseImplement
-	implStart := time.Now()
-	workDir := ""
-	if ws != nil && len(ws.Repos) > 0 {
-		workDir = ws.Repos[0].Path
-	}
-	implResult, err := o.implAgent.Execute(ctx, agents.ExecuteOptions{
-		Prompt:  o.buildImplementPrompt(ticket, result.Plan, ws),
-		WorkDir: workDir,
-		Timeout: parseTimeout(o.cfg.Implement.Timeout, 30*time.Minute),
-		Model:   o.cfg.Implement.Model,
-	})
-	if err != nil {
-		o.postErrorComment(ctx, ticket.Key, PhaseImplement, err)
-		result.Status = TicketFailed
-		result.Error = err.Error()
-		result.Duration = time.Since(start)
-		o.log.Errorf("ticket %s: implement failed: %v", ticket.Key, err)
-		return result, nil
-	}
-	o.postPhaseComment(ctx, ticket.Key, CommentImplement, implResult.Output, time.Since(implStart))
-	o.log.Infof("ticket %s: implementation complete", ticket.Key)
-
-	// Phase 4: Commit
-	result.Phase = PhaseCommit
-	var changedRepos []RepoWorkspace
-	if ws != nil {
-		for _, repo := range ws.Repos {
-			changed, err := o.fnHasChanges(ctx, repo.Path)
-			if err != nil {
-				o.postErrorComment(ctx, ticket.Key, PhaseCommit, err)
-				result.Status = TicketFailed
-				result.Error = err.Error()
-				result.Duration = time.Since(start)
-				return result, nil
-			}
-			if !changed {
-				continue
-			}
-			msg := CommitMessage(ticket.Key, "", ticket.Summary)
-			if err := o.fnCommitAndPush(ctx, repo.Path, msg); err != nil {
-				o.postErrorComment(ctx, ticket.Key, PhaseCommit, err)
-				result.Status = TicketFailed
-				result.Error = err.Error()
-				result.Duration = time.Since(start)
-				return result, nil
-			}
-			changedRepos = append(changedRepos, repo)
-		}
+	if rs.startPhase != PhaseValidate {
+		o.log.Infof("ticket %s: resuming from phase %s", ticket.Key, rs.startPhase)
 	}
 
-	// Phase 5: PR
-	result.Phase = PhasePR
-	prStart := time.Now()
-	for _, repo := range changedRepos {
-		prInfo, err := o.fnCreatePR(ctx, repo, ticket, o.cfg.Site)
-		if err != nil {
-			o.postErrorComment(ctx, ticket.Key, PhasePR, err)
+	// Seed result with any recovered data.
+	result.Plan = rs.recoveredPlan
+	result.PRURLs = rs.recoveredPRURLs
+
+	skip := func(phase Phase) bool {
+		return phaseOrder[phase] < phaseOrder[rs.startPhase]
+	}
+
+	// When resuming past the validate phase, ensure the ticket is in-progress
+	// if it is still in the TODO status category (the validate phase handles this
+	// for a fresh run, but a crash before the transition can leave it behind).
+	if skip(PhaseValidate) && ticket.Status.CategoryKey == "new" {
+		if err := o.client.TransitionToInProgress(ctx, ticket.Key); err != nil {
+			o.postErrorComment(ctx, ticket.Key, rs.startPhase, err)
 			result.Status = TicketFailed
 			result.Error = err.Error()
 			result.Duration = time.Since(start)
 			return result, nil
 		}
-		result.PRURLs = append(result.PRURLs, prInfo.URL)
 	}
-	if len(result.PRURLs) > 0 {
-		o.postPhaseComment(ctx, ticket.Key, CommentPR,
-			fmt.Sprintf("PRs created:\n%s", strings.Join(result.PRURLs, "\n")),
-			time.Since(prStart))
+
+	// Phase 1: Validate
+	if !skip(PhaseValidate) {
+		result.Phase = PhaseValidate
+		vr, err := ValidateTicket(ctx, o.validationAgent, ticket)
+		if err != nil {
+			o.postErrorComment(ctx, ticket.Key, PhaseValidate, err)
+			result.Status = TicketFailed
+			result.Error = err.Error()
+			result.Duration = time.Since(start)
+			o.log.Errorf("ticket %s: validation failed: %v", ticket.Key, err)
+			return result, nil
+		}
+		if !vr.Valid {
+			if hErr := o.client.HandleInvalidTicket(ctx, ticket.Key, vr); hErr != nil {
+				o.log.Errorf("ticket %s: handle invalid: %v", ticket.Key, hErr)
+			}
+			result.Status = TicketRejected
+			result.Summary = fmt.Sprintf("rejected: score %d/10", vr.Score)
+			result.Duration = time.Since(start)
+			o.log.Infof("ticket %s rejected (score %d/10)", ticket.Key, vr.Score)
+			return result, nil
+		}
+		o.postPhaseComment(ctx, ticket.Key, CommentValidation,
+			fmt.Sprintf("Ticket validated (score %d/10).", vr.Score), time.Since(start))
+		o.log.Infof("ticket %s validated (score %d/10)", ticket.Key, vr.Score)
+
+		// Transition to In Progress
+		if err := o.client.TransitionToInProgress(ctx, ticket.Key); err != nil {
+			o.postErrorComment(ctx, ticket.Key, PhaseValidate, err)
+			result.Status = TicketFailed
+			result.Error = err.Error()
+			result.Duration = time.Since(start)
+			return result, nil
+		}
+	}
+
+	// Phase 2: Plan
+	if !skip(PhasePlan) {
+		result.Phase = PhasePlan
+		planStart := time.Now()
+		planResult, err := o.implAgent.Execute(ctx, agents.ExecuteOptions{
+			Prompt:  o.buildPlanPrompt(ticket),
+			Timeout: parseTimeout(o.cfg.Plan.Timeout, 5*time.Minute),
+			Model:   o.cfg.Plan.Model,
+		})
+		if err != nil {
+			o.postErrorComment(ctx, ticket.Key, PhasePlan, err)
+			result.Status = TicketFailed
+			result.Error = err.Error()
+			result.Duration = time.Since(start)
+			o.log.Errorf("ticket %s: plan failed: %v", ticket.Key, err)
+			return result, nil
+		}
+		result.Plan = planResult.Output
+		o.postPhaseComment(ctx, ticket.Key, CommentPlan, planResult.Output, time.Since(planStart))
+		o.log.Infof("ticket %s: plan complete", ticket.Key)
+	}
+
+	// Phase 3: Implement
+	if !skip(PhaseImplement) {
+		result.Phase = PhaseImplement
+		implStart := time.Now()
+		workDir := ""
+		if ws != nil && len(ws.Repos) > 0 {
+			workDir = ws.Repos[0].Path
+		}
+		implResult, err := o.implAgent.Execute(ctx, agents.ExecuteOptions{
+			Prompt:  o.buildImplementPrompt(ticket, result.Plan, ws),
+			WorkDir: workDir,
+			Timeout: parseTimeout(o.cfg.Implement.Timeout, 30*time.Minute),
+			Model:   o.cfg.Implement.Model,
+		})
+		if err != nil {
+			o.postErrorComment(ctx, ticket.Key, PhaseImplement, err)
+			result.Status = TicketFailed
+			result.Error = err.Error()
+			result.Duration = time.Since(start)
+			o.log.Errorf("ticket %s: implement failed: %v", ticket.Key, err)
+			return result, nil
+		}
+		o.postPhaseComment(ctx, ticket.Key, CommentImplement, implResult.Output, time.Since(implStart))
+		o.log.Infof("ticket %s: implementation complete", ticket.Key)
+	}
+
+	// Phase 4: Commit
+	if !skip(PhaseCommit) {
+		result.Phase = PhaseCommit
+		var changedRepos []RepoWorkspace
+		if ws != nil {
+			for _, repo := range ws.Repos {
+				changed, err := o.fnHasChanges(ctx, repo.Path)
+				if err != nil {
+					o.postErrorComment(ctx, ticket.Key, PhaseCommit, err)
+					result.Status = TicketFailed
+					result.Error = err.Error()
+					result.Duration = time.Since(start)
+					return result, nil
+				}
+				if !changed {
+					continue
+				}
+				msg := CommitMessage(ticket.Key, "", ticket.Summary)
+				if err := o.fnCommitAndPush(ctx, repo.Path, msg); err != nil {
+					o.postErrorComment(ctx, ticket.Key, PhaseCommit, err)
+					result.Status = TicketFailed
+					result.Error = err.Error()
+					result.Duration = time.Since(start)
+					return result, nil
+				}
+				changedRepos = append(changedRepos, repo)
+			}
+		}
+
+		// Phase 5: PR
+		result.Phase = PhasePR
+		prStart := time.Now()
+		for _, repo := range changedRepos {
+			prInfo, err := o.fnCreatePR(ctx, repo, ticket, o.cfg.Site)
+			if err != nil {
+				o.postErrorComment(ctx, ticket.Key, PhasePR, err)
+				result.Status = TicketFailed
+				result.Error = err.Error()
+				result.Duration = time.Since(start)
+				return result, nil
+			}
+			result.PRURLs = append(result.PRURLs, prInfo.URL)
+		}
+		if len(result.PRURLs) > 0 {
+			o.postPhaseComment(ctx, ticket.Key, CommentPR,
+				fmt.Sprintf("PRs created:\n%s", strings.Join(result.PRURLs, "\n")),
+				time.Since(prStart))
+		}
+	} else if skip(PhaseCommit) && !skip(PhaseStatus) {
+		// Resuming at PhaseStatus: scan workspace repos for open PRs and merge with
+		// any URLs recovered from comments, deduplicating to avoid duplicates when
+		// the comment contained only a subset of the actual PRs.
+		if ws != nil {
+			branch := BranchName(ticket.Key)
+			seenURLs := make(map[string]struct{}, len(result.PRURLs))
+			for _, url := range result.PRURLs {
+				seenURLs[url] = struct{}{}
+			}
+			for _, repo := range ws.Repos {
+				pr, err := o.fnFindPR(ctx, repo.Path, branch)
+				if err == nil && pr != nil {
+					if _, seen := seenURLs[pr.URL]; !seen {
+						result.PRURLs = append(result.PRURLs, pr.URL)
+						seenURLs[pr.URL] = struct{}{}
+					}
+				}
+			}
+		}
 	}
 
 	// Phase 6: Status
-	result.Phase = PhaseStatus
-	if err := o.client.TransitionToReview(ctx, ticket.Key); err != nil {
-		o.postErrorComment(ctx, ticket.Key, PhaseStatus, err)
-		result.Status = TicketFailed
-		result.Error = err.Error()
-		result.Duration = time.Since(start)
-		return result, nil
+	if !skip(PhaseStatus) {
+		result.Phase = PhaseStatus
+		if err := o.client.TransitionToReview(ctx, ticket.Key); err != nil {
+			o.postErrorComment(ctx, ticket.Key, PhaseStatus, err)
+			result.Status = TicketFailed
+			result.Error = err.Error()
+			result.Duration = time.Since(start)
+			return result, nil
+		}
 	}
 
 	result.Status = TicketCompleted

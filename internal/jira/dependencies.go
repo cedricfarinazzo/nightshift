@@ -64,15 +64,20 @@ func containsKey(keys []string, key string) bool {
 	return false
 }
 
-// ResolveOrder performs a topological sort and returns ready tickets (no unresolved blockers)
-// and blocked tickets (with reasons).
+// ResolveOrder returns tickets that are immediately ready to process (no unresolved blockers)
+// and tickets that are blocked (external blockers, unfinished in-graph dependencies, or cycles).
+//
+// A ticket is ready only when it has no blockers at all — including other TODO tickets in the
+// same graph. This prevents implementing a ticket before its in-graph dependency has been
+// completed and merged. Tickets blocked by in-graph dependencies appear in the blocked list
+// with reason "waiting for dependency"; cyclic tickets appear with "circular dependency".
 func (g *DependencyGraph) ResolveOrder() (ready []Ticket, blocked []BlockedTicket) {
-	// Compute in-degree within the graph only (external blockers handled separately).
+	// Compute in-degree and separate external from in-graph blockers.
 	inDegree := make(map[string]int, len(g.tickets))
+	externalBlockers := make(map[string][]string)
 	for key := range g.tickets {
 		inDegree[key] = 0
 	}
-	externalBlockers := make(map[string][]string)
 	for key := range g.tickets {
 		for _, blocker := range g.blockedBy[key] {
 			if _, inGraph := g.tickets[blocker]; inGraph {
@@ -96,10 +101,18 @@ func (g *DependencyGraph) ResolveOrder() (ready []Ticket, blocked []BlockedTicke
 		}
 	}
 
-	// Kahn's algorithm on the remaining graph.
+	// Run Kahn's algorithm to find the topological order and detect cycles.
+	// We track two sets: "immediately ready" (initial inDegree=0) and "eventually
+	// reachable" (reachable after processing their dependencies). Tickets never
+	// reached are in a cycle.
+	workDegree := make(map[string]int, len(g.tickets))
+	for k, v := range inDegree {
+		workDegree[k] = v
+	}
+
 	queue := make([]string, 0)
 	for key := range g.tickets {
-		if inDegree[key] == 0 && !externallyBlocked[key] {
+		if workDegree[key] == 0 && !externallyBlocked[key] {
 			queue = append(queue, key)
 		}
 	}
@@ -112,19 +125,29 @@ func (g *DependencyGraph) ResolveOrder() (ready []Ticket, blocked []BlockedTicke
 			continue
 		}
 		visited[key] = true
-		ready = append(ready, *g.tickets[key])
+		if inDegree[key] == 0 {
+			// No in-graph dependencies at all: immediately ready.
+			ready = append(ready, *g.tickets[key])
+		} else {
+			// Reachable via Kahn's but has in-graph dependencies: waiting.
+			blocked = append(blocked, BlockedTicket{
+				Ticket:   *g.tickets[key],
+				Reason:   "waiting for dependency",
+				Blockers: g.blockedBy[key],
+			})
+		}
 		for _, dependent := range g.blocks[key] {
 			if _, inGraph := g.tickets[dependent]; !inGraph {
 				continue
 			}
-			inDegree[dependent]--
-			if inDegree[dependent] == 0 && !externallyBlocked[dependent] {
+			workDegree[dependent]--
+			if workDegree[dependent] == 0 && !externallyBlocked[dependent] {
 				queue = append(queue, dependent)
 			}
 		}
 	}
 
-	// Any non-visited ticket (not externally blocked) is part of a cycle.
+	// Tickets not visited by Kahn's (workDegree still > 0) are in a cycle.
 	for key := range g.tickets {
 		if !visited[key] && !externallyBlocked[key] {
 			blocked = append(blocked, BlockedTicket{
