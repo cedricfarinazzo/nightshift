@@ -186,38 +186,41 @@ func fetchInlineReviewComments(ctx context.Context, repoPath string, prNumber in
 		return nil, nil
 	}
 	out, err := ghExec(ctx, repoPath, "api",
-		fmt.Sprintf("repos/{owner}/{repo}/pulls/%d/comments", prNumber),
-		"--jq", `.[].{author: .user.login, body: .body, path: .path, line: (.line // .original_line), position: .position, created_at: .created_at}`)
+		fmt.Sprintf("repos/{owner}/{repo}/pulls/%d/comments", prNumber))
 	if err != nil {
 		return nil, fmt.Errorf("gh api inline comments: %w", err)
 	}
 	return parseInlineComments(out)
 }
 
-// parseInlineComments parses newline-delimited JSON objects from `gh api --jq` output.
+// parseInlineComments parses the raw JSON array returned by the GitHub pull request
+// review comments endpoint.
 func parseInlineComments(raw string) ([]PRComment, error) {
-	var comments []PRComment
-	for _, line := range strings.Split(strings.TrimSpace(raw), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		var v struct {
-			Author    string    `json:"author"`
-			Body      string    `json:"body"`
-			Path      string    `json:"path"`
-			Line      int       `json:"line"`
-			Position  *int      `json:"position"` // null = outdated comment
-			CreatedAt time.Time `json:"created_at"`
-		}
-		if err := json.Unmarshal([]byte(line), &v); err != nil {
-			continue // skip malformed lines
+	var items []struct {
+		User struct {
+			Login string `json:"login"`
+		} `json:"user"`
+		Body          string    `json:"body"`
+		Path          string    `json:"path"`
+		Line          *int      `json:"line"`
+		OriginalLine  int       `json:"original_line"`
+		Position      *int      `json:"position"` // null = outdated comment
+		CreatedAt     time.Time `json:"created_at"`
+	}
+	if err := json.Unmarshal([]byte(raw), &items); err != nil {
+		return nil, fmt.Errorf("parse inline comments: %w", err)
+	}
+	comments := make([]PRComment, 0, len(items))
+	for _, v := range items {
+		line := v.OriginalLine
+		if v.Line != nil {
+			line = *v.Line
 		}
 		comments = append(comments, PRComment{
-			Author:    v.Author,
+			Author:    v.User.Login,
 			Body:      v.Body,
 			Path:      v.Path,
-			Line:      v.Line,
+			Line:      line,
 			Outdated:  v.Position == nil,
 			CreatedAt: v.CreatedAt,
 		})
