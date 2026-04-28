@@ -76,20 +76,44 @@ func (o *Orchestrator) ProcessFeedback(ctx context.Context, ticket Ticket, ws *W
 			o.emit("  📎 PR %s", prInfo.URL)
 			result.PRURLs = append(result.PRURLs, prInfo.URL)
 
+			// Determine last rework timestamp for idempotency: skip reviews/comments
+			// that were already addressed in a previous run.
+			var lastReworkAt time.Time
+			if nsComments := ParseNightshiftComments(ticket.Comments); len(nsComments) > 0 {
+				if last := GetLastCommentOfType(nsComments, CommentRework); last != nil {
+					lastReworkAt = last.Timestamp
+				}
+			}
+
 			// Fetch the current review state.
 			o.emit("  fetching PR review comments from GitHub…")
 			reviewState, err := o.fnFetchReviews(ctx, repo.Path, prInfo.URL)
 			if err != nil {
 				return nil, fmt.Errorf("jira: feedback: fetch reviews %s: %w", repo.Name, err)
 			}
+			if reviewState.InlineFetchErr != nil {
+				o.log.Errorf("ticket %s: fetch inline comments %s: %v", ticket.Key, prInfo.URL, reviewState.InlineFetchErr)
+			}
+
+			// Filter to only reviews/comments newer than the last rework.
+			if !lastReworkAt.IsZero() {
+				var newReviews []Review
+				for _, r := range reviewState.Reviews {
+					if r.CreatedAt.After(lastReworkAt) {
+						newReviews = append(newReviews, r)
+					}
+				}
+				reviewState.Reviews = newReviews
+				reviewState.Comments = filterNewComments(reviewState.Comments, lastReworkAt)
+				o.log.Infof("ticket %s: idempotency filter lastReworkAt=%s — reviews=%d comments=%d",
+					ticket.Key, lastReworkAt.Format(time.RFC3339), len(reviewState.Reviews), len(reviewState.Comments))
+			}
+
 			inlineCount := 0
 			for _, c := range reviewState.Comments {
 				if c.Path != "" {
 					inlineCount++
 				}
-			}
-			if reviewState.InlineFetchErr != nil {
-				o.log.Errorf("ticket %s: fetch inline comments %s: %v", ticket.Key, prInfo.URL, reviewState.InlineFetchErr)
 			}
 			o.log.Infof("ticket %s: PR %s — reviewDecision=%q reviews=%d comments=%d inline=%d actionable=%v",
 				ticket.Key, prInfo.URL, reviewState.ReviewDecision,
@@ -103,6 +127,7 @@ func (o *Orchestrator) ProcessFeedback(ctx context.Context, ticket Ticket, ws *W
 			// means the diff moved after a push, not that the suggestion was resolved.
 			if reviewState.ReviewDecision != "CHANGES_REQUESTED" && !hasActionableComments(reviewState) {
 				o.log.Infof("ticket %s: skipping rework — no actionable comments", ticket.Key)
+				o.emit("  ✓ no new review comments since last rework — skipping")
 				continue
 			}
 
