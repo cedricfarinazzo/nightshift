@@ -97,6 +97,11 @@ func runJira(cmd *cobra.Command, _ []string) error {
 		jira.WithImplAgent(implAgent),
 		jira.WithReviewFixAgent(reviewFixAgent),
 		jira.WithValidationAgent(validationAgent),
+		jira.WithPhaseCallback(func(ticketKey string, phase jira.Phase, done bool) {
+			if !done {
+				fmt.Printf("    ⟳ %-12s …\n", phase)
+			}
+		}),
 	}
 	if skipValidation {
 		orchOpts = append(orchOpts, jira.WithSkipValidation())
@@ -233,9 +238,11 @@ func runTodoPhase(
 		if count >= jiracfg.MaxTickets {
 			break
 		}
+		fmt.Printf("\n  ▶ %s  %s\n", ticket.Key, ticket.Summary)
 		ws, err := jira.SetupWorkspace(ctx, jiracfg, ticket.Key)
 		if err != nil {
 			log.Errorf("workspace %s: %v", ticket.Key, err)
+			fmt.Printf("    ✗ workspace setup failed: %v\n", err)
 			*results = append(*results, jira.TicketResult{TicketKey: ticket.Key, Status: jira.TicketFailed, Error: err.Error()})
 			count++
 			continue
@@ -245,6 +252,7 @@ func runTodoPhase(
 			log.Errorf("process %s: %v", ticket.Key, err)
 		}
 		if result != nil {
+			printTicketResult(result)
 			*results = append(*results, *result)
 		}
 		count++
@@ -268,9 +276,11 @@ func runReviewPhase(
 	log.Infof("review tickets: %d found", len(reviewTickets))
 
 	for _, ticket := range reviewTickets {
+		fmt.Printf("\n  🔍 %s  %s\n", ticket.Key, ticket.Summary)
 		ws, err := jira.SetupWorkspace(ctx, jiracfg, ticket.Key)
 		if err != nil {
 			log.Errorf("workspace %s: %v", ticket.Key, err)
+			fmt.Printf("    ✗ workspace setup failed: %v\n", err)
 			*feedbackResults = append(*feedbackResults, jira.FeedbackResult{TicketKey: ticket.Key, Error: err.Error()})
 			continue
 		}
@@ -279,6 +289,7 @@ func runReviewPhase(
 			log.Errorf("process feedback %s: %v", ticket.Key, err)
 		}
 		if result != nil {
+			printFeedbackResult(result)
 			*feedbackResults = append(*feedbackResults, *result)
 		}
 	}
@@ -378,6 +389,35 @@ func printJiraPreflightSummary(cfg jira.JiraConfig, _ *jira.StatusMap) {
 	fmt.Printf("  Implement:    %s/%s\n", cfg.Implement.Provider, cfg.Implement.Model)
 	fmt.Printf("  ReviewFix:    %s/%s\n", cfg.ReviewFix.Provider, cfg.ReviewFix.Model)
 	fmt.Printf("  Max tickets:  %d\n", cfg.MaxTickets)
+}
+
+func printTicketResult(r *jira.TicketResult) {
+	switch r.Status {
+	case jira.TicketCompleted:
+		fmt.Printf("    ✅ completed in %s", r.Duration.Round(time.Second))
+		if len(r.PRURLs) > 0 {
+			fmt.Printf("  →  %s", strings.Join(r.PRURLs, "  "))
+		}
+		fmt.Println()
+	case jira.TicketRejected:
+		fmt.Printf("    ❌ rejected — %s\n", r.Summary)
+	case jira.TicketSkipped:
+		fmt.Printf("    ⏭️  skipped\n")
+	default:
+		fmt.Printf("    ⚠️  failed at phase %s — %s\n", r.Phase, r.Error)
+	}
+}
+
+func printFeedbackResult(r *jira.FeedbackResult) {
+	if r.Error != "" {
+		fmt.Printf("    ⚠️  error — %s\n", r.Error)
+		return
+	}
+	if r.FixesMade == 0 {
+		fmt.Printf("    ℹ️  no changes requested in %s\n", r.Duration.Round(time.Second))
+		return
+	}
+	fmt.Printf("    🔄 reworked %d repo(s), %d commit(s) in %s\n", r.FixesMade, r.PushedCommits, r.Duration.Round(time.Second))
 }
 
 func printJiraRunSummary(results []jira.TicketResult, feedback []jira.FeedbackResult, d time.Duration) {

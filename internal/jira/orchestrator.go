@@ -62,6 +62,7 @@ type Orchestrator struct {
 	implAgent       agents.Agent
 	reviewFixAgent  agents.Agent
 	skipValidation  bool
+	onPhase         func(ticketKey string, phase Phase, done bool) // optional progress callback
 	log             *logging.Logger
 
 	// ops are injectable for testing; set to real functions by NewOrchestrator.
@@ -96,6 +97,12 @@ func WithReviewFixAgent(a agents.Agent) OrchestratorOption {
 // to in-progress directly, skipping the quality-score check.
 func WithSkipValidation() OrchestratorOption {
 	return func(o *Orchestrator) { o.skipValidation = true }
+}
+
+// WithPhaseCallback registers a callback invoked at the start (done=false) and
+// end (done=true) of each phase. Useful for real-time progress reporting.
+func WithPhaseCallback(fn func(ticketKey string, phase Phase, done bool)) OrchestratorOption {
+	return func(o *Orchestrator) { o.onPhase = fn }
 }
 
 // NewOrchestrator creates an Orchestrator with the given client, config, and options.
@@ -270,6 +277,7 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 	// Phase 1: Validate
 	if !skip(PhaseValidate) {
 		result.Phase = PhaseValidate
+		o.notifyPhase(ticket.Key, PhaseValidate, false)
 		if !o.skipValidation {
 			vr, err := ValidateTicket(ctx, o.validationAgent, ticket)
 			if err != nil {
@@ -310,6 +318,7 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 	// Phase 2: Plan
 	if !skip(PhasePlan) {
 		result.Phase = PhasePlan
+		o.notifyPhase(ticket.Key, PhasePlan, false)
 		planStart := time.Now()
 		planResult, err := o.implAgent.Execute(ctx, agents.ExecuteOptions{
 			Prompt:  o.buildPlanPrompt(ticket),
@@ -332,6 +341,7 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 	// Phase 3: Implement
 	if !skip(PhaseImplement) {
 		result.Phase = PhaseImplement
+		o.notifyPhase(ticket.Key, PhaseImplement, false)
 		implStart := time.Now()
 		workDir := ""
 		if ws != nil && len(ws.Repos) > 0 {
@@ -359,6 +369,7 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 	// Phase 4: Commit
 	if !skip(PhaseCommit) {
 		result.Phase = PhaseCommit
+		o.notifyPhase(ticket.Key, PhaseCommit, false)
 		var changedRepos []RepoWorkspace
 		if ws != nil {
 			for _, repo := range ws.Repos {
@@ -387,6 +398,7 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 
 		// Phase 5: PR
 		result.Phase = PhasePR
+		o.notifyPhase(ticket.Key, PhasePR, false)
 		prStart := time.Now()
 		type repoPR struct {
 			repo RepoWorkspace
@@ -444,6 +456,7 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 	// Phase 6: Status
 	if !skip(PhaseStatus) {
 		result.Phase = PhaseStatus
+		o.notifyPhase(ticket.Key, PhaseStatus, false)
 		if err := o.client.TransitionToReview(ctx, ticket.Key); err != nil {
 			o.postErrorComment(ctx, ticket.Key, PhaseStatus, err)
 			result.Status = TicketFailed
@@ -605,4 +618,11 @@ func parseTimeout(s string, fallback time.Duration) time.Duration {
 		return fallback
 	}
 	return d
+}
+
+// notifyPhase invokes the onPhase callback when one is registered.
+func (o *Orchestrator) notifyPhase(ticketKey string, phase Phase, done bool) {
+	if o.onPhase != nil {
+		o.onPhase(ticketKey, phase, done)
+	}
 }
