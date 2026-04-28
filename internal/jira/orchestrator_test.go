@@ -769,3 +769,193 @@ func (a *callCountAgent) Execute(_ context.Context, _ agents.ExecuteOptions) (*a
 	return &agents.ExecuteResult{Output: ""}, nil
 }
 
+
+// ── detectResumeState ─────────────────────────────────────────────────────────
+
+func nightshiftComment(ct CommentType, body string) Comment {
+	ts := time.Now().Format("2006-01-02 15:04")
+	raw := "🤖 Nightshift — " + ct.Title() + " (" + ts + ")\n" +
+		"Provider: claude | Model: claude-sonnet-4-6 | Duration: 1s\n\n" +
+		body + "\n\n" +
+		"<!-- nightshift:type=" + string(ct) + " provider=claude model=claude-sonnet-4-6 duration=1s -->\n"
+	return Comment{Body: raw, Created: time.Now()}
+}
+
+func TestDetectResumeState_NoComments(t *testing.T) {
+	rs := detectResumeState(Ticket{Key: "X-1"})
+	if rs.startPhase != PhaseValidate {
+		t.Errorf("want PhaseValidate, got %s", rs.startPhase)
+	}
+}
+
+func TestDetectResumeState_AfterValidation(t *testing.T) {
+	ticket := Ticket{Comments: []Comment{nightshiftComment(CommentValidation, "Ticket validated (score 8/10).")}}
+	rs := detectResumeState(ticket)
+	if rs.startPhase != PhasePlan {
+		t.Errorf("want PhasePlan, got %s", rs.startPhase)
+	}
+}
+
+func TestDetectResumeState_AfterPlan(t *testing.T) {
+	ticket := Ticket{Comments: []Comment{
+		nightshiftComment(CommentValidation, "Ticket validated."),
+		nightshiftComment(CommentPlan, "Step 1: do the thing."),
+	}}
+	rs := detectResumeState(ticket)
+	if rs.startPhase != PhaseImplement {
+		t.Errorf("want PhaseImplement, got %s", rs.startPhase)
+	}
+	if rs.recoveredPlan != "Step 1: do the thing." {
+		t.Errorf("recoveredPlan = %q", rs.recoveredPlan)
+	}
+}
+
+func TestDetectResumeState_AfterImplement(t *testing.T) {
+	ticket := Ticket{Comments: []Comment{
+		nightshiftComment(CommentValidation, "ok"),
+		nightshiftComment(CommentPlan, "my plan"),
+		nightshiftComment(CommentImplement, "done"),
+	}}
+	rs := detectResumeState(ticket)
+	if rs.startPhase != PhaseCommit {
+		t.Errorf("want PhaseCommit, got %s", rs.startPhase)
+	}
+	if rs.recoveredPlan != "my plan" {
+		t.Errorf("recoveredPlan = %q", rs.recoveredPlan)
+	}
+}
+
+func TestDetectResumeState_AfterPR(t *testing.T) {
+	prBody := "PRs created:\nhttps://github.com/org/repo/pull/1\nhttps://github.com/org/repo/pull/2"
+	ticket := Ticket{Comments: []Comment{
+		nightshiftComment(CommentValidation, "ok"),
+		nightshiftComment(CommentPlan, "plan"),
+		nightshiftComment(CommentImplement, "done"),
+		nightshiftComment(CommentPR, prBody),
+	}}
+	rs := detectResumeState(ticket)
+	if rs.startPhase != PhaseStatus {
+		t.Errorf("want PhaseStatus, got %s", rs.startPhase)
+	}
+	if len(rs.recoveredPRURLs) != 2 {
+		t.Errorf("recoveredPRURLs len = %d, want 2: %v", len(rs.recoveredPRURLs), rs.recoveredPRURLs)
+	}
+}
+
+func TestDetectResumeState_AlreadyComplete(t *testing.T) {
+	ticket := Ticket{Comments: []Comment{
+		nightshiftComment(CommentValidation, "ok"),
+		nightshiftComment(CommentPlan, "plan"),
+		nightshiftComment(CommentImplement, "done"),
+		nightshiftComment(CommentPR, "PRs created:\nhttps://github.com/org/repo/pull/1"),
+		nightshiftComment(CommentStatusChange, "complete"),
+	}}
+	rs := detectResumeState(ticket)
+	if !rs.alreadyDone {
+		t.Error("want alreadyDone=true for ticket with status-change comment")
+	}
+}
+
+func TestProcessTicket_AlreadyComplete_EarlyExit(t *testing.T) {
+	client := &stubJiraClient{}
+	implAgent := &stubAgent{output: "plan"}
+	validationAgent := &stubAgent{output: `{"score": 9, "valid": true, "reasoning": "ok"}`}
+	o := &Orchestrator{
+		client:          client,
+		validationAgent: validationAgent,
+		implAgent:       implAgent,
+		fnHasChanges:    func(_ context.Context, _ string) (bool, error) { return false, nil },
+		fnCommitAndPush: func(_ context.Context, _, _ string) error { return nil },
+		fnCreatePR:      func(_ context.Context, _ RepoWorkspace, _ Ticket, _ string) (*PRInfo, error) { return &PRInfo{URL: "u"}, nil },
+		fnFindPR:        func(_ context.Context, _, _ string) (*PRInfo, error) { return nil, nil },
+		fnFetchReviews:  func(_ context.Context, _, _ string) (*PRReviewState, error) { return nil, nil },
+		fnPostPRComment: func(_ context.Context, _, _, _ string) error { return nil },
+	}
+	ticket := Ticket{
+		Key: "T-99",
+		Comments: []Comment{
+			nightshiftComment(CommentValidation, "ok"),
+			nightshiftComment(CommentPlan, "plan"),
+			nightshiftComment(CommentImplement, "done"),
+			nightshiftComment(CommentPR, "PRs created:\nhttps://github.com/org/repo/pull/1"),
+			nightshiftComment(CommentStatusChange, "Ticket processing complete."),
+		},
+	}
+	result, err := o.ProcessTicket(context.Background(), ticket, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Status != TicketCompleted {
+		t.Errorf("status = %s, want completed", result.Status)
+	}
+	// No new comments or transitions should have been posted.
+	if len(client.postCommentCalls) != 0 {
+		t.Errorf("expected no new comments for already-complete ticket, got %d", len(client.postCommentCalls))
+	}
+	if len(client.transitionCalls) != 0 {
+		t.Errorf("expected no transitions for already-complete ticket, got %d", len(client.transitionCalls))
+	}
+}
+
+func TestParsePRURLsFromComment(t *testing.T) {
+	body := "PRs created:\nhttps://github.com/org/repo/pull/42\nhttps://github.com/org/repo/pull/43\nsome other line"
+	urls := parsePRURLsFromComment(body)
+	if len(urls) != 2 {
+		t.Fatalf("want 2 URLs, got %d: %v", len(urls), urls)
+	}
+	if urls[0] != "https://github.com/org/repo/pull/42" {
+		t.Errorf("urls[0] = %q", urls[0])
+	}
+}
+
+func TestProcessTicket_SkipsValidationWhenAlreadyValidated(t *testing.T) {
+	client := &stubJiraClient{}
+	// implAgent returns a plan — used for both plan and implement phases.
+	implAgent := &stubAgent{output: "plan output"}
+	// validationAgent returns a valid score, but it should NOT be called.
+	validationAgent := &stubAgent{output: `{"score": 9, "valid": true, "reasoning": "ok"}`}
+
+	o := &Orchestrator{
+		client:          client,
+		validationAgent: validationAgent,
+		implAgent:       implAgent,
+		fnHasChanges:    func(_ context.Context, _ string) (bool, error) { return false, nil },
+		fnCommitAndPush: func(_ context.Context, _, _ string) error { return nil },
+		fnCreatePR:      func(_ context.Context, _ RepoWorkspace, _ Ticket, _ string) (*PRInfo, error) { return &PRInfo{URL: "u"}, nil },
+		fnFindPR:        func(_ context.Context, _, _ string) (*PRInfo, error) { return nil, nil },
+		fnFetchReviews:  func(_ context.Context, _, _ string) (*PRReviewState, error) { return nil, nil },
+		fnPostPRComment: func(_ context.Context, _, _, _ string) error { return nil },
+	}
+
+	ticket := Ticket{
+		Key: "T-1",
+		Comments: []Comment{
+			nightshiftComment(CommentValidation, "Ticket validated (score 9/10)."),
+		},
+	}
+
+	result, err := o.ProcessTicket(context.Background(), ticket, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Validation was already done — no new CommentValidation should be posted.
+	for _, c := range client.postCommentCalls {
+		if c.Type == CommentValidation {
+			t.Errorf("validation comment posted despite prior validation: %q", c.Body)
+		}
+	}
+	// Plan phase must have run — a CommentPlan should be posted.
+	hasPlan := false
+	for _, c := range client.postCommentCalls {
+		if c.Type == CommentPlan {
+			hasPlan = true
+			break
+		}
+	}
+	if !hasPlan {
+		t.Error("expected CommentPlan to be posted but it was not")
+	}
+	if result.Status != TicketCompleted {
+		t.Errorf("status = %s, want completed", result.Status)
+	}
+}

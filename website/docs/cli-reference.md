@@ -83,6 +83,47 @@ nightshift budget history -n 10
 nightshift budget calibrate
 ```
 
+## Jira Commands
+
+```bash
+nightshift jira run                     # Autonomous Jira pipeline run
+nightshift jira run --ticket PROJ-1     # Process a single ticket
+nightshift jira run --max-tickets 5     # Limit tickets processed
+nightshift jira run --skip-validation   # Skip LLM validation
+nightshift jira run --todo-only         # Only process TODO tickets
+nightshift jira run --review-only       # Only process review feedback
+
+nightshift jira preview                 # Dry-run: show what would happen
+nightshift jira preview --validate      # Run LLM validation per ticket
+nightshift jira preview --explain       # Full budget breakdown
+nightshift jira preview --project MYP   # Override project key
+nightshift jira preview --json          # JSON output
+nightshift jira preview --plain         # No TUI pager
+```
+
+### `nightshift jira run` flags
+
+| Flag | Description |
+|------|-------------|
+| `--ticket` | Process a single ticket by key |
+| `--max-tickets` | Max tickets to process (default from config) |
+| `--label` | Jira label filter (overrides config, default `nightshift`) |
+| `--skip-validation` | Accepted for compatibility; validation is still performed |
+| `--todo-only` | Only process TODO-status tickets |
+| `--review-only` | Only process review-feedback tickets |
+
+### `nightshift jira preview` flags
+
+| Flag | Description |
+|------|-------------|
+| `--project`, `-p` | Jira project key (overrides config) |
+| `--label` | Jira label filter (overrides config, default `nightshift`) |
+| `--validate` | Run LLM validation on each ticket (costs tokens) |
+| `--explain` | Show detailed budget breakdown |
+| `--json` | Output as JSON |
+| `--plain` | Disable TUI pager |
+| `--type` | Filter tickets by issue type (e.g. Bug, Story) |
+
 ## Global Flags
 
 | Flag | Description |
