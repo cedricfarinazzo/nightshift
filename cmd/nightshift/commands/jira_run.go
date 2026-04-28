@@ -99,8 +99,26 @@ func runJira(cmd *cobra.Command, _ []string) error {
 		jira.WithValidationAgent(validationAgent),
 		jira.WithPhaseCallback(func(ticketKey string, phase jira.Phase, done bool) {
 			if !done {
-				fmt.Printf("    ⟳ %-12s …\n", phase)
+				switch phase {
+				case jira.PhaseValidate:
+					fmt.Printf("    ⟳ validate      checking ticket quality…\n")
+				case jira.PhasePlan:
+					fmt.Printf("    ⟳ plan          generating implementation plan…\n")
+				case jira.PhaseImplement:
+					fmt.Printf("    ⟳ implement     coding — this may take a while…\n")
+				case jira.PhaseCommit:
+					fmt.Printf("    ⟳ commit        committing changes…\n")
+				case jira.PhasePR:
+					fmt.Printf("    ⟳ pr            opening pull request…\n")
+				case jira.PhaseStatus:
+					fmt.Printf("    ⟳ status        updating Jira ticket…\n")
+				default:
+					fmt.Printf("    ⟳ %-12s …\n", phase)
+				}
 			}
+		}),
+		jira.WithProgressPrinter(func(format string, args ...any) {
+			fmt.Printf("    "+format+"\n", args...)
 		}),
 	}
 	if skipValidation {
@@ -231,6 +249,10 @@ func runTodoPhase(
 	ready, blocked := graph.ResolveOrder()
 	for _, b := range blocked {
 		log.Infof("ticket %s blocked by %v, skipping", b.Ticket.Key, b.Blockers)
+		fmt.Printf("  ⏭  %s  blocked by %v\n", b.Ticket.Key, b.Blockers)
+	}
+	if len(ready) == 0 {
+		fmt.Println("  no tickets ready to process")
 	}
 
 	count := 0
@@ -239,6 +261,7 @@ func runTodoPhase(
 			break
 		}
 		fmt.Printf("\n  ▶ %s  %s\n", ticket.Key, ticket.Summary)
+		fmt.Printf("    setting up workspace…\n")
 		ws, err := jira.SetupWorkspace(ctx, jiracfg, ticket.Key)
 		if err != nil {
 			log.Errorf("workspace %s: %v", ticket.Key, err)
@@ -275,8 +298,12 @@ func runReviewPhase(
 	}
 	log.Infof("review tickets: %d found", len(reviewTickets))
 
+	if len(reviewTickets) == 0 {
+		fmt.Println("  no tickets in review")
+	}
 	for _, ticket := range reviewTickets {
 		fmt.Printf("\n  🔍 %s  %s\n", ticket.Key, ticket.Summary)
+		fmt.Printf("    setting up workspace…\n")
 		ws, err := jira.SetupWorkspace(ctx, jiracfg, ticket.Key)
 		if err != nil {
 			log.Errorf("workspace %s: %v", ticket.Key, err)

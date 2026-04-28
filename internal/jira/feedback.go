@@ -73,9 +73,11 @@ func (o *Orchestrator) ProcessFeedback(ctx context.Context, ticket Ticket, ws *W
 				continue
 			}
 			o.log.Infof("ticket %s: found PR %s in repo %s", ticket.Key, prInfo.URL, repo.Name)
+			o.emit("  📎 PR %s", prInfo.URL)
 			result.PRURLs = append(result.PRURLs, prInfo.URL)
 
 			// Fetch the current review state.
+			o.emit("  fetching PR review comments from GitHub…")
 			reviewState, err := o.fnFetchReviews(ctx, repo.Path, prInfo.URL)
 			if err != nil {
 				return nil, fmt.Errorf("jira: feedback: fetch reviews %s: %w", repo.Name, err)
@@ -106,10 +108,12 @@ func (o *Orchestrator) ProcessFeedback(ctx context.Context, ticket Ticket, ws *W
 
 			// Build a prompt from the review comments and execute the agent.
 			prompt := buildReworkPrompt(ticket, reviewState, repo)
+			timeout := parseTimeout(o.cfg.ReviewFix.Timeout, 20*time.Minute)
+			o.emit("🤖 claude running: review-fix  (%s, timeout %s)", o.cfg.ReviewFix.Model, timeout.Round(time.Minute))
 			agentResult, err := agent.Execute(ctx, agents.ExecuteOptions{
 				Prompt:  prompt,
 				WorkDir: repo.Path,
-				Timeout: parseTimeout(o.cfg.ReviewFix.Timeout, 20*time.Minute),
+				Timeout: timeout,
 				Model:   o.cfg.ReviewFix.Model,
 			})
 			if err != nil {
@@ -125,6 +129,7 @@ func (o *Orchestrator) ProcessFeedback(ctx context.Context, ticket Ticket, ws *W
 			}
 			if changed {
 				msg := CommitMessage(ticket.Key, "", "address review feedback")
+				o.emit("  committing + pushing review fixes → %s", repo.Branch)
 				if err := o.fnCommitAndPush(ctx, repo.Path, msg); err != nil {
 					return nil, fmt.Errorf("jira: feedback: push fixes %s: %w", repo.Name, err)
 				}
@@ -132,6 +137,7 @@ func (o *Orchestrator) ProcessFeedback(ctx context.Context, ticket Ticket, ws *W
 			}
 
 			// Post a summary comment on the GitHub PR.
+			o.emit("  posting rework summary to PR %s", prInfo.URL)
 			if err := o.fnPostPRComment(ctx, repo.Path, prInfo.URL, buildPRReworkComment(agentResult.Output)); err != nil {
 				o.log.Errorf("ticket %s: post pr comment %s: %v", ticket.Key, repo.Name, err)
 			}
@@ -142,6 +148,7 @@ func (o *Orchestrator) ProcessFeedback(ctx context.Context, ticket Ticket, ws *W
 
 	// Post a Jira rework comment when fixes were made.
 	if result.FixesMade > 0 {
+		o.emit("📝 posting rework summary to Jira %s", ticket.Key)
 		comment := NightshiftComment{
 			Type:      CommentRework,
 			Timestamp: time.Now(),
