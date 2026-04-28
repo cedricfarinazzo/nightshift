@@ -26,7 +26,7 @@ func agentByName(cfg *config.Config, provider string) (agents.Agent, error) {
 		}
 		return a, nil
 	case "copilot":
-		a := newCopilotAgentFromConfig(cfg)
+		a := newCopilotAgentFromConfig(cfg, "")
 		if !a.Available() {
 			return nil, fmt.Errorf("copilot CLI not found in PATH (install via 'gh' or standalone)")
 		}
@@ -78,15 +78,14 @@ func newCodexAgentFromConfig(cfg *config.Config) *agents.CodexAgent {
 // newCopilotAgentFromConfig creates a CopilotAgent from config. If binaryPath
 // is non-empty it overrides auto-detection; otherwise the binary is resolved
 // from PATH (preferring standalone "copilot", falling back to "gh").
-func newCopilotAgentFromConfig(cfg *config.Config, binaryPath ...string) *agents.CopilotAgent {
+// Extra CopilotOptions (e.g. phase-specific model/timeout) are applied last.
+func newCopilotAgentFromConfig(cfg *config.Config, binaryPath string, extra ...agents.CopilotOption) *agents.CopilotAgent {
 	if cfg == nil {
 		return agents.NewCopilotAgent()
 	}
 
-	binary := ""
-	if len(binaryPath) > 0 && binaryPath[0] != "" {
-		binary = binaryPath[0]
-	} else {
+	binary := binaryPath
+	if binary == "" {
 		// Auto-detect: prefer standalone copilot, fallback to gh
 		binary = "gh"
 		if _, err := exec.LookPath("copilot"); err == nil {
@@ -101,5 +100,6 @@ func newCopilotAgentFromConfig(cfg *config.Config, binaryPath ...string) *agents
 	if cfg.Providers.Copilot.Model != "" {
 		opts = append(opts, agents.WithCopilotModel(cfg.Providers.Copilot.Model))
 	}
+	opts = append(opts, extra...)
 	return agents.NewCopilotAgent(opts...)
 }

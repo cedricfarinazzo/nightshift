@@ -365,20 +365,20 @@ func createJiraAgent(cfg *config.Config, phase jira.PhaseConfig) (agents.Agent, 
 		return a, nil
 
 	case "copilot":
-		opts := []agents.CopilotOption{
-			agents.WithCopilotDangerouslySkipPermissions(cfg.Providers.Copilot.DangerouslySkipPermissions),
-		}
+		// Use newCopilotAgentFromConfig for auto-detection (prefers standalone
+		// "copilot" binary, falls back to "gh copilot"), matching run.go behaviour.
 		model := phase.Model
 		if model == "" {
 			model = cfg.Providers.Copilot.Model
 		}
+		extraOpts := []agents.CopilotOption{}
 		if model != "" {
-			opts = append(opts, agents.WithCopilotModel(model))
+			extraOpts = append(extraOpts, agents.WithCopilotModel(model))
 		}
 		if timeout > 0 {
-			opts = append(opts, agents.WithCopilotDefaultTimeout(timeout))
+			extraOpts = append(extraOpts, agents.WithCopilotDefaultTimeout(timeout))
 		}
-		a := agents.NewCopilotAgent(opts...)
+		a := newCopilotAgentFromConfig(cfg, "", extraOpts...)
 		if !a.Available() {
 			return nil, fmt.Errorf("copilot CLI not found in PATH")
 		}
