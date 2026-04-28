@@ -327,6 +327,7 @@ func TestJiraPreviewCmd_Flags(t *testing.T) {
 		name string
 	}{
 		{"project"},
+		{"label"},
 		{"json"},
 		{"plain"},
 		{"validate"},

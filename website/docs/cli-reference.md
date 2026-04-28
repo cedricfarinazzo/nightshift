@@ -107,6 +107,7 @@ nightshift jira preview --plain         # No TUI pager
 |------|-------------|
 | `--ticket` | Process a single ticket by key |
 | `--max-tickets` | Max tickets to process (default from config) |
+| `--label` | Jira label filter (overrides config, default `nightshift`) |
 | `--skip-validation` | Accepted for compatibility; validation is still performed |
 | `--todo-only` | Only process TODO-status tickets |
 | `--review-only` | Only process review-feedback tickets |
@@ -116,6 +117,7 @@ nightshift jira preview --plain         # No TUI pager
 | Flag | Description |
 |------|-------------|
 | `--project`, `-p` | Jira project key (overrides config) |
+| `--label` | Jira label filter (overrides config, default `nightshift`) |
 | `--validate` | Run LLM validation on each ticket (costs tokens) |
 | `--explain` | Show detailed budget breakdown |
 | `--json` | Output as JSON |

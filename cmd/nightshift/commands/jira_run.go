@@ -29,6 +29,7 @@ ON REVIEW tickets: fetch PR feedback → re-work → push`,
 func init() {
 	jiraCmd.AddCommand(jiraRunCmd)
 
+	jiraRunCmd.Flags().String("label", "", "Jira label filter (overrides config, default \"nightshift\")")
 	jiraRunCmd.Flags().Int("max-tickets", 0, "Override max tickets per run (0 = use config)")
 	jiraRunCmd.Flags().String("ticket", "", "Process a single ticket by key (e.g., VC-123)")
 	jiraRunCmd.Flags().Bool("skip-validation", false, "Skip LLM ticket validation step")
@@ -50,6 +51,9 @@ func runJira(cmd *cobra.Command, _ []string) error {
 
 	if v, _ := cmd.Flags().GetInt("max-tickets"); v > 0 {
 		cfg.Jira.MaxTickets = v
+	}
+	if v, _ := cmd.Flags().GetString("label"); v != "" {
+		cfg.Jira.Label = v
 	}
 	skipValidation, _ := cmd.Flags().GetBool("skip-validation")
 	todoOnly, _ := cmd.Flags().GetBool("todo-only")

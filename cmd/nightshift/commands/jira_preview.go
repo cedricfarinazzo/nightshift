@@ -30,6 +30,7 @@ execution order, and budget without executing anything.`,
 
 func init() {
 	jiraPreviewCmd.Flags().StringP("project", "p", "", "Jira project key (overrides config)")
+	jiraPreviewCmd.Flags().String("label", "", "Jira label filter (overrides config, default \"nightshift\")")
 	jiraPreviewCmd.Flags().Bool("json", false, "Output as JSON")
 	jiraPreviewCmd.Flags().Bool("plain", false, "Disable TUI pager")
 	jiraPreviewCmd.Flags().Bool("validate", false, "Run LLM validation on each ticket (costs tokens)")
@@ -94,6 +95,7 @@ type jiraPreviewSkipped struct {
 
 func runJiraPreview(cmd *cobra.Command, _ []string) error {
 	projectOverride, _ := cmd.Flags().GetString("project")
+	labelOverride, _ := cmd.Flags().GetString("label")
 	jsonOutput, _ := cmd.Flags().GetBool("json")
 	plainOutput, _ := cmd.Flags().GetBool("plain")
 	explain, _ := cmd.Flags().GetBool("explain")
@@ -108,6 +110,9 @@ func runJiraPreview(cmd *cobra.Command, _ []string) error {
 
 	if projectOverride != "" {
 		cfg.Jira.Project = projectOverride
+	}
+	if labelOverride != "" {
+		cfg.Jira.Label = labelOverride
 	}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
