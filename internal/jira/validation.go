@@ -29,8 +29,7 @@ func ValidateTicket(ctx context.Context, agent agents.Agent, ticket Ticket) (*Va
 	defer cancel()
 
 	opts := agents.ExecuteOptions{
-		Prompt:  buildValidationPrompt(ticket),
-		Timeout: validationTimeout,
+		Prompt: buildValidationPrompt(ticket),
 	}
 	result, err := agent.Execute(ctx, opts)
 	if err != nil {
