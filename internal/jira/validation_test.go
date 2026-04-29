@@ -11,9 +11,9 @@ import (
 
 // stubAgent is a mock agents.Agent for unit testing.
 type stubAgent struct {
-	name        string
-	output      string
-	err         error
+	name         string
+	output       string
+	err          error
 	capturedOpts agents.ExecuteOptions
 }
 
@@ -254,21 +254,30 @@ func TestValidateTicket_InvalidTicket(t *testing.T) {
 	}
 }
 
-// TestValidateTicket_TimeoutAppliedOnce ensures ValidateTicket does not set
-// opts.Timeout alongside context.WithTimeout, which would create two nested
-// deadlines racing each other (regression for VC-42).
-func TestValidateTicket_TimeoutAppliedOnce(t *testing.T) {
+func TestValidateTicket_PassesValidationPrompt(t *testing.T) {
 	agent := &stubAgent{
 		name:   "stub",
 		output: `{"valid": true, "score": 7, "issues": [], "missing": [], "suggestions": []}`,
 	}
-	ticket := Ticket{Key: "TEST-5", Summary: "Timeout test ticket"}
+	ticket := Ticket{
+		Key:     "TEST-5",
+		Summary: "Timeout test ticket",
+		Comments: []Comment{
+			{Author: "alice", Body: "Please clarify the deadline."},
+		},
+	}
 
 	_, err := ValidateTicket(context.Background(), agent, ticket)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if agent.capturedOpts.Timeout != 0 {
-		t.Errorf("opts.Timeout should be zero (timeout applied via context only), got %v", agent.capturedOpts.Timeout)
+	if !strings.Contains(agent.capturedOpts.Prompt, ticket.Key) {
+		t.Errorf("prompt missing ticket key: %q", agent.capturedOpts.Prompt)
+	}
+	if !strings.Contains(agent.capturedOpts.Prompt, ticket.Summary) {
+		t.Errorf("prompt missing ticket summary: %q", agent.capturedOpts.Prompt)
+	}
+	if !strings.Contains(agent.capturedOpts.Prompt, "Please clarify the deadline.") {
+		t.Errorf("prompt missing comment body: %q", agent.capturedOpts.Prompt)
 	}
 }

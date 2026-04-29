@@ -42,6 +42,32 @@ func (r *ExecuteResult) IsSuccess() bool {
 	return r.ExitCode == 0 && r.Error == ""
 }
 
+// withEffectiveTimeout applies the shortest available timeout from the agent
+// configuration, per-call override, and any parent context deadline.
+func withEffectiveTimeout(ctx context.Context, defaultTimeout, override time.Duration) (context.Context, context.CancelFunc, time.Duration) {
+	timeout := defaultTimeout
+	if override > 0 {
+		timeout = override
+	}
+
+	if deadline, ok := ctx.Deadline(); ok {
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			return ctx, func() {}, 0
+		}
+		if remaining < timeout {
+			timeout = remaining
+		}
+	}
+
+	if timeout <= 0 {
+		return ctx, func() {}, 0
+	}
+
+	timeoutCtx, cancel := context.WithTimeout(ctx, timeout)
+	return timeoutCtx, cancel, timeout
+}
+
 // truncate returns s trimmed to at most maxLen bytes, appending "..." if truncated.
 // Operates on bytes, not runes; callers pass ASCII-only strings (CLI stderr/stdout).
 func truncate(s string, maxLen int) string {
