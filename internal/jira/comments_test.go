@@ -193,6 +193,50 @@ func TestExtractBody(t *testing.T) {
 	}
 }
 
+func TestFormatComment_TypeLineURLEncoded(t *testing.T) {
+	c := NightshiftComment{
+		Type:     CommentPlan,
+		Provider: "acme%corp",
+		Model:    "model/v2",
+		Duration: 5 * time.Minute,
+		Body:     "body",
+	}
+	body := formatComment(c)
+	if strings.Contains(body, "provider=acme%corp ") || strings.Contains(body, "provider=acme%corp -") {
+		t.Error("provider with raw % must be URL-encoded in type line")
+	}
+	if strings.Contains(body, "model=model/v2") {
+		t.Error("model with / must be URL-encoded in type line")
+	}
+	if !strings.Contains(body, "provider=acme%25corp") {
+		t.Errorf("provider %% must be encoded as %%25 in type line")
+	}
+	if !strings.Contains(body, "model=model%2Fv2") {
+		t.Errorf("model / must be encoded as %%2F in type line")
+	}
+}
+
+func TestFormatComment_TypeLineRoundTrip(t *testing.T) {
+	c := NightshiftComment{
+		Type:     CommentPlan,
+		Provider: "acme%corp",
+		Model:    "claude-3/sonnet",
+		Duration: 2 * time.Minute,
+		Body:     "body",
+	}
+	body := formatComment(c)
+	_, meta, ok := parseCommentMeta(body)
+	if !ok {
+		t.Fatal("expected ok=true")
+	}
+	if meta["provider"] != "acme%corp" {
+		t.Errorf("provider = %q, want %q", meta["provider"], "acme%corp")
+	}
+	if meta["model"] != "claude-3/sonnet" {
+		t.Errorf("model = %q, want %q", meta["model"], "claude-3/sonnet")
+	}
+}
+
 func TestParseNightshiftComments(t *testing.T) {
 	now := time.Now()
 	raw := []Comment{
