@@ -34,15 +34,15 @@ const (
 
 // TicketResult holds the outcome of processing a single Jira ticket.
 type TicketResult struct {
-	TicketKey              string        `json:"ticket_key"`
-	Status                 TicketStatus  `json:"status"`
-	Phase                  Phase         `json:"phase"`
-	PRURLs                 []string      `json:"pr_urls,omitempty"`
-	Plan                   string        `json:"plan,omitempty"`
-	ImplementationSummary  string        `json:"implementation_summary,omitempty"`
-	Summary                string        `json:"summary,omitempty"`
-	Error                  string        `json:"error,omitempty"`
-	Duration               time.Duration `json:"duration"`
+	TicketKey             string        `json:"ticket_key"`
+	Status                TicketStatus  `json:"status"`
+	Phase                 Phase         `json:"phase"`
+	PRURLs                []string      `json:"pr_urls,omitempty"`
+	Plan                  string        `json:"plan,omitempty"`
+	ImplementationSummary string        `json:"implementation_summary,omitempty"`
+	Summary               string        `json:"summary,omitempty"`
+	Error                 string        `json:"error,omitempty"`
+	Duration              time.Duration `json:"duration"`
 }
 
 // jiraClient defines the Jira operations needed by the orchestrator.
@@ -231,11 +231,19 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 	}
 	if o.fnHasChanges == nil {
 		o.fnHasChanges = HasChanges
+	}
+	if o.fnCommitAndPush == nil {
 		o.fnCommitAndPush = CommitAndPush
+	}
+	if o.fnCreatePR == nil {
 		o.fnCreatePR = CreateOrUpdatePR
+	}
+	if o.fnFindPR == nil {
 		o.fnFindPR = func(ctx context.Context, repoPath, branch string) (*PRInfo, error) {
 			return findExistingPR(ctx, repoPath, branch)
 		}
+	}
+	if o.fnFetchReviews == nil {
 		o.fnFetchReviews = FetchPRReviewComments
 	}
 	if o.fnPostPRComment == nil {

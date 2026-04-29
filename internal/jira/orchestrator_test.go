@@ -571,7 +571,8 @@ func TestProcessTicket_CommitPhase_NoChanges(t *testing.T) {
 	o.fnHasChanges = func(_ context.Context, _ string) (bool, error) { return false, nil }
 	o.fnCommitAndPush = func(_ context.Context, _, _ string) error { t.Error("CommitAndPush called unexpectedly"); return nil }
 	o.fnCreatePR = func(_ context.Context, _ RepoWorkspace, _ Ticket, _ string) (*PRInfo, error) {
-		t.Error("CreateOrUpdatePR called unexpectedly"); return nil, nil
+		t.Error("CreateOrUpdatePR called unexpectedly")
+		return nil, nil
 	}
 
 	result, err := o.ProcessTicket(context.Background(), Ticket{Key: "T-1", Summary: "Test"}, ws)
@@ -769,7 +770,6 @@ func (a *callCountAgent) Execute(_ context.Context, _ agents.ExecuteOptions) (*a
 	return &agents.ExecuteResult{Output: ""}, nil
 }
 
-
 // ── detectResumeState ─────────────────────────────────────────────────────────
 
 func nightshiftComment(ct CommentType, body string) Comment {
@@ -866,7 +866,9 @@ func TestProcessTicket_AlreadyComplete_EarlyExit(t *testing.T) {
 		implAgent:       implAgent,
 		fnHasChanges:    func(_ context.Context, _ string) (bool, error) { return false, nil },
 		fnCommitAndPush: func(_ context.Context, _, _ string) error { return nil },
-		fnCreatePR:      func(_ context.Context, _ RepoWorkspace, _ Ticket, _ string) (*PRInfo, error) { return &PRInfo{URL: "u"}, nil },
+		fnCreatePR: func(_ context.Context, _ RepoWorkspace, _ Ticket, _ string) (*PRInfo, error) {
+			return &PRInfo{URL: "u"}, nil
+		},
 		fnFindPR:        func(_ context.Context, _, _ string) (*PRInfo, error) { return nil, nil },
 		fnFetchReviews:  func(_ context.Context, _, _ string) (*PRReviewState, error) { return nil, nil },
 		fnPostPRComment: func(_ context.Context, _, _, _ string) error { return nil },
@@ -897,6 +899,44 @@ func TestProcessTicket_AlreadyComplete_EarlyExit(t *testing.T) {
 	}
 }
 
+func TestProcessTicket_DefaultInjectablesWhenFnHasChangesSet(t *testing.T) {
+	client := &stubJiraClient{}
+	validationAgent := &stubAgent{output: `{"score": 9, "valid": true, "reasoning": "ok"}`}
+	implAgent := &stubAgent{output: "plan"}
+	o := &Orchestrator{
+		client:          client,
+		validationAgent: validationAgent,
+		implAgent:       implAgent,
+		fnHasChanges:    func(_ context.Context, _ string) (bool, error) { return false, nil },
+	}
+	ticket := Ticket{
+		Key: "T-100",
+		Comments: []Comment{
+			nightshiftComment(CommentValidation, "ok"),
+			nightshiftComment(CommentPlan, "plan"),
+			nightshiftComment(CommentImplement, "done"),
+			nightshiftComment(CommentPR, "PRs created:\nhttps://github.com/org/repo/pull/1"),
+		},
+	}
+	ws := &Workspace{
+		Repos: []RepoWorkspace{{Name: "repo", Path: "/tmp", Branch: "feature/T-100", BaseBranch: "main"}},
+	}
+
+	result, err := o.ProcessTicket(context.Background(), ticket, ws)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Status != TicketCompleted {
+		t.Errorf("Status = %q, want %q", result.Status, TicketCompleted)
+	}
+	if o.fnFindPR == nil {
+		t.Error("fnFindPR should be initialized independently")
+	}
+	if o.fnFetchReviews == nil {
+		t.Error("fnFetchReviews should be initialized independently")
+	}
+}
+
 func TestParsePRURLsFromComment(t *testing.T) {
 	body := "PRs created:\nhttps://github.com/org/repo/pull/42\nhttps://github.com/org/repo/pull/43\nsome other line"
 	urls := parsePRURLsFromComment(body)
@@ -921,7 +961,9 @@ func TestProcessTicket_SkipsValidationWhenAlreadyValidated(t *testing.T) {
 		implAgent:       implAgent,
 		fnHasChanges:    func(_ context.Context, _ string) (bool, error) { return false, nil },
 		fnCommitAndPush: func(_ context.Context, _, _ string) error { return nil },
-		fnCreatePR:      func(_ context.Context, _ RepoWorkspace, _ Ticket, _ string) (*PRInfo, error) { return &PRInfo{URL: "u"}, nil },
+		fnCreatePR: func(_ context.Context, _ RepoWorkspace, _ Ticket, _ string) (*PRInfo, error) {
+			return &PRInfo{URL: "u"}, nil
+		},
 		fnFindPR:        func(_ context.Context, _, _ string) (*PRInfo, error) { return nil, nil },
 		fnFetchReviews:  func(_ context.Context, _, _ string) (*PRReviewState, error) { return nil, nil },
 		fnPostPRComment: func(_ context.Context, _, _, _ string) error { return nil },
