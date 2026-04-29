@@ -290,12 +290,18 @@ func extractAcceptanceCriteria(description string) string {
 		return ""
 	}
 	// Skip past the heading line
+	const acKeyword = "acceptance criteria"
 	start := strings.Index(description[idx:], "\n")
+	var rest string
 	if start < 0 {
-		return ""
+		// No newline after heading: treat any inline content after the keyword as the body
+		rest = strings.TrimSpace(description[idx+len(acKeyword):])
+		// Strip a leading ':' or whitespace that often follows inline headings (e.g. "Acceptance Criteria: ...")
+		rest = strings.TrimLeft(rest, ": \t")
+	} else {
+		start += idx + 1
+		rest = description[start:]
 	}
-	start += idx + 1
-	rest := description[start:]
 	// Stop at the next section: a non-empty line that ends with ':' and contains no spaces
 	// (matches "SectionName:" style headings produced by extractText).
 	lines := strings.Split(rest, "\n")
