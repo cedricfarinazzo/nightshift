@@ -11,13 +11,15 @@ import (
 
 // stubAgent is a mock agents.Agent for unit testing.
 type stubAgent struct {
-	name   string
-	output string
-	err    error
+	name        string
+	output      string
+	err         error
+	capturedOpts agents.ExecuteOptions
 }
 
 func (s *stubAgent) Name() string { return s.name }
-func (s *stubAgent) Execute(_ context.Context, _ agents.ExecuteOptions) (*agents.ExecuteResult, error) {
+func (s *stubAgent) Execute(_ context.Context, opts agents.ExecuteOptions) (*agents.ExecuteResult, error) {
+	s.capturedOpts = opts
 	if s.err != nil {
 		return nil, s.err
 	}
@@ -249,5 +251,24 @@ func TestValidateTicket_InvalidTicket(t *testing.T) {
 	}
 	if len(result.Missing) != 2 {
 		t.Errorf("Missing = %v, want 2 items", result.Missing)
+	}
+}
+
+// TestValidateTicket_TimeoutAppliedOnce ensures ValidateTicket does not set
+// opts.Timeout alongside context.WithTimeout, which would create two nested
+// deadlines racing each other (regression for VC-42).
+func TestValidateTicket_TimeoutAppliedOnce(t *testing.T) {
+	agent := &stubAgent{
+		name:   "stub",
+		output: `{"valid": true, "score": 7, "issues": [], "missing": [], "suggestions": []}`,
+	}
+	ticket := Ticket{Key: "TEST-5", Summary: "Timeout test ticket"}
+
+	_, err := ValidateTicket(context.Background(), agent, ticket)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if agent.capturedOpts.Timeout != 0 {
+		t.Errorf("opts.Timeout should be zero (timeout applied via context only), got %v", agent.capturedOpts.Timeout)
 	}
 }
