@@ -40,7 +40,7 @@ func init() {
 func runJira(cmd *cobra.Command, _ []string) error {
 	log := logging.Component("jira")
 
-	cfg, err := config.Load()
+	cfg, err := loadConfig("")
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
@@ -97,6 +97,29 @@ func runJira(cmd *cobra.Command, _ []string) error {
 		jira.WithImplAgent(implAgent),
 		jira.WithReviewFixAgent(reviewFixAgent),
 		jira.WithValidationAgent(validationAgent),
+		jira.WithPhaseCallback(func(ticketKey string, phase jira.Phase, done bool) {
+			if !done {
+				switch phase {
+				case jira.PhaseValidate:
+					fmt.Printf("    ⟳ validate      checking ticket quality…\n")
+				case jira.PhasePlan:
+					fmt.Printf("    ⟳ plan          generating implementation plan…\n")
+				case jira.PhaseImplement:
+					fmt.Printf("    ⟳ implement     coding — this may take a while…\n")
+				case jira.PhaseCommit:
+					fmt.Printf("    ⟳ commit        committing changes…\n")
+				case jira.PhasePR:
+					fmt.Printf("    ⟳ pr            opening pull request…\n")
+				case jira.PhaseStatus:
+					fmt.Printf("    ⟳ status        updating Jira ticket…\n")
+				default:
+					fmt.Printf("    ⟳ %-12s …\n", phase)
+				}
+			}
+		}),
+		jira.WithProgressPrinter(func(format string, args ...any) {
+			fmt.Printf("    "+format+"\n", args...)
+		}),
 	}
 	if skipValidation {
 		orchOpts = append(orchOpts, jira.WithSkipValidation())
@@ -226,6 +249,10 @@ func runTodoPhase(
 	ready, blocked := graph.ResolveOrder()
 	for _, b := range blocked {
 		log.Infof("ticket %s blocked by %v, skipping", b.Ticket.Key, b.Blockers)
+		fmt.Printf("  ⏭  %s  blocked by %v\n", b.Ticket.Key, b.Blockers)
+	}
+	if len(ready) == 0 {
+		fmt.Println("  no tickets ready to process")
 	}
 
 	count := 0
@@ -233,9 +260,12 @@ func runTodoPhase(
 		if count >= jiracfg.MaxTickets {
 			break
 		}
+		fmt.Printf("\n  ▶ %s  %s\n", ticket.Key, ticket.Summary)
+		fmt.Printf("    setting up workspace…\n")
 		ws, err := jira.SetupWorkspace(ctx, jiracfg, ticket.Key)
 		if err != nil {
 			log.Errorf("workspace %s: %v", ticket.Key, err)
+			fmt.Printf("    ✗ workspace setup failed: %v\n", err)
 			*results = append(*results, jira.TicketResult{TicketKey: ticket.Key, Status: jira.TicketFailed, Error: err.Error()})
 			count++
 			continue
@@ -245,6 +275,7 @@ func runTodoPhase(
 			log.Errorf("process %s: %v", ticket.Key, err)
 		}
 		if result != nil {
+			printTicketResult(result)
 			*results = append(*results, *result)
 		}
 		count++
@@ -267,10 +298,16 @@ func runReviewPhase(
 	}
 	log.Infof("review tickets: %d found", len(reviewTickets))
 
+	if len(reviewTickets) == 0 {
+		fmt.Println("  no tickets in review")
+	}
 	for _, ticket := range reviewTickets {
+		fmt.Printf("\n  🔍 %s  %s\n", ticket.Key, ticket.Summary)
+		fmt.Printf("    setting up workspace…\n")
 		ws, err := jira.SetupWorkspace(ctx, jiracfg, ticket.Key)
 		if err != nil {
 			log.Errorf("workspace %s: %v", ticket.Key, err)
+			fmt.Printf("    ✗ workspace setup failed: %v\n", err)
 			*feedbackResults = append(*feedbackResults, jira.FeedbackResult{TicketKey: ticket.Key, Error: err.Error()})
 			continue
 		}
@@ -279,6 +316,7 @@ func runReviewPhase(
 			log.Errorf("process feedback %s: %v", ticket.Key, err)
 		}
 		if result != nil {
+			printFeedbackResult(result)
 			*feedbackResults = append(*feedbackResults, *result)
 		}
 	}
@@ -306,61 +344,42 @@ func createJiraAgent(cfg *config.Config, phase jira.PhaseConfig) (agents.Agent, 
 
 	switch provider {
 	case "codex":
-		opts := []agents.CodexOption{}
-		if cfg.Providers.Codex.DangerouslyBypassApprovalsAndSandbox {
-			opts = append(opts, agents.WithDangerouslyBypassApprovalsAndSandbox(true))
-		}
-		model := phase.Model
-		if model == "" {
-			model = cfg.Providers.Codex.Model
-		}
-		if model != "" {
-			opts = append(opts, agents.WithCodexModel(model))
+		var extra []agents.CodexOption
+		if m := phase.Model; m != "" {
+			extra = append(extra, agents.WithCodexModel(m))
 		}
 		if timeout > 0 {
-			opts = append(opts, agents.WithCodexDefaultTimeout(timeout))
+			extra = append(extra, agents.WithCodexDefaultTimeout(timeout))
 		}
-		a := agents.NewCodexAgent(opts...)
+		a := newCodexAgentFromConfig(cfg, extra...)
 		if !a.Available() {
 			return nil, fmt.Errorf("codex CLI not found in PATH")
 		}
 		return a, nil
 
 	case "copilot":
-		opts := []agents.CopilotOption{
-			agents.WithCopilotDangerouslySkipPermissions(cfg.Providers.Copilot.DangerouslySkipPermissions),
-		}
-		model := phase.Model
-		if model == "" {
-			model = cfg.Providers.Copilot.Model
-		}
-		if model != "" {
-			opts = append(opts, agents.WithCopilotModel(model))
+		var extra []agents.CopilotOption
+		if m := phase.Model; m != "" {
+			extra = append(extra, agents.WithCopilotModel(m))
 		}
 		if timeout > 0 {
-			opts = append(opts, agents.WithCopilotDefaultTimeout(timeout))
+			extra = append(extra, agents.WithCopilotDefaultTimeout(timeout))
 		}
-		a := agents.NewCopilotAgent(opts...)
+		a := newCopilotAgentFromConfig(cfg, "", extra...)
 		if !a.Available() {
 			return nil, fmt.Errorf("copilot CLI not found in PATH")
 		}
 		return a, nil
 
 	default: // "claude" or unrecognized
-		opts := []agents.ClaudeOption{
-			agents.WithDangerouslySkipPermissions(cfg.Providers.Claude.DangerouslySkipPermissions),
-		}
-		model := phase.Model
-		if model == "" {
-			model = cfg.Providers.Claude.Model
-		}
-		if model != "" {
-			opts = append(opts, agents.WithModel(model))
+		var extra []agents.ClaudeOption
+		if m := phase.Model; m != "" {
+			extra = append(extra, agents.WithModel(m))
 		}
 		if timeout > 0 {
-			opts = append(opts, agents.WithDefaultTimeout(timeout))
+			extra = append(extra, agents.WithDefaultTimeout(timeout))
 		}
-		a := agents.NewClaudeAgent(opts...)
+		a := newClaudeAgentFromConfig(cfg, extra...)
 		if !a.Available() {
 			return nil, fmt.Errorf("claude CLI not found in PATH")
 		}
@@ -378,6 +397,35 @@ func printJiraPreflightSummary(cfg jira.JiraConfig, _ *jira.StatusMap) {
 	fmt.Printf("  Implement:    %s/%s\n", cfg.Implement.Provider, cfg.Implement.Model)
 	fmt.Printf("  ReviewFix:    %s/%s\n", cfg.ReviewFix.Provider, cfg.ReviewFix.Model)
 	fmt.Printf("  Max tickets:  %d\n", cfg.MaxTickets)
+}
+
+func printTicketResult(r *jira.TicketResult) {
+	switch r.Status {
+	case jira.TicketCompleted:
+		fmt.Printf("    ✅ completed in %s", r.Duration.Round(time.Second))
+		if len(r.PRURLs) > 0 {
+			fmt.Printf("  →  %s", strings.Join(r.PRURLs, "  "))
+		}
+		fmt.Println()
+	case jira.TicketRejected:
+		fmt.Printf("    ❌ rejected — %s\n", r.Summary)
+	case jira.TicketSkipped:
+		fmt.Printf("    ⏭️  skipped\n")
+	default:
+		fmt.Printf("    ⚠️  failed at phase %s — %s\n", r.Phase, r.Error)
+	}
+}
+
+func printFeedbackResult(r *jira.FeedbackResult) {
+	if r.Error != "" {
+		fmt.Printf("    ⚠️  error — %s\n", r.Error)
+		return
+	}
+	if r.FixesMade == 0 {
+		fmt.Printf("    ℹ️  no changes requested in %s\n", r.Duration.Round(time.Second))
+		return
+	}
+	fmt.Printf("    🔄 reworked %d repo(s), %d commit(s) in %s\n", r.FixesMade, r.PushedCommits, r.Duration.Round(time.Second))
 }
 
 func printJiraRunSummary(results []jira.TicketResult, feedback []jira.FeedbackResult, d time.Duration) {

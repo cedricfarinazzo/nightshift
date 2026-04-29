@@ -6,7 +6,12 @@ import (
 	"strings"
 
 	"github.com/marcus/nightshift/internal/agents"
+	"github.com/marcus/nightshift/internal/budget"
+	"github.com/marcus/nightshift/internal/calibrator"
 	"github.com/marcus/nightshift/internal/config"
+	"github.com/marcus/nightshift/internal/db"
+	"github.com/marcus/nightshift/internal/providers"
+	"github.com/marcus/nightshift/internal/trends"
 )
 
 // agentByName creates an agent for the given provider name.
@@ -26,7 +31,7 @@ func agentByName(cfg *config.Config, provider string) (agents.Agent, error) {
 		}
 		return a, nil
 	case "copilot":
-		a := newCopilotAgentFromConfig(cfg)
+		a := newCopilotAgentFromConfig(cfg, "")
 		if !a.Available() {
 			return nil, fmt.Errorf("copilot CLI not found in PATH (install via 'gh' or standalone)")
 		}
@@ -36,9 +41,9 @@ func agentByName(cfg *config.Config, provider string) (agents.Agent, error) {
 	}
 }
 
-func newClaudeAgentFromConfig(cfg *config.Config) *agents.ClaudeAgent {
+func newClaudeAgentFromConfig(cfg *config.Config, extra ...agents.ClaudeOption) *agents.ClaudeAgent {
 	if cfg == nil {
-		return agents.NewClaudeAgent()
+		return agents.NewClaudeAgent(extra...)
 	}
 	opts := []agents.ClaudeOption{
 		agents.WithDangerouslySkipPermissions(cfg.Providers.Claude.DangerouslySkipPermissions),
@@ -46,12 +51,13 @@ func newClaudeAgentFromConfig(cfg *config.Config) *agents.ClaudeAgent {
 	if cfg.Providers.Claude.Model != "" {
 		opts = append(opts, agents.WithModel(cfg.Providers.Claude.Model))
 	}
+	opts = append(opts, extra...)
 	return agents.NewClaudeAgent(opts...)
 }
 
-func newCodexAgentFromConfig(cfg *config.Config) *agents.CodexAgent {
+func newCodexAgentFromConfig(cfg *config.Config, extra ...agents.CodexOption) *agents.CodexAgent {
 	if cfg == nil {
-		return agents.NewCodexAgent()
+		return agents.NewCodexAgent(extra...)
 	}
 	// The --dangerously-bypass-approvals-and-sandbox flag is required for
 	// non-interactive (headless) Codex execution. The agent defaults to true.
@@ -72,21 +78,21 @@ func newCodexAgentFromConfig(cfg *config.Config) *agents.CodexAgent {
 	if cfg.Providers.Codex.Model != "" {
 		opts = append(opts, agents.WithCodexModel(cfg.Providers.Codex.Model))
 	}
+	opts = append(opts, extra...)
 	return agents.NewCodexAgent(opts...)
 }
 
 // newCopilotAgentFromConfig creates a CopilotAgent from config. If binaryPath
 // is non-empty it overrides auto-detection; otherwise the binary is resolved
 // from PATH (preferring standalone "copilot", falling back to "gh").
-func newCopilotAgentFromConfig(cfg *config.Config, binaryPath ...string) *agents.CopilotAgent {
+// Extra CopilotOptions (e.g. phase-specific model/timeout) are applied last.
+func newCopilotAgentFromConfig(cfg *config.Config, binaryPath string, extra ...agents.CopilotOption) *agents.CopilotAgent {
 	if cfg == nil {
 		return agents.NewCopilotAgent()
 	}
 
-	binary := ""
-	if len(binaryPath) > 0 && binaryPath[0] != "" {
-		binary = binaryPath[0]
-	} else {
+	binary := binaryPath
+	if binary == "" {
 		// Auto-detect: prefer standalone copilot, fallback to gh
 		binary = "gh"
 		if _, err := exec.LookPath("copilot"); err == nil {
@@ -101,5 +107,18 @@ func newCopilotAgentFromConfig(cfg *config.Config, binaryPath ...string) *agents
 	if cfg.Providers.Copilot.Model != "" {
 		opts = append(opts, agents.WithCopilotModel(cfg.Providers.Copilot.Model))
 	}
+	opts = append(opts, extra...)
 	return agents.NewCopilotAgent(opts...)
+}
+
+// newBudgetManager builds a budget.Manager from config and an open database.
+// Shared between run.go and jira_preview.go to avoid duplicating provider + calibrator setup.
+func newBudgetManager(cfg *config.Config, database *db.DB) *budget.Manager {
+	claudeProvider := providers.NewClaudeWithPath(cfg.ExpandedProviderPath("claude"))
+	codexProvider := providers.NewCodexWithPath(cfg.ExpandedProviderPath("codex"))
+	copilotProvider := providers.NewCopilotWithPath(cfg.ExpandedProviderPath("copilot"))
+	cal := calibrator.New(database, cfg)
+	trend := trends.NewAnalyzer(database, cfg.Budget.SnapshotRetentionDays)
+	return budget.NewManagerFromProviders(cfg, claudeProvider, codexProvider, copilotProvider,
+		budget.WithBudgetSource(cal), budget.WithTrendAnalyzer(trend))
 }

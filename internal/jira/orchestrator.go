@@ -62,6 +62,8 @@ type Orchestrator struct {
 	implAgent       agents.Agent
 	reviewFixAgent  agents.Agent
 	skipValidation  bool
+	onPhase         func(ticketKey string, phase Phase, done bool) // optional progress callback
+	progressf       func(format string, args ...any)               // optional human-readable progress printer
 	log             *logging.Logger
 
 	// ops are injectable for testing; set to real functions by NewOrchestrator.
@@ -96,6 +98,18 @@ func WithReviewFixAgent(a agents.Agent) OrchestratorOption {
 // to in-progress directly, skipping the quality-score check.
 func WithSkipValidation() OrchestratorOption {
 	return func(o *Orchestrator) { o.skipValidation = true }
+}
+
+// WithPhaseCallback registers a callback invoked at the start (done=false) and
+// end (done=true) of each phase. Useful for real-time progress reporting.
+func WithPhaseCallback(fn func(ticketKey string, phase Phase, done bool)) OrchestratorOption {
+	return func(o *Orchestrator) { o.onPhase = fn }
+}
+
+// WithProgressPrinter registers a printf-style function called for human-readable
+// progress events (agent start, PR creation, Jira transitions, etc.).
+func WithProgressPrinter(fn func(format string, args ...any)) OrchestratorOption {
+	return func(o *Orchestrator) { o.progressf = fn }
 }
 
 // NewOrchestrator creates an Orchestrator with the given client, config, and options.
@@ -270,6 +284,7 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 	// Phase 1: Validate
 	if !skip(PhaseValidate) {
 		result.Phase = PhaseValidate
+		o.notifyPhase(ticket.Key, PhaseValidate, false)
 		if !o.skipValidation {
 			vr, err := ValidateTicket(ctx, o.validationAgent, ticket)
 			if err != nil {
@@ -310,6 +325,8 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 	// Phase 2: Plan
 	if !skip(PhasePlan) {
 		result.Phase = PhasePlan
+		o.notifyPhase(ticket.Key, PhasePlan, false)
+		o.emit("🤖 claude running: plan  (%s)", o.cfg.Plan.Model)
 		planStart := time.Now()
 		planResult, err := o.implAgent.Execute(ctx, agents.ExecuteOptions{
 			Prompt:  o.buildPlanPrompt(ticket),
@@ -325,6 +342,7 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 			return result, nil
 		}
 		result.Plan = planResult.Output
+		o.emit("📝 posting plan to Jira %s", ticket.Key)
 		o.postPhaseComment(ctx, ticket.Key, CommentPlan, planResult.Output, time.Since(planStart))
 		o.log.Infof("ticket %s: plan complete", ticket.Key)
 	}
@@ -332,6 +350,9 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 	// Phase 3: Implement
 	if !skip(PhaseImplement) {
 		result.Phase = PhaseImplement
+		o.notifyPhase(ticket.Key, PhaseImplement, false)
+		timeout := parseTimeout(o.cfg.Implement.Timeout, 30*time.Minute)
+		o.emit("🤖 claude running: implement  (%s, timeout %s)", o.cfg.Implement.Model, timeout.Round(time.Minute))
 		implStart := time.Now()
 		workDir := ""
 		if ws != nil && len(ws.Repos) > 0 {
@@ -340,7 +361,7 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 		implResult, err := o.implAgent.Execute(ctx, agents.ExecuteOptions{
 			Prompt:  o.buildImplementPrompt(ticket, result.Plan, ws),
 			WorkDir: workDir,
-			Timeout: parseTimeout(o.cfg.Implement.Timeout, 30*time.Minute),
+			Timeout: timeout,
 			Model:   o.cfg.Implement.Model,
 		})
 		if err != nil {
@@ -352,6 +373,7 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 			return result, nil
 		}
 		result.ImplementationSummary = implResult.Output
+		o.emit("📝 posting implementation summary to Jira %s", ticket.Key)
 		o.postPhaseComment(ctx, ticket.Key, CommentImplement, implResult.Output, time.Since(implStart))
 		o.log.Infof("ticket %s: implementation complete", ticket.Key)
 	}
@@ -359,6 +381,7 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 	// Phase 4: Commit
 	if !skip(PhaseCommit) {
 		result.Phase = PhaseCommit
+		o.notifyPhase(ticket.Key, PhaseCommit, false)
 		var changedRepos []RepoWorkspace
 		if ws != nil {
 			for _, repo := range ws.Repos {
@@ -371,9 +394,11 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 					return result, nil
 				}
 				if !changed {
+					o.emit("  no changes in repo %s — skipping commit", repo.Name)
 					continue
 				}
 				msg := CommitMessage(ticket.Key, "", ticket.Summary)
+				o.emit("  committing + pushing %s → %s", repo.Name, repo.Branch)
 				if err := o.fnCommitAndPush(ctx, repo.Path, msg); err != nil {
 					o.postErrorComment(ctx, ticket.Key, PhaseCommit, err)
 					result.Status = TicketFailed
@@ -387,6 +412,7 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 
 		// Phase 5: PR
 		result.Phase = PhasePR
+		o.notifyPhase(ticket.Key, PhasePR, false)
 		prStart := time.Now()
 		type repoPR struct {
 			repo RepoWorkspace
@@ -394,6 +420,7 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 		}
 		var repoPRs []repoPR
 		for _, repo := range changedRepos {
+			o.emit("  creating PR for %s (%s → %s)", repo.Name, repo.Branch, repo.BaseBranch)
 			prInfo, err := o.fnCreatePR(ctx, repo, ticket, o.cfg.Site)
 			if err != nil {
 				o.postErrorComment(ctx, ticket.Key, PhasePR, err)
@@ -402,17 +429,20 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 				result.Duration = time.Since(start)
 				return result, nil
 			}
+			o.emit("  ✓ PR created: %s", prInfo.URL)
 			result.PRURLs = append(result.PRURLs, prInfo.URL)
 			repoPRs = append(repoPRs, repoPR{repo: repo, url: prInfo.URL})
 		}
 		if len(result.PRURLs) > 0 {
+			o.emit("📝 posting PR links to Jira %s", ticket.Key)
 			o.postPhaseComment(ctx, ticket.Key, CommentPR,
 				fmt.Sprintf("PRs created:\n%s", strings.Join(result.PRURLs, "\n")),
 				time.Since(prStart))
 			// Post implementation summary as PR comment so reviewers have full context.
 			if result.ImplementationSummary != "" {
-				prComment := buildPRImplementationComment(ticket, result.ImplementationSummary, o.cfg.Site)
 				for _, rpr := range repoPRs {
+					o.emit("  posting implementation summary to PR %s", rpr.url)
+					prComment := buildPRImplementationComment(ticket, result.ImplementationSummary, o.cfg.Site)
 					if err := o.fnPostPRComment(ctx, rpr.repo.Path, rpr.url, prComment); err != nil {
 						o.log.Errorf("ticket %s: post impl summary on PR %s: %v", ticket.Key, rpr.url, err)
 					}
@@ -444,6 +474,8 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 	// Phase 6: Status
 	if !skip(PhaseStatus) {
 		result.Phase = PhaseStatus
+		o.notifyPhase(ticket.Key, PhaseStatus, false)
+		o.emit("🔄 transitioning %s → review (Jira)", ticket.Key)
 		if err := o.client.TransitionToReview(ctx, ticket.Key); err != nil {
 			o.postErrorComment(ctx, ticket.Key, PhaseStatus, err)
 			result.Status = TicketFailed
@@ -622,4 +654,18 @@ func parseTimeout(s string, fallback time.Duration) time.Duration {
 		return fallback
 	}
 	return d
+}
+
+// notifyPhase invokes the onPhase callback when one is registered.
+func (o *Orchestrator) notifyPhase(ticketKey string, phase Phase, done bool) {
+	if o.onPhase != nil {
+		o.onPhase(ticketKey, phase, done)
+	}
+}
+
+// emit calls the progress printer when one is registered.
+func (o *Orchestrator) emit(format string, args ...any) {
+	if o.progressf != nil {
+		o.progressf(format, args...)
+	}
 }

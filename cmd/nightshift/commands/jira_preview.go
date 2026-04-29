@@ -12,11 +12,8 @@ import (
 
 	"github.com/marcus/nightshift/internal/agents"
 	"github.com/marcus/nightshift/internal/budget"
-	"github.com/marcus/nightshift/internal/calibrator"
 	"github.com/marcus/nightshift/internal/db"
 	"github.com/marcus/nightshift/internal/jira"
-	"github.com/marcus/nightshift/internal/providers"
-	"github.com/marcus/nightshift/internal/trends"
 	"github.com/spf13/cobra"
 )
 
@@ -240,12 +237,7 @@ func runJiraPreview(cmd *cobra.Command, _ []string) error {
 			result.BudgetErr = fmt.Sprintf("open db: %v", dbErr)
 		} else {
 			defer func() { _ = database.Close() }()
-			claudeProvider := providers.NewClaudeWithPath(cfg.ExpandedProviderPath("claude"))
-			codexProvider := providers.NewCodexWithPath(cfg.ExpandedProviderPath("codex"))
-			copilotProvider := providers.NewCopilotWithPath(cfg.ExpandedProviderPath("copilot"))
-			cal := calibrator.New(database, cfg)
-			trend := trends.NewAnalyzer(database, cfg.Budget.SnapshotRetentionDays)
-			budgetMgr := budget.NewManagerFromProviders(cfg, claudeProvider, codexProvider, copilotProvider, budget.WithBudgetSource(cal), budget.WithTrendAnalyzer(trend))
+			budgetMgr := newBudgetManager(cfg, database)
 
 			provider := cfg.Jira.Implement.Provider
 			if provider == "" {
