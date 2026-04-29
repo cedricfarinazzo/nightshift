@@ -141,9 +141,9 @@ func runJira(cmd *cobra.Command, _ []string) error {
 			return fmt.Errorf("ticket %s not found in TODO or ON REVIEW lists", singleTicket)
 		}
 	} else {
-		// Phase A: TODO tickets.
+		// Phase A: TODO + in-progress tickets (resume failed runs).
 		if !reviewOnly {
-			if err := runTodoPhase(ctx, log, orch, client, cfg.Jira, &results); err != nil {
+			if err := runTodoPhase(ctx, log, orch, client, cfg.Jira, statusMap, &results); err != nil {
 				return err
 			}
 		}
@@ -181,12 +181,16 @@ func runSingleTicket(
 	if err != nil {
 		return false, fmt.Errorf("fetch tickets: %w", err)
 	}
+	inProgressTickets, err := client.FetchInProgressTickets(ctx, statusMap)
+	if err != nil {
+		return false, fmt.Errorf("fetch in-progress tickets: %w", err)
+	}
 	reviewTickets, err := client.FetchReviewTickets(ctx, statusMap)
 	if err != nil {
 		return false, fmt.Errorf("fetch review tickets: %w", err)
 	}
 
-	for _, t := range todoTickets {
+	for _, t := range append(todoTickets, inProgressTickets...) {
 		if t.Key != key {
 			continue
 		}
@@ -237,15 +241,21 @@ func runTodoPhase(
 	orch *jira.Orchestrator,
 	client *jira.Client,
 	jiracfg jira.JiraConfig,
+	statusMap *jira.StatusMap,
 	results *[]jira.TicketResult,
 ) error {
 	todoTickets, err := client.FetchTodoTickets(ctx)
 	if err != nil {
 		return fmt.Errorf("fetch todo tickets: %w", err)
 	}
-	log.Infof("todo tickets: %d found", len(todoTickets))
+	inProgressTickets, err := client.FetchInProgressTickets(ctx, statusMap)
+	if err != nil {
+		return fmt.Errorf("fetch in-progress tickets: %w", err)
+	}
+	allTickets := append(todoTickets, inProgressTickets...)
+	log.Infof("todo tickets: %d found (%d in-progress)", len(allTickets), len(inProgressTickets))
 
-	graph := jira.BuildDependencyGraph(todoTickets)
+	graph := jira.BuildDependencyGraph(allTickets)
 	ready, blocked := graph.ResolveOrder()
 	for _, b := range blocked {
 		log.Infof("ticket %s blocked by %v, skipping", b.Ticket.Key, b.Blockers)
