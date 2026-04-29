@@ -11,13 +11,15 @@ import (
 
 // stubAgent is a mock agents.Agent for unit testing.
 type stubAgent struct {
-	name   string
-	output string
-	err    error
+	name         string
+	output       string
+	err          error
+	capturedOpts agents.ExecuteOptions
 }
 
 func (s *stubAgent) Name() string { return s.name }
-func (s *stubAgent) Execute(_ context.Context, _ agents.ExecuteOptions) (*agents.ExecuteResult, error) {
+func (s *stubAgent) Execute(_ context.Context, opts agents.ExecuteOptions) (*agents.ExecuteResult, error) {
+	s.capturedOpts = opts
 	if s.err != nil {
 		return nil, s.err
 	}
@@ -249,5 +251,33 @@ func TestValidateTicket_InvalidTicket(t *testing.T) {
 	}
 	if len(result.Missing) != 2 {
 		t.Errorf("Missing = %v, want 2 items", result.Missing)
+	}
+}
+
+func TestValidateTicket_PassesValidationPrompt(t *testing.T) {
+	agent := &stubAgent{
+		name:   "stub",
+		output: `{"valid": true, "score": 7, "issues": [], "missing": [], "suggestions": []}`,
+	}
+	ticket := Ticket{
+		Key:     "TEST-5",
+		Summary: "Timeout test ticket",
+		Comments: []Comment{
+			{Author: "alice", Body: "Please clarify the deadline."},
+		},
+	}
+
+	_, err := ValidateTicket(context.Background(), agent, ticket)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(agent.capturedOpts.Prompt, ticket.Key) {
+		t.Errorf("prompt missing ticket key: %q", agent.capturedOpts.Prompt)
+	}
+	if !strings.Contains(agent.capturedOpts.Prompt, ticket.Summary) {
+		t.Errorf("prompt missing ticket summary: %q", agent.capturedOpts.Prompt)
+	}
+	if !strings.Contains(agent.capturedOpts.Prompt, "Please clarify the deadline.") {
+		t.Errorf("prompt missing comment body: %q", agent.capturedOpts.Prompt)
 	}
 }
