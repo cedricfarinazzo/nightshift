@@ -91,9 +91,6 @@ func (o *Orchestrator) ProcessFeedback(ctx context.Context, ticket Ticket, ws *W
 			if err != nil {
 				return nil, fmt.Errorf("jira: feedback: fetch reviews %s: %w", repo.Name, err)
 			}
-			if reviewState.InlineFetchErr != nil {
-				o.log.Errorf("ticket %s: fetch inline comments %s: %v", ticket.Key, prInfo.URL, reviewState.InlineFetchErr)
-			}
 
 			// Filter to only reviews/comments newer than the last rework.
 			if !lastReworkAt.IsZero() {
@@ -110,14 +107,19 @@ func (o *Orchestrator) ProcessFeedback(ctx context.Context, ticket Ticket, ws *W
 			}
 
 			inlineCount := 0
+			resolvedCount := 0
 			for _, c := range reviewState.Comments {
 				if c.Path != "" {
-					inlineCount++
+					if c.Resolved {
+						resolvedCount++
+					} else {
+						inlineCount++
+					}
 				}
 			}
-			o.log.Infof("ticket %s: PR %s — reviewDecision=%q reviews=%d comments=%d inline=%d actionable=%v",
+			o.log.Infof("ticket %s: PR %s — reviewDecision=%q reviews=%d comments=%d inline=%d resolved=%d actionable=%v",
 				ticket.Key, prInfo.URL, reviewState.ReviewDecision,
-				len(reviewState.Reviews), len(reviewState.Comments), inlineCount,
+				len(reviewState.Reviews), len(reviewState.Comments), inlineCount, resolvedCount,
 				hasActionableComments(reviewState))
 			result.ReviewsFound += len(reviewState.Reviews) + len(reviewState.Comments)
 
@@ -208,13 +210,12 @@ func (o *Orchestrator) ProcessFeedback(ctx context.Context, ticket Ticket, ws *W
 }
 
 // hasActionableComments returns true when the review state has at least one
-// inline comment — used to trigger rework even when ReviewDecision is not
-// CHANGES_REQUESTED (e.g. Copilot COMMENTED reviews). Outdated comments are
-// included: position=null means the diff moved after a push, not that the
-// suggestion was resolved.
+// unresolved inline comment. Resolved threads are excluded — they have already
+// been addressed. Outdated comments are included: position=null means the diff
+// moved after a push, not that the suggestion was resolved.
 func hasActionableComments(rs *PRReviewState) bool {
 	for _, c := range rs.Comments {
-		if c.Path != "" {
+		if c.Path != "" && !c.Resolved {
 			return true
 		}
 	}
@@ -234,7 +235,7 @@ func buildReworkPrompt(ticket Ticket, review *PRReviewState, repo RepoWorkspace)
 	}
 	b.WriteString("### Inline Comments\n\n")
 	for _, c := range review.Comments {
-		if c.Path != "" {
+		if c.Path != "" && !c.Resolved {
 			if c.Outdated {
 				fmt.Fprintf(&b, "**%s:%d** (%s) [OUTDATED — verify if still applies to current code]:\n%s\n\n", c.Path, c.Line, c.Author, c.Body)
 			} else {
