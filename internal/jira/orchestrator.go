@@ -582,23 +582,40 @@ func buildPRImplementationComment(ticket Ticket, summary, jiraSite string) strin
 	return b.String()
 }
 
-// providerForCommentType selects provider/model metadata based on the comment type.
-// Plan comments use the plan phase config; everything else uses the implement config.
+// providerForCommentType selects provider/model attribution metadata for a comment type.
 func (o *Orchestrator) providerForCommentType(ct CommentType) (provider, model string) {
-	if ct == CommentPlan {
+	switch ct {
+	case CommentValidation:
+		return o.cfg.Validation.Provider, o.cfg.Validation.Model
+	case CommentPlan:
 		return o.cfg.Plan.Provider, o.cfg.Plan.Model
+	default:
+		return o.cfg.Implement.Provider, o.cfg.Implement.Model
 	}
-	return o.cfg.Implement.Provider, o.cfg.Implement.Model
+}
+
+// providerForPhase returns the configured provider/model metadata associated with
+// a phase for comment attribution and error reporting. This reflects phase config
+// rather than necessarily the actual agent that executed the phase.
+func (o *Orchestrator) providerForPhase(phase Phase) (provider, model string) {
+	return o.providerForCommentType(commentTypeForPhase(phase))
+}
+
+func commentTypeForPhase(phase Phase) CommentType {
+	switch phase {
+	case PhaseValidate:
+		return CommentValidation
+	case PhasePlan:
+		return CommentPlan
+	default: // PhaseImplement, PhaseCommit, PhasePR, PhaseStatus
+		return CommentImplement
+	}
 }
 
 // postErrorComment posts an error comment to the Jira ticket.
 func (o *Orchestrator) postErrorComment(ctx context.Context, ticketKey string, phase Phase, err error) {
-	// Select provider/model based on which phase failed.
 	ct := CommentError
-	provider, model := o.providerForCommentType(CommentImplement)
-	if phase == PhasePlan {
-		provider, model = o.providerForCommentType(CommentPlan)
-	}
+	provider, model := o.providerForPhase(phase)
 	comment := NightshiftComment{
 		Type:      ct,
 		Timestamp: time.Now(),

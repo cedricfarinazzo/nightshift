@@ -959,3 +959,82 @@ func TestProcessTicket_SkipsValidationWhenAlreadyValidated(t *testing.T) {
 		t.Errorf("status = %s, want completed", result.Status)
 	}
 }
+
+func TestProviderForPhase(t *testing.T) {
+	cfg := JiraConfig{
+		Validation: PhaseConfig{Provider: "claude", Model: "claude-haiku-4.5"},
+		Plan:       PhaseConfig{Provider: "claude", Model: "claude-opus-4"},
+		Implement:  PhaseConfig{Provider: "codex", Model: "o3"},
+	}
+	o := &Orchestrator{cfg: cfg}
+
+	cases := []struct {
+		phase    Phase
+		wantProv string
+		wantMod  string
+	}{
+		{PhaseValidate, "claude", "claude-haiku-4.5"},
+		{PhasePlan, "claude", "claude-opus-4"},
+		{PhaseImplement, "codex", "o3"},
+		{PhaseCommit, "codex", "o3"},
+		{PhasePR, "codex", "o3"},
+		{PhaseStatus, "codex", "o3"},
+	}
+	for _, tc := range cases {
+		prov, mod := o.providerForPhase(tc.phase)
+		if prov != tc.wantProv || mod != tc.wantMod {
+			t.Errorf("phase %s: got %s/%s, want %s/%s", tc.phase, prov, mod, tc.wantProv, tc.wantMod)
+		}
+	}
+}
+
+func TestProviderForCommentType(t *testing.T) {
+	cfg := JiraConfig{
+		Validation: PhaseConfig{Provider: "claude", Model: "claude-haiku-4.5"},
+		Plan:       PhaseConfig{Provider: "claude", Model: "claude-opus-4"},
+		Implement:  PhaseConfig{Provider: "codex", Model: "o3"},
+	}
+	o := &Orchestrator{cfg: cfg}
+
+	cases := []struct {
+		ct       CommentType
+		wantProv string
+		wantMod  string
+	}{
+		{CommentValidation, "claude", "claude-haiku-4.5"},
+		{CommentPlan, "claude", "claude-opus-4"},
+		{CommentImplement, "codex", "o3"},
+		{CommentPR, "codex", "o3"},
+		{CommentStatusChange, "codex", "o3"},
+	}
+	for _, tc := range cases {
+		prov, mod := o.providerForCommentType(tc.ct)
+		if prov != tc.wantProv || mod != tc.wantMod {
+			t.Errorf("comment type %s: got %s/%s, want %s/%s", tc.ct, prov, mod, tc.wantProv, tc.wantMod)
+		}
+	}
+}
+
+func TestValidationCommentMetadataMatchesPhase(t *testing.T) {
+	sc := &stubJiraClient{}
+	o := &Orchestrator{
+		client: sc,
+		cfg: JiraConfig{
+			Validation: PhaseConfig{Provider: "claude", Model: "claude-haiku-4.5"},
+			Plan:       PhaseConfig{Provider: "claude", Model: "claude-opus-4"},
+			Implement:  PhaseConfig{Provider: "codex", Model: "o3"},
+		},
+	}
+
+	o.postPhaseComment(context.Background(), "T-1", CommentValidation, "Ticket validated.", time.Second)
+	o.postErrorComment(context.Background(), "T-1", PhaseValidate, errors.New("validation failed"))
+
+	if len(sc.postCommentCalls) != 2 {
+		t.Fatalf("expected 2 comments, got %d", len(sc.postCommentCalls))
+	}
+	for i, c := range sc.postCommentCalls {
+		if c.Provider != "claude" || c.Model != "claude-haiku-4.5" {
+			t.Errorf("comment[%d] metadata = %s/%s, want claude/claude-haiku-4.5", i, c.Provider, c.Model)
+		}
+	}
+}
