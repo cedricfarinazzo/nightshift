@@ -155,16 +155,97 @@ func buildPRBody(ticket Ticket, jiraSite string) string {
 	return b.String()
 }
 
-// FetchPRReviewComments fetches the current review state for a PR using `gh pr view --json`.
-// Inline review thread comments (with file/line and resolved status) are sourced from
-// the `reviewThreads` field, which is more reliable than a separate REST API call.
+// FetchPRReviewComments fetches the current review state for a PR using `gh pr view --json`
+// and appends inline review thread comments (with resolved status) via the GitHub GraphQL API.
 func FetchPRReviewComments(ctx context.Context, repoPath, prURL string) (*PRReviewState, error) {
 	out, err := ghExec(ctx, repoPath, "pr", "view", prURL,
-		"--json", "url,state,reviewDecision,reviews,comments,number,reviewThreads")
+		"--json", "url,state,reviewDecision,reviews,comments,number")
 	if err != nil {
 		return nil, fmt.Errorf("jira: pr: fetch review state: %w", err)
 	}
-	return parsePRReviewState(out)
+	rs, err := parsePRReviewState(out)
+	if err != nil {
+		return nil, err
+	}
+
+	// Fetch inline review thread comments with isResolved via GraphQL.
+	inline, err := fetchReviewThreads(ctx, repoPath, rs.Number)
+	if err != nil {
+		// Non-fatal: log and continue without inline thread data.
+		rs.Comments = append(rs.Comments, inline...)
+	} else {
+		rs.Comments = append(rs.Comments, inline...)
+	}
+	return rs, nil
+}
+
+// fetchReviewThreads fetches per-line review thread comments via the GitHub GraphQL API.
+// Each comment carries the isResolved and isOutdated status of its parent thread.
+func fetchReviewThreads(ctx context.Context, repoPath string, prNumber int) ([]PRComment, error) {
+	if prNumber == 0 {
+		return nil, nil
+	}
+	query := `query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$number){reviewThreads(first:100){nodes{isResolved isOutdated comments(first:20){nodes{author{login}body path line createdAt}}}}}}}`
+	out, err := ghExec(ctx, repoPath, "api", "graphql",
+		"-F", fmt.Sprintf("owner={owner}"),
+		"-F", fmt.Sprintf("repo={repo}"),
+		"-F", fmt.Sprintf("number=%d", prNumber),
+		"-f", fmt.Sprintf("query=%s", query))
+	if err != nil {
+		return nil, fmt.Errorf("gh graphql review threads: %w", err)
+	}
+	return parseReviewThreads(out)
+}
+
+// parseReviewThreads parses the GraphQL response for review threads.
+func parseReviewThreads(raw string) ([]PRComment, error) {
+	var resp struct {
+		Data struct {
+			Repository struct {
+				PullRequest struct {
+					ReviewThreads struct {
+						Nodes []struct {
+							IsResolved bool `json:"isResolved"`
+							IsOutdated bool `json:"isOutdated"`
+							Comments   struct {
+								Nodes []struct {
+									Author struct {
+										Login string `json:"login"`
+									} `json:"author"`
+									Body      string    `json:"body"`
+									Path      string    `json:"path"`
+									Line      *int      `json:"line"`
+									CreatedAt time.Time `json:"createdAt"`
+								} `json:"nodes"`
+							} `json:"comments"`
+						} `json:"nodes"`
+					} `json:"reviewThreads"`
+				} `json:"pullRequest"`
+			} `json:"repository"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(raw), &resp); err != nil {
+		return nil, fmt.Errorf("parse review threads: %w", err)
+	}
+	var comments []PRComment
+	for _, thread := range resp.Data.Repository.PullRequest.ReviewThreads.Nodes {
+		for _, c := range thread.Comments.Nodes {
+			line := 0
+			if c.Line != nil {
+				line = *c.Line
+			}
+			comments = append(comments, PRComment{
+				Author:    c.Author.Login,
+				Body:      c.Body,
+				Path:      c.Path,
+				Line:      line,
+				Outdated:  thread.IsOutdated,
+				Resolved:  thread.IsResolved,
+				CreatedAt: c.CreatedAt,
+			})
+		}
+	}
+	return comments, nil
 }
 
 // parsePRReviewState decodes the JSON output of `gh pr view --json ...` into a PRReviewState.
@@ -189,19 +270,6 @@ func parsePRReviewState(raw string) (*PRReviewState, error) {
 			Body      string    `json:"body"`
 			CreatedAt time.Time `json:"createdAt"`
 		} `json:"comments"`
-		ReviewThreads []struct {
-			IsResolved bool `json:"isResolved"`
-			IsOutdated bool `json:"isOutdated"`
-			Comments   []struct {
-				Author struct {
-					Login string `json:"login"`
-				} `json:"author"`
-				Body      string    `json:"body"`
-				Path      string    `json:"path"`
-				Line      *int      `json:"line"`
-				CreatedAt time.Time `json:"createdAt"`
-			} `json:"comments"`
-		} `json:"reviewThreads"`
 	}
 	if err := json.Unmarshal([]byte(raw), &v); err != nil {
 		return nil, fmt.Errorf("jira: pr: parse review state: %w", err)
@@ -226,24 +294,6 @@ func parsePRReviewState(raw string) (*PRReviewState, error) {
 			Body:      c.Body,
 			CreatedAt: c.CreatedAt,
 		})
-	}
-	// Inline review thread comments: include path/line and resolved status.
-	for _, thread := range v.ReviewThreads {
-		for _, c := range thread.Comments {
-			line := 0
-			if c.Line != nil {
-				line = *c.Line
-			}
-			rs.Comments = append(rs.Comments, PRComment{
-				Author:    c.Author.Login,
-				Body:      c.Body,
-				Path:      c.Path,
-				Line:      line,
-				Outdated:  thread.IsOutdated,
-				Resolved:  thread.IsResolved,
-				CreatedAt: c.CreatedAt,
-			})
-		}
 	}
 	return rs, nil
 }
