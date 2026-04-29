@@ -194,8 +194,8 @@ func commentToComment(c *model.IssueCommentScheme) Comment {
 	if c.Body != nil {
 		cm.Body = extractText(c.Body)
 	}
-	cm.Created, _ = time.Parse(time.RFC3339, c.Created)
-	cm.Updated, _ = time.Parse(time.RFC3339, c.Updated)
+	cm.Created = parseJiraTime(c.Created)
+	cm.Updated = parseJiraTime(c.Updated)
 	return cm
 }
 
@@ -227,7 +227,29 @@ func issueLinkToLink(selfKey string, link *model.IssueLinkScheme) IssueLink {
 	return il
 }
 
-// extractText recursively extracts plain text from an ADF CommentNodeScheme.
+// parseJiraTime parses Jira timestamp strings, which use a non-RFC3339 format
+// like "2006-01-02T15:04:05.000+0200" (offset without colon). Falls back to
+// RFC3339 and then to zero time.
+func parseJiraTime(s string) time.Time {
+	if s == "" {
+		return time.Time{}
+	}
+	// Jira format: "2006-01-02T15:04:05.000-0700" (no colon in offset)
+	if t, err := time.Parse("2006-01-02T15:04:05.000-0700", s); err == nil {
+		return t
+	}
+	// RFC3339 with sub-seconds
+	if t, err := time.Parse(time.RFC3339Nano, s); err == nil {
+		return t
+	}
+	// RFC3339 plain
+	if t, err := time.Parse(time.RFC3339, s); err == nil {
+		return t
+	}
+	return time.Time{}
+}
+
+
 func extractText(n *model.CommentNodeScheme) string {
 	if n == nil {
 		return ""

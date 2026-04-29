@@ -150,7 +150,7 @@ func (o *Orchestrator) ProcessFeedback(ctx context.Context, ticket Ticket, ws *W
 			// Build a prompt from the review comments and execute the agent.
 			prompt := buildReworkPrompt(ticket, reviewState, repo)
 			timeout := parseTimeout(o.cfg.ReviewFix.Timeout, 20*time.Minute)
-			o.emit("🤖 claude running: review-fix  (%s, timeout %s)", o.cfg.ReviewFix.Model, timeout.Round(time.Minute))
+			o.emit("🤖 %s running: review-fix  (%s, timeout %s)", o.cfg.ReviewFix.Provider, o.cfg.ReviewFix.Model, timeout.Round(time.Minute))
 			agentResult, err := agent.Execute(ctx, agents.ExecuteOptions{
 				Prompt:  prompt,
 				WorkDir: repo.Path,
