@@ -158,21 +158,24 @@ func (o *Orchestrator) ProcessFeedback(ctx context.Context, ticket Ticket, ws *W
 				return nil, fmt.Errorf("jira: feedback: rework agent %s: %w", repo.Name, err)
 			}
 
-			result.FixesMade++
-
-			// Only commit when the agent produced file changes.
+			// Only commit and report when the agent produced file changes.
 			changed, err := o.fnHasChanges(ctx, repo.Path)
 			if err != nil {
 				return nil, fmt.Errorf("jira: feedback: check changes %s: %w", repo.Name, err)
 			}
-			if changed {
-				msg := CommitMessage(ticket.Key, "", "address review feedback")
-				o.emit("  committing + pushing review fixes → %s", repo.Branch)
-				if err := o.fnCommitAndPush(ctx, repo.Path, msg); err != nil {
-					return nil, fmt.Errorf("jira: feedback: push fixes %s: %w", repo.Name, err)
-				}
-				result.PushedCommits++
+			if !changed {
+				o.log.Infof("ticket %s: rework agent made no file changes — skipping commit and comment", ticket.Key)
+				o.emit("  ✓ agent made no changes — nothing to commit or report")
+				continue
 			}
+
+			result.FixesMade++
+			msg := CommitMessage(ticket.Key, "", "address review feedback")
+			o.emit("  committing + pushing review fixes → %s", repo.Branch)
+			if err := o.fnCommitAndPush(ctx, repo.Path, msg); err != nil {
+				return nil, fmt.Errorf("jira: feedback: push fixes %s: %w", repo.Name, err)
+			}
+			result.PushedCommits++
 
 			// Post a summary comment on the GitHub PR.
 			o.emit("  posting rework summary to PR %s", prInfo.URL)
@@ -184,8 +187,8 @@ func (o *Orchestrator) ProcessFeedback(ctx context.Context, ticket Ticket, ws *W
 
 	result.Summary = fmt.Sprintf("Review feedback addressed in %d repo(s) across %d commit(s).", result.FixesMade, result.PushedCommits)
 
-	// Post a Jira rework comment when fixes were made.
-	if result.FixesMade > 0 {
+	// Post a Jira rework comment only when code changes were actually committed.
+	if result.PushedCommits > 0 {
 		o.emit("📝 posting rework summary to Jira %s", ticket.Key)
 		comment := NightshiftComment{
 			Type:      CommentRework,
