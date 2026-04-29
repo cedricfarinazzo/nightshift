@@ -121,14 +121,27 @@ func (o *Orchestrator) ProcessFeedback(ctx context.Context, ticket Ticket, ws *W
 				hasActionableComments(reviewState))
 			result.ReviewsFound += len(reviewState.Reviews) + len(reviewState.Comments)
 
-			// Trigger rework when changes are explicitly requested OR when there
-			// are inline review comments (e.g. Copilot posts COMMENTED reviews,
-			// not CHANGES_REQUESTED). Outdated comments are included — position=null
-			// means the diff moved after a push, not that the suggestion was resolved.
-			if reviewState.ReviewDecision != "CHANGES_REQUESTED" && !hasActionableComments(reviewState) {
-				o.log.Infof("ticket %s: skipping rework — no actionable comments", ticket.Key)
-				o.emit("  ✓ no new review comments since last rework — skipping")
-				continue
+			// Skip logic depends on whether we've previously reworked this ticket.
+			// After filtering by lastReworkAt, if nothing remains → skip regardless
+			// of ReviewDecision (it stays CHANGES_REQUESTED until a re-review).
+			// On first run (lastReworkAt zero), fall back to the original heuristic.
+			if !lastReworkAt.IsZero() {
+				if len(reviewState.Reviews) == 0 && !hasActionableComments(reviewState) {
+					o.log.Infof("ticket %s: skipping rework — no new content since lastReworkAt=%s",
+						ticket.Key, lastReworkAt.Format(time.RFC3339))
+					o.emit("  ✓ no new review comments since last rework — skipping")
+					continue
+				}
+			} else {
+				// No previous rework: proceed only when changes are explicitly requested
+				// or there are actionable inline comments (Copilot posts COMMENTED reviews,
+				// not CHANGES_REQUESTED). Outdated comments are included — position=null
+				// means the diff moved after a push, not that the suggestion was resolved.
+				if reviewState.ReviewDecision != "CHANGES_REQUESTED" && !hasActionableComments(reviewState) {
+					o.log.Infof("ticket %s: skipping rework — no actionable comments", ticket.Key)
+					o.emit("  ✓ no actionable review comments — skipping")
+					continue
+				}
 			}
 
 			// Build a prompt from the review comments and execute the agent.
