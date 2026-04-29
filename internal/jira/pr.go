@@ -187,8 +187,8 @@ func fetchReviewThreads(ctx context.Context, repoPath string, prNumber int) ([]P
 	}
 	query := `query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$number){reviewThreads(first:100){nodes{isResolved isOutdated comments(first:20){nodes{author{login}body path line createdAt}}}}}}}`
 	out, err := ghExec(ctx, repoPath, "api", "graphql",
-		"-F", fmt.Sprintf("owner={owner}"),
-		"-F", fmt.Sprintf("repo={repo}"),
+		"-F", "owner={owner}",
+		"-F", "repo={repo}",
 		"-F", fmt.Sprintf("number=%d", prNumber),
 		"-f", fmt.Sprintf("query=%s", query))
 	if err != nil {
