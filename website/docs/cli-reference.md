@@ -108,7 +108,7 @@ nightshift jira preview --plain         # No TUI pager
 | `--ticket` | Process a single ticket by key |
 | `--max-tickets` | Max tickets to process (default from config) |
 | `--label` | Jira label filter (overrides config, default `nightshift`) |
-| `--skip-validation` | Skip LLM ticket validation step (saves tokens) |
+| `--skip-validation` | Skip LLM ticket validation step (saves tokens; preflight and progress output show validation as skipped) |
 | `--todo-only` | Only process TODO-status tickets |
 | `--review-only` | Only process review-feedback tickets |
 

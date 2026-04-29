@@ -104,7 +104,11 @@ func runJira(cmd *cobra.Command, _ []string) error {
 			if !done {
 				switch phase {
 				case jira.PhaseValidate:
-					fmt.Printf("    ⟳ validate      checking ticket quality…\n")
+					if skipValidation {
+						fmt.Printf("    ⟳ validate      skipped (validation disabled)…\n")
+					} else {
+						fmt.Printf("    ⟳ validate      checking ticket quality…\n")
+					}
 				case jira.PhasePlan:
 					fmt.Printf("    ⟳ plan          generating implementation plan…\n")
 				case jira.PhaseImplement:
@@ -131,7 +135,7 @@ func runJira(cmd *cobra.Command, _ []string) error {
 	}
 	orch := jira.NewOrchestrator(client, cfg.Jira, orchOpts...)
 
-	printJiraPreflightSummary(cfg.Jira, statusMap)
+	printJiraPreflightSummary(cfg.Jira, skipValidation, statusMap)
 
 	var results []jira.TicketResult
 	var feedbackResults []jira.FeedbackResult
@@ -402,13 +406,17 @@ func createJiraAgent(cfg *config.Config, phase jira.PhaseConfig) (agents.Agent, 
 	}
 }
 
-func printJiraPreflightSummary(cfg jira.JiraConfig, _ *jira.StatusMap) {
+func printJiraPreflightSummary(cfg jira.JiraConfig, skipValidation bool, _ *jira.StatusMap) {
 	fmt.Println("🌙 Nightshift Jira Run")
 	fmt.Println("──────────────────────────────")
 	fmt.Printf("  Site:         %s.atlassian.net\n", cfg.Site)
 	fmt.Printf("  Project:      %s\n", cfg.Project)
 	fmt.Printf("  Label:        %s\n", cfg.Label)
-	fmt.Printf("  Validation:   %s/%s\n", cfg.Validation.Provider, cfg.Validation.Model)
+	if skipValidation {
+		fmt.Printf("  Validation:   skipped\n")
+	} else {
+		fmt.Printf("  Validation:   %s/%s\n", cfg.Validation.Provider, cfg.Validation.Model)
+	}
 	fmt.Printf("  Implement:    %s/%s\n", cfg.Implement.Provider, cfg.Implement.Model)
 	fmt.Printf("  ReviewFix:    %s/%s\n", cfg.ReviewFix.Provider, cfg.ReviewFix.Model)
 	fmt.Printf("  Max tickets:  %d\n", cfg.MaxTickets)
