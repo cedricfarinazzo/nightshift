@@ -146,6 +146,21 @@ func TestParseCommentMeta_DecodesURLValues(t *testing.T) {
 	}
 }
 
+func TestParseCommentMeta_InvalidPercentEncoding(t *testing.T) {
+	// %ZZ is not valid percent-encoding; raw value must be preserved, not discarded
+	body := "<!-- nightshift:type=pr provider=%ZZclaude model=sonnet duration=1m -->\n<!-- nightshift:meta url=%ZZbad -->"
+	_, meta, ok := parseCommentMeta(body)
+	if !ok {
+		t.Fatal("expected ok=true")
+	}
+	if meta["provider"] != "%ZZclaude" {
+		t.Errorf("meta[provider] = %q, want %q", meta["provider"], "%ZZclaude")
+	}
+	if meta["url"] != "%ZZbad" {
+		t.Errorf("meta[url] = %q, want %q", meta["url"], "%ZZbad")
+	}
+}
+
 func TestGetLastCommentOfType(t *testing.T) {
 	now := time.Now()
 	comments := []NightshiftComment{

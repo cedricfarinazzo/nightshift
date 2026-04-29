@@ -132,13 +132,21 @@ func parseCommentMeta(body string) (CommentType, map[string]string, bool) {
 	// extract key=value pairs from the nightshift:type line (provider, model, duration)
 	if tl := reTypeLine.FindStringSubmatch(body); tl != nil {
 		for _, kv := range reKV.FindAllStringSubmatch(tl[1], -1) {
-			meta[kv[1]], _ = url.QueryUnescape(kv[2])
+			if decoded, err := url.QueryUnescape(kv[2]); err == nil {
+				meta[kv[1]] = decoded
+			} else {
+				meta[kv[1]] = kv[2]
+			}
 		}
 	}
 	// extract additional key=value pairs from the nightshift:meta line
 	if mm := reMeta.FindStringSubmatch(body); mm != nil {
 		for _, kv := range reKV.FindAllStringSubmatch(mm[1], -1) {
-			meta[kv[1]], _ = url.QueryUnescape(kv[2])
+			if decoded, err := url.QueryUnescape(kv[2]); err == nil {
+				meta[kv[1]] = decoded
+			} else {
+				meta[kv[1]] = kv[2]
+			}
 		}
 	}
 	return ct, meta, true
