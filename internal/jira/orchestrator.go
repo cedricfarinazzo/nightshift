@@ -233,6 +233,10 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 		o.fnHasChanges = HasChanges
 		o.fnCommitAndPush = CommitAndPush
 		o.fnCreatePR = CreateOrUpdatePR
+		o.fnFindPR = func(ctx context.Context, repoPath, branch string) (*PRInfo, error) {
+			return findExistingPR(ctx, repoPath, branch)
+		}
+		o.fnFetchReviews = FetchPRReviewComments
 	}
 	if o.fnPostPRComment == nil {
 		o.fnPostPRComment = func(ctx context.Context, repoPath, prURL, body string) error {
