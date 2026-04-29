@@ -40,7 +40,7 @@ func init() {
 func runJira(cmd *cobra.Command, _ []string) error {
 	log := logging.Component("jira")
 
-	cfg, err := config.Load()
+	cfg, err := loadConfig("")
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
@@ -344,61 +344,42 @@ func createJiraAgent(cfg *config.Config, phase jira.PhaseConfig) (agents.Agent, 
 
 	switch provider {
 	case "codex":
-		opts := []agents.CodexOption{}
-		if cfg.Providers.Codex.DangerouslyBypassApprovalsAndSandbox {
-			opts = append(opts, agents.WithDangerouslyBypassApprovalsAndSandbox(true))
-		}
-		model := phase.Model
-		if model == "" {
-			model = cfg.Providers.Codex.Model
-		}
-		if model != "" {
-			opts = append(opts, agents.WithCodexModel(model))
+		var extra []agents.CodexOption
+		if m := phase.Model; m != "" {
+			extra = append(extra, agents.WithCodexModel(m))
 		}
 		if timeout > 0 {
-			opts = append(opts, agents.WithCodexDefaultTimeout(timeout))
+			extra = append(extra, agents.WithCodexDefaultTimeout(timeout))
 		}
-		a := agents.NewCodexAgent(opts...)
+		a := newCodexAgentFromConfig(cfg, extra...)
 		if !a.Available() {
 			return nil, fmt.Errorf("codex CLI not found in PATH")
 		}
 		return a, nil
 
 	case "copilot":
-		// Use newCopilotAgentFromConfig for auto-detection (prefers standalone
-		// "copilot" binary, falls back to "gh copilot"), matching run.go behaviour.
-		model := phase.Model
-		if model == "" {
-			model = cfg.Providers.Copilot.Model
-		}
-		extraOpts := []agents.CopilotOption{}
-		if model != "" {
-			extraOpts = append(extraOpts, agents.WithCopilotModel(model))
+		var extra []agents.CopilotOption
+		if m := phase.Model; m != "" {
+			extra = append(extra, agents.WithCopilotModel(m))
 		}
 		if timeout > 0 {
-			extraOpts = append(extraOpts, agents.WithCopilotDefaultTimeout(timeout))
+			extra = append(extra, agents.WithCopilotDefaultTimeout(timeout))
 		}
-		a := newCopilotAgentFromConfig(cfg, "", extraOpts...)
+		a := newCopilotAgentFromConfig(cfg, "", extra...)
 		if !a.Available() {
 			return nil, fmt.Errorf("copilot CLI not found in PATH")
 		}
 		return a, nil
 
 	default: // "claude" or unrecognized
-		opts := []agents.ClaudeOption{
-			agents.WithDangerouslySkipPermissions(cfg.Providers.Claude.DangerouslySkipPermissions),
-		}
-		model := phase.Model
-		if model == "" {
-			model = cfg.Providers.Claude.Model
-		}
-		if model != "" {
-			opts = append(opts, agents.WithModel(model))
+		var extra []agents.ClaudeOption
+		if m := phase.Model; m != "" {
+			extra = append(extra, agents.WithModel(m))
 		}
 		if timeout > 0 {
-			opts = append(opts, agents.WithDefaultTimeout(timeout))
+			extra = append(extra, agents.WithDefaultTimeout(timeout))
 		}
-		a := agents.NewClaudeAgent(opts...)
+		a := newClaudeAgentFromConfig(cfg, extra...)
 		if !a.Available() {
 			return nil, fmt.Errorf("claude CLI not found in PATH")
 		}
