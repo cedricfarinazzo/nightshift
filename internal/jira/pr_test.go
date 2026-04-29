@@ -300,6 +300,7 @@ func TestFindExistingPR_OpenPR(t *testing.T) {
 	}
 	if pr == nil {
 		t.Fatal("expected PRInfo, got nil")
+		return
 	}
 	if pr.Number != 42 {
 		t.Errorf("Number = %d, want 42", pr.Number)

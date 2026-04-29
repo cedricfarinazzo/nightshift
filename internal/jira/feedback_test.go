@@ -351,8 +351,10 @@ func TestProcessFeedback_ChangesRequestedNoFileChanges(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if result.FixesMade != 1 {
-		t.Errorf("FixesMade = %d, want 1 (agent ran)", result.FixesMade)
+	// With no file changes: agent ran but FixesMade and PushedCommits stay 0,
+	// and no commit or PR/Jira comment is posted.
+	if result.FixesMade != 0 {
+		t.Errorf("FixesMade = %d, want 0 (no file changes made)", result.FixesMade)
 	}
 	if result.PushedCommits != 0 {
 		t.Errorf("PushedCommits = %d, want 0 (no file changes)", result.PushedCommits)

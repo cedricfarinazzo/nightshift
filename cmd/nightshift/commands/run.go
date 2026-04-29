@@ -17,16 +17,13 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/marcus/nightshift/internal/agents"
 	"github.com/marcus/nightshift/internal/budget"
-	"github.com/marcus/nightshift/internal/calibrator"
 	"github.com/marcus/nightshift/internal/config"
 	"github.com/marcus/nightshift/internal/db"
 	"github.com/marcus/nightshift/internal/logging"
 	"github.com/marcus/nightshift/internal/orchestrator"
-	"github.com/marcus/nightshift/internal/providers"
 	"github.com/marcus/nightshift/internal/reporting"
 	"github.com/marcus/nightshift/internal/state"
 	"github.com/marcus/nightshift/internal/tasks"
-	"github.com/marcus/nightshift/internal/trends"
 	"github.com/mattn/go-isatty"
 	"github.com/muesli/termenv"
 	"github.com/spf13/cobra"
@@ -196,15 +193,8 @@ func runRun(cmd *cobra.Command, args []string) error {
 		log.Infof("cleared %d stale assignments", cleared)
 	}
 
-	// Initialize providers
-	claudeProvider := providers.NewClaudeWithPath(cfg.ExpandedProviderPath("claude"))
-	codexProvider := providers.NewCodexWithPath(cfg.ExpandedProviderPath("codex"))
-	copilotProvider := providers.NewCopilotWithPath(cfg.ExpandedProviderPath("copilot"))
-
 	// Initialize budget manager
-	cal := calibrator.New(database, cfg)
-	trend := trends.NewAnalyzer(database, cfg.Budget.SnapshotRetentionDays)
-	budgetMgr := budget.NewManagerFromProviders(cfg, claudeProvider, codexProvider, copilotProvider, budget.WithBudgetSource(cal), budget.WithTrendAnalyzer(trend))
+	budgetMgr := newBudgetManager(cfg, database)
 
 	// Determine projects to run
 	projects, err := resolveProjects(cfg, projectPath)
