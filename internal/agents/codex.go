@@ -79,14 +79,8 @@ func (a *CodexAgent) Name() string {
 func (a *CodexAgent) Execute(ctx context.Context, opts ExecuteOptions) (*ExecuteResult, error) {
 	start := time.Now()
 
-	// Determine timeout
-	timeout := a.timeout
-	if opts.Timeout > 0 {
-		timeout = opts.Timeout
-	}
-
-	// Create context with timeout
-	ctx, cancel := context.WithTimeout(ctx, timeout)
+	// Create context with the shortest applicable timeout.
+	ctx, cancel, timeout := withEffectiveTimeout(ctx, a.timeout, opts.Timeout)
 	defer cancel()
 
 	// Build command args for headless/non-interactive execution.

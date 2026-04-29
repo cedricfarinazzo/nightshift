@@ -165,6 +165,37 @@ func TestClaudeAgent_Execute_Timeout(t *testing.T) {
 	}
 }
 
+func TestClaudeAgent_Execute_UsesParentDeadline(t *testing.T) {
+	mock := &MockRunner{
+		Delay: 5 * time.Second,
+	}
+	agent := NewClaudeAgent(
+		WithRunner(mock),
+		WithDefaultTimeout(10*time.Second),
+	)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	result, err := agent.Execute(ctx, ExecuteOptions{
+		Prompt:  "long task",
+		Timeout: 5 * time.Minute,
+	})
+
+	if err != context.DeadlineExceeded {
+		t.Fatalf("expected DeadlineExceeded, got %v", err)
+	}
+	if result.ExitCode != -1 {
+		t.Errorf("ExitCode = %d, want -1", result.ExitCode)
+	}
+	if strings.Contains(result.Error, "10s") || strings.Contains(result.Error, "5m") {
+		t.Errorf("Error = %q, want parent deadline to win", result.Error)
+	}
+	if !strings.Contains(result.Error, "timeout after") {
+		t.Errorf("Error = %q, want timeout message", result.Error)
+	}
+}
+
 func TestClaudeAgent_Execute_WithOptionsTimeout(t *testing.T) {
 	mock := &MockRunner{
 		Delay: 5 * time.Second,

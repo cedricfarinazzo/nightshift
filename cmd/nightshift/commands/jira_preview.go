@@ -167,6 +167,15 @@ func runJiraPreview(cmd *cobra.Command, _ []string) error {
 					Reason: fmt.Sprintf("fetch todo tickets: %v", err),
 				})
 			} else {
+				inProgressTickets, ipErr := client.FetchInProgressTickets(ctx, statusMap)
+				if ipErr != nil {
+					result.SkippedTickets = append(result.SkippedTickets, jiraPreviewSkipped{
+						Key:    "*",
+						Reason: fmt.Sprintf("fetch in-progress tickets: %v", ipErr),
+					})
+				} else {
+					todoTickets = append(todoTickets, inProgressTickets...)
+				}
 				// Apply optional issue-type filter.
 				if typeFilter != "" {
 					filtered := todoTickets[:0]
