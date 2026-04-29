@@ -550,7 +550,7 @@ func buildPRImplementationComment(ticket Ticket, summary, jiraSite string) strin
 	return b.String()
 }
 
-// providerForCommentType selects provider/model metadata based on the comment type.
+// providerForCommentType selects provider/model attribution metadata for a comment type.
 func (o *Orchestrator) providerForCommentType(ct CommentType) (provider, model string) {
 	switch ct {
 	case CommentValidation:
@@ -562,15 +562,21 @@ func (o *Orchestrator) providerForCommentType(ct CommentType) (provider, model s
 	}
 }
 
-// providerForPhase returns the provider/model for the agent that runs a given phase.
+// providerForPhase returns the configured provider/model metadata associated with
+// a phase for comment attribution and error reporting. This reflects phase config
+// rather than necessarily the actual agent that executed the phase.
 func (o *Orchestrator) providerForPhase(phase Phase) (provider, model string) {
+	return o.providerForCommentType(commentTypeForPhase(phase))
+}
+
+func commentTypeForPhase(phase Phase) CommentType {
 	switch phase {
 	case PhaseValidate:
-		return o.cfg.Validation.Provider, o.cfg.Validation.Model
+		return CommentValidation
 	case PhasePlan:
-		return o.cfg.Plan.Provider, o.cfg.Plan.Model
+		return CommentPlan
 	default: // PhaseImplement, PhaseCommit, PhasePR, PhaseStatus
-		return o.cfg.Implement.Provider, o.cfg.Implement.Model
+		return CommentImplement
 	}
 }
 
