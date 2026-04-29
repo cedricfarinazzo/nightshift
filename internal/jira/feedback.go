@@ -12,14 +12,15 @@ import (
 
 // FeedbackResult holds the outcome of processing review feedback for a ticket.
 type FeedbackResult struct {
-	TicketKey     string
-	PRURLs        []string
-	ReviewsFound  int // total review comments found
-	FixesMade     int // number of repos where review feedback was addressed
-	PushedCommits int // number of commits pushed
-	Summary       string
-	Error         string
-	Duration      time.Duration
+	TicketKey        string
+	PRURLs           []string
+	ReviewsFound     int // total review comments found
+	FixesMade        int // number of repos where review feedback was addressed
+	PushedCommits    int // number of commits pushed
+	AcknowledgedOnly bool // true when the agent ran but made no changes (review already handled)
+	Summary          string
+	Error            string
+	Duration         time.Duration
 }
 
 // ProcessFeedback handles the full PR review feedback loop for a ticket in ON REVIEW state.
@@ -166,8 +167,11 @@ func (o *Orchestrator) ProcessFeedback(ctx context.Context, ticket Ticket, ws *W
 				return nil, fmt.Errorf("jira: feedback: check changes %s: %w", repo.Name, err)
 			}
 			if !changed {
-				o.log.Infof("ticket %s: rework agent made no file changes — skipping commit and comment", ticket.Key)
-				o.emit("  ✓ agent made no changes — nothing to commit or report")
+				o.log.Infof("ticket %s: rework agent made no file changes — acknowledging timestamp", ticket.Key)
+				o.emit("  ✓ agent made no changes — acknowledging review as handled")
+				// Still record a CommentRework timestamp on Jira so the next run's
+				// timestamp filter knows these review comments were already examined.
+				result.AcknowledgedOnly = true
 				continue
 			}
 
@@ -189,16 +193,24 @@ func (o *Orchestrator) ProcessFeedback(ctx context.Context, ticket Ticket, ws *W
 
 	result.Summary = fmt.Sprintf("Review feedback addressed in %d repo(s) across %d commit(s).", result.FixesMade, result.PushedCommits)
 
-	// Post a Jira rework comment only when code changes were actually committed.
-	if result.PushedCommits > 0 {
-		o.emit("📝 posting rework summary to Jira %s", ticket.Key)
+	// Post a Jira rework comment when:
+	// - code was actually committed (PushedCommits > 0), OR
+	// - agent examined the review but found no changes needed (AcknowledgedOnly).
+	// In both cases, recording the CommentRework timestamp prevents the next run
+	// from re-triggering the agent on the same already-seen review comments.
+	if result.PushedCommits > 0 || result.AcknowledgedOnly {
+		body := result.Summary
+		if result.AcknowledgedOnly {
+			body = "Reviewed open comments — no code changes needed; review feedback already addressed."
+		}
+		o.emit("📝 recording rework acknowledgement on Jira %s", ticket.Key)
 		comment := NightshiftComment{
 			Type:      CommentRework,
 			Timestamp: time.Now(),
 			Provider:  o.cfg.ReviewFix.Provider,
 			Model:     o.cfg.ReviewFix.Model,
 			Duration:  time.Since(start),
-			Body:      result.Summary,
+			Body:      body,
 		}
 		if err := o.client.PostComment(ctx, ticket.Key, comment); err != nil {
 			o.log.Errorf("ticket %s: post rework comment: %v", ticket.Key, err)
