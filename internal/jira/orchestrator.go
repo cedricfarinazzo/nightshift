@@ -326,7 +326,7 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 	if !skip(PhasePlan) {
 		result.Phase = PhasePlan
 		o.notifyPhase(ticket.Key, PhasePlan, false)
-		o.emit("🤖 claude running: plan  (%s)", o.cfg.Plan.Model)
+		o.emit("🤖 %s running: plan  (%s)", o.cfg.Plan.Provider, o.cfg.Plan.Model)
 		planStart := time.Now()
 		planResult, err := o.implAgent.Execute(ctx, agents.ExecuteOptions{
 			Prompt:  o.buildPlanPrompt(ticket),
@@ -352,7 +352,7 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 		result.Phase = PhaseImplement
 		o.notifyPhase(ticket.Key, PhaseImplement, false)
 		timeout := parseTimeout(o.cfg.Implement.Timeout, 30*time.Minute)
-		o.emit("🤖 claude running: implement  (%s, timeout %s)", o.cfg.Implement.Model, timeout.Round(time.Minute))
+		o.emit("🤖 %s running: implement  (%s, timeout %s)", o.cfg.Implement.Provider, o.cfg.Implement.Model, timeout.Round(time.Minute))
 		implStart := time.Now()
 		workDir := ""
 		if ws != nil && len(ws.Repos) > 0 {
