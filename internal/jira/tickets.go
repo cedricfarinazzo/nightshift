@@ -59,6 +59,28 @@ func (c *Client) FetchTodoTickets(ctx context.Context) ([]Ticket, error) {
 	return c.fetchParentDescriptions(ctx, tickets), nil
 }
 
+// FetchInProgressTickets fetches issues that are in a non-review "indeterminate" status,
+// filtered by the configured label. These are tickets that were started by nightshift but
+// failed mid-run (e.g. during plan or implement) and need to be resumed.
+func (c *Client) FetchInProgressTickets(ctx context.Context, statusMap *StatusMap) ([]Ticket, error) {
+	if statusMap == nil || len(statusMap.InProgressStatuses) == 0 {
+		return nil, nil
+	}
+	names := make([]string, len(statusMap.InProgressStatuses))
+	for i, s := range statusMap.InProgressStatuses {
+		names[i] = fmt.Sprintf(`"%s"`, s.Name)
+	}
+	jql := fmt.Sprintf(
+		`project = "%s" AND status in (%s) AND labels = "%s" ORDER BY created ASC`,
+		c.cfg.Project, strings.Join(names, ", "), c.cfg.Label,
+	)
+	tickets, err := c.fetchTickets(ctx, jql)
+	if err != nil {
+		return nil, err
+	}
+	return c.fetchParentDescriptions(ctx, tickets), nil
+}
+
 // FetchReviewTickets fetches issues that are in a review status, filtered by the configured label.
 func (c *Client) FetchReviewTickets(ctx context.Context, statusMap *StatusMap) ([]Ticket, error) {
 	if statusMap == nil || len(statusMap.ReviewStatuses) == 0 {
