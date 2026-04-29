@@ -80,9 +80,13 @@ func runJira(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("discover statuses: %w", err)
 	}
 
-	validationAgent, err := createJiraAgent(cfg, cfg.Jira.Validation)
-	if err != nil {
-		return fmt.Errorf("validation agent: %w", err)
+	var validationAgent agents.Agent
+	if !skipValidation {
+		var err error
+		validationAgent, err = createJiraAgent(cfg, cfg.Jira.Validation)
+		if err != nil {
+			return fmt.Errorf("validation agent: %w", err)
+		}
 	}
 	implAgent, err := createJiraAgent(cfg, cfg.Jira.Implement)
 	if err != nil {
@@ -96,7 +100,6 @@ func runJira(cmd *cobra.Command, _ []string) error {
 	orchOpts := []jira.OrchestratorOption{
 		jira.WithImplAgent(implAgent),
 		jira.WithReviewFixAgent(reviewFixAgent),
-		jira.WithValidationAgent(validationAgent),
 		jira.WithPhaseCallback(func(ticketKey string, phase jira.Phase, done bool) {
 			if !done {
 				switch phase {
@@ -123,6 +126,8 @@ func runJira(cmd *cobra.Command, _ []string) error {
 	}
 	if skipValidation {
 		orchOpts = append(orchOpts, jira.WithSkipValidation())
+	} else {
+		orchOpts = append(orchOpts, jira.WithValidationAgent(validationAgent))
 	}
 	orch := jira.NewOrchestrator(client, cfg.Jira, orchOpts...)
 

@@ -71,6 +71,41 @@ func TestProcessTicket_NilAgents(t *testing.T) {
 	}
 }
 
+func TestProcessTicket_SkipValidation_NilAgent(t *testing.T) {
+	sc := &stubJiraClient{}
+	ia := &stubAgent{name: "impl", output: "implementation done"}
+	o := &Orchestrator{
+		client:          sc,
+		cfg:             JiraConfig{},
+		skipValidation:  true,
+		validationAgent: nil,
+		implAgent:       ia,
+	}
+
+	ticket := Ticket{Key: "TEST-SV", Summary: "Skip validation test", Description: "Do the thing."}
+	ws := &Workspace{TicketKey: "TEST-SV"} // no repos — skips commit/PR
+
+	result, err := o.ProcessTicket(context.Background(), ticket, ws)
+	if err != nil {
+		t.Fatalf("unexpected error with nil validation agent when skipValidation=true: %v", err)
+	}
+	if result.Status != TicketCompleted {
+		t.Errorf("Status = %q, want %q", result.Status, TicketCompleted)
+	}
+
+	// Ensure no validation comment was posted.
+	for _, c := range sc.postCommentCalls {
+		if c.Type == CommentValidation {
+			t.Error("unexpected CommentValidation posted when skipValidation=true")
+		}
+	}
+
+	// Ensure impl agent was called (plan + implement phases ran).
+	if ia.capturedOpts.Prompt == "" {
+		t.Error("expected impl agent to be called, but capturedOpts.Prompt is empty")
+	}
+}
+
 func TestProcessTicket_HappyPath(t *testing.T) {
 	sc := &stubJiraClient{}
 	va := &stubAgent{

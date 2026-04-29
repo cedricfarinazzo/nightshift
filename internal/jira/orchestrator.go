@@ -244,8 +244,8 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 	start := time.Now()
 	result := &TicketResult{TicketKey: ticket.Key}
 
-	if o.validationAgent == nil || o.implAgent == nil {
-		return nil, fmt.Errorf("jira: orchestrator: validation and impl agents are required")
+	if o.implAgent == nil || (!o.skipValidation && o.validationAgent == nil) {
+		return nil, fmt.Errorf("jira: orchestrator: impl agent is required; validation agent required when not skipping validation")
 	}
 
 	rs := detectResumeState(ticket)
