@@ -7,6 +7,8 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/marcus/nightshift/internal/logging"
 )
 
 // PRInfo describes a GitHub pull request created or updated for a Jira ticket.
@@ -171,8 +173,7 @@ func FetchPRReviewComments(ctx context.Context, repoPath, prURL string) (*PRRevi
 	// Fetch inline review thread comments with isResolved via GraphQL.
 	inline, err := fetchReviewThreads(ctx, repoPath, rs.Number)
 	if err != nil {
-		// Non-fatal: log and continue without inline thread data.
-		rs.Comments = append(rs.Comments, inline...)
+		logging.Get().Warnf("jira: pr: fetch review threads: %v", err)
 	} else {
 		rs.Comments = append(rs.Comments, inline...)
 	}

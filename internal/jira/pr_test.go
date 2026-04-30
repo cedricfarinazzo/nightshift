@@ -2,6 +2,7 @@ package jira
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -348,5 +349,44 @@ func TestFindExistingPR_StateOpenFlagPassed(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("expected --state open in gh pr list args, got: %v", capturedArgs)
+	}
+}
+
+// ── FetchPRReviewComments ─────────────────────────────────────────────────────
+
+func TestFetchPRReviewComments_ReviewThreadsError(t *testing.T) {
+	orig := ghExec
+	defer func() { ghExec = orig }()
+
+	prViewJSON := `{
+		"url": "https://github.com/org/repo/pull/7",
+		"state": "OPEN",
+		"reviewDecision": "",
+		"number": 7,
+		"reviews": [],
+		"comments": [
+			{"author": {"login": "alice"}, "body": "top-level comment", "createdAt": "2026-04-07T10:00:00Z"}
+		]
+	}`
+
+	call := 0
+	ghExec = func(_ context.Context, _ string, args ...string) (string, error) {
+		call++
+		if call == 1 {
+			return prViewJSON, nil
+		}
+		return "", fmt.Errorf("graphql unavailable")
+	}
+
+	rs, err := FetchPRReviewComments(context.Background(), "/repo", "https://github.com/org/repo/pull/7")
+	if err != nil {
+		t.Fatalf("FetchPRReviewComments should not return error on graphql failure, got: %v", err)
+	}
+	// The top-level comment from pr view should still be present.
+	if len(rs.Comments) != 1 {
+		t.Errorf("len(Comments) = %d, want 1 (inline threads must not be appended on error)", len(rs.Comments))
+	}
+	if rs.Comments[0].Author != "alice" {
+		t.Errorf("Comments[0].Author = %q, want alice", rs.Comments[0].Author)
 	}
 }
