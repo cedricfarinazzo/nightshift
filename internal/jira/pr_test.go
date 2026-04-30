@@ -1,8 +1,11 @@
 package jira
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -378,9 +381,27 @@ func TestFetchPRReviewComments_ReviewThreadsError(t *testing.T) {
 		return "", fmt.Errorf("graphql unavailable")
 	}
 
-	rs, err := FetchPRReviewComments(context.Background(), "/repo", "https://github.com/org/repo/pull/7")
+	// Capture stderr so we can assert the warning is logged.
+	// logging.Get() with no global logger creates a default logger writing to os.Stderr.
+	r, w, err := os.Pipe()
 	if err != nil {
-		t.Fatalf("FetchPRReviewComments should not return error on graphql failure, got: %v", err)
+		t.Fatal(err)
+	}
+	origStderr := os.Stderr
+	os.Stderr = w
+
+	rs, fetchErr := FetchPRReviewComments(context.Background(), "/repo", "https://github.com/org/repo/pull/7")
+
+	w.Close()
+	os.Stderr = origStderr
+	var logBuf bytes.Buffer
+	if _, err := io.Copy(&logBuf, r); err != nil {
+		t.Fatal(err)
+	}
+	r.Close()
+
+	if fetchErr != nil {
+		t.Fatalf("FetchPRReviewComments should not return error on graphql failure, got: %v", fetchErr)
 	}
 	// The top-level comment from pr view should still be present.
 	if len(rs.Comments) != 1 {
@@ -388,5 +409,13 @@ func TestFetchPRReviewComments_ReviewThreadsError(t *testing.T) {
 	}
 	if rs.Comments[0].Author != "alice" {
 		t.Errorf("Comments[0].Author = %q, want alice", rs.Comments[0].Author)
+	}
+	// Verify a warning was emitted with the error and PR identity.
+	logOutput := logBuf.String()
+	if !strings.Contains(logOutput, "graphql unavailable") {
+		t.Errorf("expected warning log containing error message, got: %s", logOutput)
+	}
+	if !strings.Contains(logOutput, "#7") {
+		t.Errorf("expected warning log containing PR number, got: %s", logOutput)
 	}
 }

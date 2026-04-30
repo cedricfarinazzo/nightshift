@@ -173,8 +173,9 @@ func FetchPRReviewComments(ctx context.Context, repoPath, prURL string) (*PRRevi
 	// Fetch inline review thread comments with isResolved via GraphQL.
 	inline, err := fetchReviewThreads(ctx, repoPath, rs.Number)
 	if err != nil {
-		logging.Get().Warnf("jira: pr: fetch review threads: %v", err)
-	} else {
+		logging.Get().Warnf("jira: pr: fetch review threads for PR #%d (%s) in repo %s: %v", rs.Number, prURL, repoPath, err)
+	}
+	if err == nil {
 		rs.Comments = append(rs.Comments, inline...)
 	}
 	return rs, nil
