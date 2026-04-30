@@ -34,15 +34,15 @@ const (
 
 // TicketResult holds the outcome of processing a single Jira ticket.
 type TicketResult struct {
-	TicketKey              string        `json:"ticket_key"`
-	Status                 TicketStatus  `json:"status"`
-	Phase                  Phase         `json:"phase"`
-	PRURLs                 []string      `json:"pr_urls,omitempty"`
-	Plan                   string        `json:"plan,omitempty"`
-	ImplementationSummary  string        `json:"implementation_summary,omitempty"`
-	Summary                string        `json:"summary,omitempty"`
-	Error                  string        `json:"error,omitempty"`
-	Duration               time.Duration `json:"duration"`
+	TicketKey             string        `json:"ticket_key"`
+	Status                TicketStatus  `json:"status"`
+	Phase                 Phase         `json:"phase"`
+	PRURLs                []string      `json:"pr_urls,omitempty"`
+	Plan                  string        `json:"plan,omitempty"`
+	ImplementationSummary string        `json:"implementation_summary,omitempty"`
+	Summary               string        `json:"summary,omitempty"`
+	Error                 string        `json:"error,omitempty"`
+	Duration              time.Duration `json:"duration"`
 }
 
 // jiraClient defines the Jira operations needed by the orchestrator.
@@ -231,8 +231,20 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 	}
 	if o.fnHasChanges == nil {
 		o.fnHasChanges = HasChanges
+	}
+	if o.fnCommitAndPush == nil {
 		o.fnCommitAndPush = CommitAndPush
+	}
+	if o.fnCreatePR == nil {
 		o.fnCreatePR = CreateOrUpdatePR
+	}
+	if o.fnFindPR == nil {
+		o.fnFindPR = func(ctx context.Context, repoPath, branch string) (*PRInfo, error) {
+			return findExistingPR(ctx, repoPath, branch)
+		}
+	}
+	if o.fnFetchReviews == nil {
+		o.fnFetchReviews = FetchPRReviewComments
 	}
 	if o.fnPostPRComment == nil {
 		o.fnPostPRComment = func(ctx context.Context, repoPath, prURL, body string) error {
@@ -244,8 +256,11 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 	start := time.Now()
 	result := &TicketResult{TicketKey: ticket.Key}
 
-	if o.validationAgent == nil || o.implAgent == nil {
-		return nil, fmt.Errorf("jira: orchestrator: validation and impl agents are required")
+	if o.implAgent == nil {
+		return nil, fmt.Errorf("jira: orchestrator: impl agent is required")
+	}
+	if !o.skipValidation && o.validationAgent == nil {
+		return nil, fmt.Errorf("jira: orchestrator: validation agent is required when not skipping validation")
 	}
 
 	rs := detectResumeState(ticket)
@@ -395,6 +410,10 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 				}
 				if !changed {
 					o.emit("  no changes in repo %s — skipping commit", repo.Name)
+					// NOTE: If the agent only modified repo[0] but the ticket required
+					// changes in this repo too, we silently skip it here. Enforcement
+					// (fail-fast when expected repos are untouched) is deferred to a
+					// follow-up ticket.
 					continue
 				}
 				msg := CommitMessage(ticket.Key, "", ticket.Summary)
@@ -556,6 +575,11 @@ func (o *Orchestrator) buildImplementPrompt(ticket Ticket, plan string, ws *Work
 		for _, repo := range ws.Repos {
 			fmt.Fprintf(&b, "- %s: %s (branch: %s, base: %s)\n",
 				repo.Name, repo.Path, repo.Branch, repo.BaseBranch)
+		}
+		if len(ws.Repos) > 1 {
+			b.WriteString("\nYou are responsible for making changes across ALL repos listed above. ")
+			b.WriteString("Use their absolute paths to edit files in each repo. ")
+			b.WriteString("Do not limit your edits to your working directory.\n")
 		}
 	}
 	b.WriteString("\n## Instructions\n")
