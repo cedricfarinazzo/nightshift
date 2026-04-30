@@ -324,7 +324,7 @@ func extractAcceptanceCriteria(description string) string {
 		body, ok := acceptanceCriteriaBodyFromLine(line)
 		if ok {
 			rest := body
-			if nextStart <= len(description) && nextStart < len(description) {
+			if nextStart < len(description) {
 				tail := description[nextStart:]
 				if tail != "" {
 					if rest != "" {
