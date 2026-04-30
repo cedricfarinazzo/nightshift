@@ -34,15 +34,15 @@ const (
 
 // TicketResult holds the outcome of processing a single Jira ticket.
 type TicketResult struct {
-	TicketKey              string        `json:"ticket_key"`
-	Status                 TicketStatus  `json:"status"`
-	Phase                  Phase         `json:"phase"`
-	PRURLs                 []string      `json:"pr_urls,omitempty"`
-	Plan                   string        `json:"plan,omitempty"`
-	ImplementationSummary  string        `json:"implementation_summary,omitempty"`
-	Summary                string        `json:"summary,omitempty"`
-	Error                  string        `json:"error,omitempty"`
-	Duration               time.Duration `json:"duration"`
+	TicketKey             string        `json:"ticket_key"`
+	Status                TicketStatus  `json:"status"`
+	Phase                 Phase         `json:"phase"`
+	PRURLs                []string      `json:"pr_urls,omitempty"`
+	Plan                  string        `json:"plan,omitempty"`
+	ImplementationSummary string        `json:"implementation_summary,omitempty"`
+	Summary               string        `json:"summary,omitempty"`
+	Error                 string        `json:"error,omitempty"`
+	Duration              time.Duration `json:"duration"`
 }
 
 // jiraClient defines the Jira operations needed by the orchestrator.
@@ -244,8 +244,11 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 	start := time.Now()
 	result := &TicketResult{TicketKey: ticket.Key}
 
-	if o.validationAgent == nil || o.implAgent == nil {
-		return nil, fmt.Errorf("jira: orchestrator: validation and impl agents are required")
+	if o.implAgent == nil {
+		return nil, fmt.Errorf("jira: orchestrator: impl agent is required")
+	}
+	if !o.skipValidation && o.validationAgent == nil {
+		return nil, fmt.Errorf("jira: orchestrator: validation agent is required when not skipping validation")
 	}
 
 	rs := detectResumeState(ticket)
