@@ -89,6 +89,23 @@ func setupBranch(ctx context.Context, repoPath, branchName, baseBranch string) (
 	return true, nil
 }
 
+// BranchAheadOfBase reports whether branch has commits ahead of origin/base on the remote.
+// Returns (false, nil) when the remote ref for branch does not exist (branch not yet pushed)
+// or when there are no commits ahead. Only returns an error for unexpected git failures.
+func BranchAheadOfBase(ctx context.Context, repoPath, branch, base string) (bool, error) {
+	out, err := gitExec(ctx, repoPath, "log", "origin/"+base+"..origin/"+branch, "--oneline")
+	if err != nil {
+		msg := err.Error()
+		// Treat a missing remote ref as "not ahead" rather than an error.
+		if strings.Contains(msg, "unknown revision") || strings.Contains(msg, "bad revision") ||
+			strings.Contains(msg, "ambiguous argument") {
+			return false, nil
+		}
+		return false, err
+	}
+	return len(out) > 0, nil
+}
+
 // gitExec runs a git command in repoPath and returns trimmed combined output.
 func gitExec(ctx context.Context, repoPath string, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, "git", args...)
