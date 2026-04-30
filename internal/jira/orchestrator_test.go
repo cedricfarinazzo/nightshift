@@ -62,12 +62,59 @@ func TestNewOrchestrator_Options(t *testing.T) {
 // ── ProcessTicket ─────────────────────────────────────────────────────────────
 
 func TestProcessTicket_NilAgents(t *testing.T) {
-	sc := &stubJiraClient{}
-	o := &Orchestrator{client: sc, cfg: JiraConfig{}}
+	t.Run("missing impl", func(t *testing.T) {
+		sc := &stubJiraClient{}
+		o := &Orchestrator{client: sc, cfg: JiraConfig{}, validationAgent: &stubAgent{name: "validator"}}
 
-	_, err := o.ProcessTicket(context.Background(), Ticket{Key: "X-1"}, &Workspace{})
-	if err == nil {
-		t.Fatal("expected error for nil agents")
+		_, err := o.ProcessTicket(context.Background(), Ticket{Key: "X-1"}, &Workspace{})
+		if err == nil || err.Error() != "jira: orchestrator: impl agent is required" {
+			t.Fatalf("error = %v, want impl agent missing error", err)
+		}
+	})
+
+	t.Run("missing validation", func(t *testing.T) {
+		sc := &stubJiraClient{}
+		o := &Orchestrator{client: sc, cfg: JiraConfig{}, implAgent: &stubAgent{name: "impl"}}
+
+		_, err := o.ProcessTicket(context.Background(), Ticket{Key: "X-2"}, &Workspace{})
+		if err == nil || err.Error() != "jira: orchestrator: validation agent is required when not skipping validation" {
+			t.Fatalf("error = %v, want validation agent missing error", err)
+		}
+	})
+}
+
+func TestProcessTicket_SkipValidation_NilAgent(t *testing.T) {
+	sc := &stubJiraClient{}
+	ia := &stubAgent{name: "impl", output: "implementation done"}
+	o := &Orchestrator{
+		client:          sc,
+		cfg:             JiraConfig{},
+		skipValidation:  true,
+		validationAgent: nil,
+		implAgent:       ia,
+	}
+
+	ticket := Ticket{Key: "TEST-SV", Summary: "Skip validation test", Description: "Do the thing."}
+	ws := &Workspace{TicketKey: "TEST-SV"} // no repos — skips commit/PR
+
+	result, err := o.ProcessTicket(context.Background(), ticket, ws)
+	if err != nil {
+		t.Fatalf("unexpected error with nil validation agent when skipValidation=true: %v", err)
+	}
+	if result.Status != TicketCompleted {
+		t.Errorf("Status = %q, want %q", result.Status, TicketCompleted)
+	}
+
+	// Ensure no validation comment was posted.
+	for _, c := range sc.postCommentCalls {
+		if c.Type == CommentValidation {
+			t.Error("unexpected CommentValidation posted when skipValidation=true")
+		}
+	}
+
+	// Ensure impl agent was called (plan + implement phases ran).
+	if ia.capturedOpts.Prompt == "" {
+		t.Error("expected impl agent to be called, but capturedOpts.Prompt is empty")
 	}
 }
 
@@ -615,7 +662,8 @@ func TestProcessTicket_CommitPhase_NoChanges(t *testing.T) {
 	o.fnHasChanges = func(_ context.Context, _ string) (bool, error) { return false, nil }
 	o.fnCommitAndPush = func(_ context.Context, _, _ string) error { t.Error("CommitAndPush called unexpectedly"); return nil }
 	o.fnCreatePR = func(_ context.Context, _ RepoWorkspace, _ Ticket, _ string) (*PRInfo, error) {
-		t.Error("CreateOrUpdatePR called unexpectedly"); return nil, nil
+		t.Error("CreateOrUpdatePR called unexpectedly")
+		return nil, nil
 	}
 
 	result, err := o.ProcessTicket(context.Background(), Ticket{Key: "T-1", Summary: "Test"}, ws)
@@ -813,7 +861,6 @@ func (a *callCountAgent) Execute(_ context.Context, _ agents.ExecuteOptions) (*a
 	return &agents.ExecuteResult{Output: ""}, nil
 }
 
-
 // ── detectResumeState ─────────────────────────────────────────────────────────
 
 func nightshiftComment(ct CommentType, body string) Comment {
@@ -910,7 +957,9 @@ func TestProcessTicket_AlreadyComplete_EarlyExit(t *testing.T) {
 		implAgent:       implAgent,
 		fnHasChanges:    func(_ context.Context, _ string) (bool, error) { return false, nil },
 		fnCommitAndPush: func(_ context.Context, _, _ string) error { return nil },
-		fnCreatePR:      func(_ context.Context, _ RepoWorkspace, _ Ticket, _ string) (*PRInfo, error) { return &PRInfo{URL: "u"}, nil },
+		fnCreatePR: func(_ context.Context, _ RepoWorkspace, _ Ticket, _ string) (*PRInfo, error) {
+			return &PRInfo{URL: "u"}, nil
+		},
 		fnFindPR:        func(_ context.Context, _, _ string) (*PRInfo, error) { return nil, nil },
 		fnFetchReviews:  func(_ context.Context, _, _ string) (*PRReviewState, error) { return nil, nil },
 		fnPostPRComment: func(_ context.Context, _, _, _ string) error { return nil },
@@ -965,7 +1014,9 @@ func TestProcessTicket_SkipsValidationWhenAlreadyValidated(t *testing.T) {
 		implAgent:       implAgent,
 		fnHasChanges:    func(_ context.Context, _ string) (bool, error) { return false, nil },
 		fnCommitAndPush: func(_ context.Context, _, _ string) error { return nil },
-		fnCreatePR:      func(_ context.Context, _ RepoWorkspace, _ Ticket, _ string) (*PRInfo, error) { return &PRInfo{URL: "u"}, nil },
+		fnCreatePR: func(_ context.Context, _ RepoWorkspace, _ Ticket, _ string) (*PRInfo, error) {
+			return &PRInfo{URL: "u"}, nil
+		},
 		fnFindPR:        func(_ context.Context, _, _ string) (*PRInfo, error) { return nil, nil },
 		fnFetchReviews:  func(_ context.Context, _, _ string) (*PRReviewState, error) { return nil, nil },
 		fnPostPRComment: func(_ context.Context, _, _, _ string) error { return nil },

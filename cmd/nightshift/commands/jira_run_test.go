@@ -22,7 +22,7 @@ func TestPrintJiraPreflightSummary(t *testing.T) {
 	}
 
 	out := captureStdout(t, func() {
-		printJiraPreflightSummary(cfg, nil)
+		printJiraPreflightSummary(cfg, false, nil)
 	})
 
 	checks := []string{
@@ -37,6 +37,23 @@ func TestPrintJiraPreflightSummary(t *testing.T) {
 		if !strings.Contains(out, s) {
 			t.Errorf("preflight summary missing %q\nfull output:\n%s", s, out)
 		}
+	}
+}
+
+func TestPrintJiraPreflightSummary_SkippedValidation(t *testing.T) {
+	cfg := jira.JiraConfig{
+		Site:       "testsite",
+		Project:    "PROJ",
+		Label:      "nightshift",
+		Validation: jira.PhaseConfig{Provider: "claude", Model: "claude-haiku-4.5"},
+	}
+
+	out := captureStdout(t, func() {
+		printJiraPreflightSummary(cfg, true, nil)
+	})
+
+	if !strings.Contains(out, "Validation:   skipped") {
+		t.Errorf("preflight summary should show skipped validation\nfull output:\n%s", out)
 	}
 }
 
