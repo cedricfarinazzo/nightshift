@@ -62,12 +62,59 @@ func TestNewOrchestrator_Options(t *testing.T) {
 // ── ProcessTicket ─────────────────────────────────────────────────────────────
 
 func TestProcessTicket_NilAgents(t *testing.T) {
-	sc := &stubJiraClient{}
-	o := &Orchestrator{client: sc, cfg: JiraConfig{}}
+	t.Run("missing impl", func(t *testing.T) {
+		sc := &stubJiraClient{}
+		o := &Orchestrator{client: sc, cfg: JiraConfig{}, validationAgent: &stubAgent{name: "validator"}}
 
-	_, err := o.ProcessTicket(context.Background(), Ticket{Key: "X-1"}, &Workspace{})
-	if err == nil {
-		t.Fatal("expected error for nil agents")
+		_, err := o.ProcessTicket(context.Background(), Ticket{Key: "X-1"}, &Workspace{})
+		if err == nil || err.Error() != "jira: orchestrator: impl agent is required" {
+			t.Fatalf("error = %v, want impl agent missing error", err)
+		}
+	})
+
+	t.Run("missing validation", func(t *testing.T) {
+		sc := &stubJiraClient{}
+		o := &Orchestrator{client: sc, cfg: JiraConfig{}, implAgent: &stubAgent{name: "impl"}}
+
+		_, err := o.ProcessTicket(context.Background(), Ticket{Key: "X-2"}, &Workspace{})
+		if err == nil || err.Error() != "jira: orchestrator: validation agent is required when not skipping validation" {
+			t.Fatalf("error = %v, want validation agent missing error", err)
+		}
+	})
+}
+
+func TestProcessTicket_SkipValidation_NilAgent(t *testing.T) {
+	sc := &stubJiraClient{}
+	ia := &stubAgent{name: "impl", output: "implementation done"}
+	o := &Orchestrator{
+		client:          sc,
+		cfg:             JiraConfig{},
+		skipValidation:  true,
+		validationAgent: nil,
+		implAgent:       ia,
+	}
+
+	ticket := Ticket{Key: "TEST-SV", Summary: "Skip validation test", Description: "Do the thing."}
+	ws := &Workspace{TicketKey: "TEST-SV"} // no repos — skips commit/PR
+
+	result, err := o.ProcessTicket(context.Background(), ticket, ws)
+	if err != nil {
+		t.Fatalf("unexpected error with nil validation agent when skipValidation=true: %v", err)
+	}
+	if result.Status != TicketCompleted {
+		t.Errorf("Status = %q, want %q", result.Status, TicketCompleted)
+	}
+
+	// Ensure no validation comment was posted.
+	for _, c := range sc.postCommentCalls {
+		if c.Type == CommentValidation {
+			t.Error("unexpected CommentValidation posted when skipValidation=true")
+		}
+	}
+
+	// Ensure impl agent was called (plan + implement phases ran).
+	if ia.capturedOpts.Prompt == "" {
+		t.Error("expected impl agent to be called, but capturedOpts.Prompt is empty")
 	}
 }
 
@@ -301,6 +348,50 @@ func TestBuildImplementPrompt_MultiRepo(t *testing.T) {
 		if !strings.Contains(prompt, name) {
 			t.Errorf("prompt missing repo %q", name)
 		}
+	}
+}
+
+func TestBuildImplementPrompt_MultiRepo_CrossRepoInstruction(t *testing.T) {
+	o := &Orchestrator{cfg: JiraConfig{}}
+	ticket := Ticket{Key: "X-1", Description: "Multi-repo work."}
+	ws := &Workspace{
+		Repos: []RepoWorkspace{
+			{Name: "frontend", Path: "/ws/frontend", Branch: "feat/X-1", BaseBranch: "main"},
+			{Name: "backend", Path: "/ws/backend", Branch: "feat/X-1", BaseBranch: "main"},
+		},
+	}
+
+	prompt := o.buildImplementPrompt(ticket, "plan", ws)
+
+	for _, path := range []string{"/ws/frontend", "/ws/backend"} {
+		if !strings.Contains(prompt, path) {
+			t.Errorf("prompt missing repo path %q", path)
+		}
+	}
+	if !strings.Contains(prompt, "ALL repos") {
+		t.Error("prompt missing cross-repo instruction")
+	}
+	if !strings.Contains(prompt, "absolute paths") {
+		t.Error("prompt missing absolute paths instruction")
+	}
+	if !strings.Contains(prompt, "working directory") {
+		t.Error("prompt missing working-directory scope warning")
+	}
+}
+
+func TestBuildImplementPrompt_SingleRepo_NoCrossRepoInstruction(t *testing.T) {
+	o := &Orchestrator{cfg: JiraConfig{}}
+	ticket := Ticket{Key: "X-2", Description: "Single repo."}
+	ws := &Workspace{
+		Repos: []RepoWorkspace{
+			{Name: "api", Path: "/ws/api", Branch: "feat/X-2", BaseBranch: "main"},
+		},
+	}
+
+	prompt := o.buildImplementPrompt(ticket, "plan", ws)
+
+	if strings.Contains(prompt, "ALL repos") {
+		t.Error("single-repo prompt must not contain cross-repo instruction")
 	}
 }
 
