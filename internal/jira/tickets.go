@@ -46,6 +46,7 @@ type IssueLink struct {
 }
 
 const searchPageSize = 50
+const acKeyword = "acceptance criteria"
 
 // FetchTodoTickets fetches issues in the "To Do" status category filtered by the configured label.
 func (c *Client) FetchTodoTickets(ctx context.Context) ([]Ticket, error) {
@@ -277,7 +278,6 @@ func parseJiraTime(s string) time.Time {
 	return time.Time{}
 }
 
-
 func extractText(n *model.CommentNodeScheme) string {
 	if n == nil {
 		return ""
@@ -309,31 +309,71 @@ func isBlockNode(n *model.CommentNodeScheme) bool {
 }
 
 // extractAcceptanceCriteria extracts the acceptance criteria section from a description string.
-// It looks for a heading containing "acceptance criteria" (case-insensitive) and returns all
-// text until the next heading or end of string.
+// It looks for a heading line that starts with "acceptance criteria" (case-insensitive) and
+// returns all text until the next heading or end of string.
 func extractAcceptanceCriteria(description string) string {
-	lower := strings.ToLower(description)
-	idx := strings.Index(lower, "acceptance criteria")
-	if idx < 0 {
-		return ""
-	}
-	// Skip past the heading line
-	start := strings.Index(description[idx:], "\n")
-	if start < 0 {
-		return ""
-	}
-	start += idx + 1
-	rest := description[start:]
-	// Stop at the next section: a non-empty line that ends with ':' and contains no spaces
-	// (matches "SectionName:" style headings produced by extractText).
-	lines := strings.Split(rest, "\n")
-	var out []string
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if len(out) > 0 && trimmed != "" && strings.HasSuffix(trimmed, ":") && !strings.Contains(trimmed, " ") {
+	for start := 0; start <= len(description); {
+		end := strings.IndexByte(description[start:], '\n')
+		line := description[start:]
+		nextStart := len(description)
+		if end >= 0 {
+			line = description[start : start+end]
+			nextStart = start + end + 1
+		}
+
+		body, ok := acceptanceCriteriaBodyFromLine(line)
+		if ok {
+			rest := body
+			if nextStart <= len(description) && nextStart < len(description) {
+				tail := description[nextStart:]
+				if tail != "" {
+					if rest != "" {
+						rest += "\n" + tail
+					} else {
+						rest = tail
+					}
+				}
+			}
+			// Stop at the next section: a non-empty line that ends with ':' and contains no spaces
+			// (matches "SectionName:" style headings produced by extractText).
+			lines := strings.Split(rest, "\n")
+			var out []string
+			for _, line := range lines {
+				trimmed := strings.TrimSpace(line)
+				if len(out) > 0 && trimmed != "" && strings.HasSuffix(trimmed, ":") && !strings.Contains(trimmed, " ") {
+					break
+				}
+				out = append(out, line)
+			}
+			return strings.TrimSpace(strings.Join(out, "\n"))
+		}
+
+		if end < 0 {
 			break
 		}
-		out = append(out, line)
+		start = nextStart
 	}
-	return strings.TrimSpace(strings.Join(out, "\n"))
+	return ""
+}
+
+func acceptanceCriteriaBodyFromLine(line string) (string, bool) {
+	trimmed := strings.TrimSpace(line)
+	if trimmed == "" {
+		return "", false
+	}
+
+	for strings.HasPrefix(trimmed, "#") {
+		trimmed = strings.TrimLeft(trimmed, "#")
+		trimmed = strings.TrimLeft(trimmed, " \t")
+	}
+
+	if len(trimmed) < len(acKeyword) || !strings.EqualFold(trimmed[:len(acKeyword)], acKeyword) {
+		return "", false
+	}
+
+	rest := strings.TrimLeft(trimmed[len(acKeyword):], ": \t")
+	if rest == "" {
+		return "", true
+	}
+	return rest, true
 }

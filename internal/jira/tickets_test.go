@@ -111,10 +111,48 @@ func TestExtractAcceptanceCriteria_StopsAtNextSection(t *testing.T) {
 }
 
 func TestExtractAcceptanceCriteria_NoNewlineAfterHeading(t *testing.T) {
-	// "acceptance criteria" with no newline after — returns empty
+	// "acceptance criteria" keyword only, no content after → still empty
 	got := extractAcceptanceCriteria("acceptance criteria")
 	if got != "" {
-		t.Errorf("expected empty when no newline, got %q", got)
+		t.Errorf("expected empty when heading only with no content, got %q", got)
+	}
+}
+
+func TestExtractAcceptanceCriteria_ContentAfterHeadingNoNewline(t *testing.T) {
+	// Heading with inline content and no trailing newline — this was the silent-drop bug
+	desc := "Acceptance Criteria: must pass all checks"
+	got := extractAcceptanceCriteria(desc)
+	if !strings.Contains(got, "must pass all checks") {
+		t.Errorf("expected body content, got %q", got)
+	}
+}
+
+func TestExtractAcceptanceCriteria_ContentAfterHeadingWithNewline(t *testing.T) {
+	// Heading with inline content followed by newline content — preserve both parts.
+	desc := "Acceptance Criteria: must pass\n- item"
+	got := extractAcceptanceCriteria(desc)
+	if !strings.Contains(got, "must pass") {
+		t.Errorf("expected inline content to be preserved, got %q", got)
+	}
+	if !strings.Contains(got, "item") {
+		t.Errorf("expected following newline content to be preserved, got %q", got)
+	}
+}
+
+func TestExtractAcceptanceCriteria_HeadingAtEndNoTrailingNewline(t *testing.T) {
+	// Heading followed by items but no trailing newline — regression guard
+	desc := "Do the thing.\n\nAcceptance Criteria\n- item1\n- item2"
+	got := extractAcceptanceCriteria(desc)
+	if !strings.Contains(got, "item1") || !strings.Contains(got, "item2") {
+		t.Errorf("expected items, got %q", got)
+	}
+}
+
+func TestExtractAcceptanceCriteria_RejectsSentenceMention(t *testing.T) {
+	desc := "We discussed acceptance criteria yesterday"
+	got := extractAcceptanceCriteria(desc)
+	if got != "" {
+		t.Errorf("expected empty for non-heading mention, got %q", got)
 	}
 }
 
