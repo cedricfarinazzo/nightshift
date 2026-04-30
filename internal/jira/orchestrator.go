@@ -395,6 +395,10 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 				}
 				if !changed {
 					o.emit("  no changes in repo %s — skipping commit", repo.Name)
+					// NOTE: If the agent only modified repo[0] but the ticket required
+					// changes in this repo too, we silently skip it here. Enforcement
+					// (fail-fast when expected repos are untouched) is deferred to a
+					// follow-up ticket.
 					continue
 				}
 				msg := CommitMessage(ticket.Key, "", ticket.Summary)
@@ -556,6 +560,11 @@ func (o *Orchestrator) buildImplementPrompt(ticket Ticket, plan string, ws *Work
 		for _, repo := range ws.Repos {
 			fmt.Fprintf(&b, "- %s: %s (branch: %s, base: %s)\n",
 				repo.Name, repo.Path, repo.Branch, repo.BaseBranch)
+		}
+		if len(ws.Repos) > 1 {
+			b.WriteString("\nYou are responsible for making changes across ALL repos listed above. ")
+			b.WriteString("Use their absolute paths to edit files in each repo. ")
+			b.WriteString("Do not limit your edits to your working directory.\n")
 		}
 	}
 	b.WriteString("\n## Instructions\n")

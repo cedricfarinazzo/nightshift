@@ -304,6 +304,50 @@ func TestBuildImplementPrompt_MultiRepo(t *testing.T) {
 	}
 }
 
+func TestBuildImplementPrompt_MultiRepo_CrossRepoInstruction(t *testing.T) {
+	o := &Orchestrator{cfg: JiraConfig{}}
+	ticket := Ticket{Key: "X-1", Description: "Multi-repo work."}
+	ws := &Workspace{
+		Repos: []RepoWorkspace{
+			{Name: "frontend", Path: "/ws/frontend", Branch: "feat/X-1", BaseBranch: "main"},
+			{Name: "backend", Path: "/ws/backend", Branch: "feat/X-1", BaseBranch: "main"},
+		},
+	}
+
+	prompt := o.buildImplementPrompt(ticket, "plan", ws)
+
+	for _, path := range []string{"/ws/frontend", "/ws/backend"} {
+		if !strings.Contains(prompt, path) {
+			t.Errorf("prompt missing repo path %q", path)
+		}
+	}
+	if !strings.Contains(prompt, "ALL repos") {
+		t.Error("prompt missing cross-repo instruction")
+	}
+	if !strings.Contains(prompt, "absolute paths") {
+		t.Error("prompt missing absolute paths instruction")
+	}
+	if !strings.Contains(prompt, "working directory") {
+		t.Error("prompt missing working-directory scope warning")
+	}
+}
+
+func TestBuildImplementPrompt_SingleRepo_NoCrossRepoInstruction(t *testing.T) {
+	o := &Orchestrator{cfg: JiraConfig{}}
+	ticket := Ticket{Key: "X-2", Description: "Single repo."}
+	ws := &Workspace{
+		Repos: []RepoWorkspace{
+			{Name: "api", Path: "/ws/api", Branch: "feat/X-2", BaseBranch: "main"},
+		},
+	}
+
+	prompt := o.buildImplementPrompt(ticket, "plan", ws)
+
+	if strings.Contains(prompt, "ALL repos") {
+		t.Error("single-repo prompt must not contain cross-repo instruction")
+	}
+}
+
 // ── buildPlanPrompt ───────────────────────────────────────────────────────────
 
 func TestBuildPlanPrompt(t *testing.T) {
