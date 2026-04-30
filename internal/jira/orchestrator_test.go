@@ -1309,9 +1309,8 @@ func TestPhaseCallback_PlanError(t *testing.T) {
 	cb, calls := collectPhaseCalls()
 	sc := &stubJiraClient{}
 	va := &stubAgent{output: `{"valid": true, "score": 8, "issues": [], "missing": [], "suggestions": []}`}
-	callCount := 0
+	// implAgent always errors, so the plan phase fails immediately
 	ia := &stubAgent{name: "impl", err: errors.New("plan failed")}
-	// Override with a function that fails on first call (plan), second call would be impl
 	o := &Orchestrator{
 		client:          sc,
 		cfg:             JiraConfig{},
@@ -1319,7 +1318,6 @@ func TestPhaseCallback_PlanError(t *testing.T) {
 		implAgent:       ia,
 		onPhase:         cb,
 	}
-	_ = callCount
 
 	_, err := o.ProcessTicket(context.Background(), Ticket{Key: "T-CB5"}, &Workspace{})
 	if err != nil {
