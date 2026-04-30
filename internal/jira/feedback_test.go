@@ -467,12 +467,21 @@ func TestProcessFeedback_OnlyFnHasChangesSet_NoPanic(t *testing.T) {
 		fnPostPRComment: func(_ context.Context, _, _, _ string) error { return nil },
 	}
 
+	repoPath := t.TempDir() // owned temp dir: isolated from real repos on the host
+
 	ws := &Workspace{
 		TicketKey: "X-1",
-		Repos:     []RepoWorkspace{{Name: "repo", Path: "/tmp/repo", Branch: "feature/X-1"}},
+		Repos:     []RepoWorkspace{{Name: "repo", Path: repoPath, Branch: "feature/X-1"}},
 	}
 
-	// Must not panic. CommitAndPush will fail because /tmp/repo is not a git repo — that is
-	// acceptable; the test only verifies the nil guard fires before the call site.
-	_, _ = o.ProcessFeedback(context.Background(), Ticket{Key: "X-1"}, ws)
+	// The nil guard must initialize fnCommitAndPush to CommitAndPush before the call site.
+	// CommitAndPush fails on a non-git dir, so we expect an error that mentions "push fixes",
+	// confirming the commit path was reached (i.e., no nil-pointer panic occurred first).
+	_, err := o.ProcessFeedback(context.Background(), Ticket{Key: "X-1"}, ws)
+	if err == nil {
+		t.Fatal("expected an error from the commit/push path, got nil")
+	}
+	if !strings.Contains(err.Error(), "push fixes") {
+		t.Errorf("expected error to mention 'push fixes' (commit path reached), got: %v", err)
+	}
 }
