@@ -308,6 +308,7 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 				result.Error = err.Error()
 				result.Duration = time.Since(start)
 				o.log.Errorf("ticket %s: validation failed: %v", ticket.Key, err)
+				o.notifyPhase(ticket.Key, PhaseValidate, true)
 				return result, nil
 			}
 			if !vr.Valid {
@@ -318,6 +319,7 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 				result.Summary = fmt.Sprintf("rejected: score %d/10", vr.Score)
 				result.Duration = time.Since(start)
 				o.log.Infof("ticket %s rejected (score %d/10)", ticket.Key, vr.Score)
+				o.notifyPhase(ticket.Key, PhaseValidate, true)
 				return result, nil
 			}
 			o.postPhaseComment(ctx, ticket.Key, CommentValidation,
@@ -333,8 +335,10 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 			result.Status = TicketFailed
 			result.Error = err.Error()
 			result.Duration = time.Since(start)
+			o.notifyPhase(ticket.Key, PhaseValidate, true)
 			return result, nil
 		}
+		o.notifyPhase(ticket.Key, PhaseValidate, true)
 	}
 
 	// Phase 2: Plan
@@ -354,12 +358,14 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 			result.Error = err.Error()
 			result.Duration = time.Since(start)
 			o.log.Errorf("ticket %s: plan failed: %v", ticket.Key, err)
+			o.notifyPhase(ticket.Key, PhasePlan, true)
 			return result, nil
 		}
 		result.Plan = planResult.Output
 		o.emit("📝 posting plan to Jira %s", ticket.Key)
 		o.postPhaseComment(ctx, ticket.Key, CommentPlan, planResult.Output, time.Since(planStart))
 		o.log.Infof("ticket %s: plan complete", ticket.Key)
+		o.notifyPhase(ticket.Key, PhasePlan, true)
 	}
 
 	// Phase 3: Implement
@@ -385,12 +391,14 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 			result.Error = err.Error()
 			result.Duration = time.Since(start)
 			o.log.Errorf("ticket %s: implement failed: %v", ticket.Key, err)
+			o.notifyPhase(ticket.Key, PhaseImplement, true)
 			return result, nil
 		}
 		result.ImplementationSummary = implResult.Output
 		o.emit("📝 posting implementation summary to Jira %s", ticket.Key)
 		o.postPhaseComment(ctx, ticket.Key, CommentImplement, implResult.Output, time.Since(implStart))
 		o.log.Infof("ticket %s: implementation complete", ticket.Key)
+		o.notifyPhase(ticket.Key, PhaseImplement, true)
 	}
 
 	// Phase 4: Commit
@@ -406,6 +414,7 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 					result.Status = TicketFailed
 					result.Error = err.Error()
 					result.Duration = time.Since(start)
+					o.notifyPhase(ticket.Key, PhaseCommit, true)
 					return result, nil
 				}
 				if !changed {
@@ -423,11 +432,13 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 					result.Status = TicketFailed
 					result.Error = err.Error()
 					result.Duration = time.Since(start)
+					o.notifyPhase(ticket.Key, PhaseCommit, true)
 					return result, nil
 				}
 				changedRepos = append(changedRepos, repo)
 			}
 		}
+		o.notifyPhase(ticket.Key, PhaseCommit, true)
 
 		// Phase 5: PR
 		result.Phase = PhasePR
@@ -446,6 +457,7 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 				result.Status = TicketFailed
 				result.Error = err.Error()
 				result.Duration = time.Since(start)
+				o.notifyPhase(ticket.Key, PhasePR, true)
 				return result, nil
 			}
 			o.emit("  ✓ PR created: %s", prInfo.URL)
@@ -468,6 +480,7 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 				}
 			}
 		}
+		o.notifyPhase(ticket.Key, PhasePR, true)
 	} else if skip(PhaseCommit) && !skip(PhaseStatus) {
 		// Resuming at PhaseStatus: scan workspace repos for open PRs and merge with
 		// any URLs recovered from comments, deduplicating to avoid duplicates when
@@ -500,8 +513,10 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 			result.Status = TicketFailed
 			result.Error = err.Error()
 			result.Duration = time.Since(start)
+			o.notifyPhase(ticket.Key, PhaseStatus, true)
 			return result, nil
 		}
+		o.notifyPhase(ticket.Key, PhaseStatus, true)
 	}
 
 	result.Status = TicketCompleted
