@@ -177,7 +177,10 @@ func formatComment(c NightshiftComment) string {
 		c.Provider, c.Model, c.Duration.Round(time.Second))
 	b.WriteString(c.Body)
 	fmt.Fprintf(&b, "\n\n<!-- nightshift:type=%s provider=%s model=%s duration=%s -->\n",
-		c.Type, c.Provider, c.Model, c.Duration.Round(time.Second))
+		c.Type,
+		url.QueryEscape(c.Provider),
+		url.QueryEscape(c.Model),
+		url.QueryEscape(c.Duration.Round(time.Second).String()))
 	if len(c.Metadata) > 0 {
 		b.WriteString("<!-- nightshift:meta")
 		for k, v := range c.Metadata {
