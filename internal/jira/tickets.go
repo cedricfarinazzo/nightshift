@@ -38,10 +38,11 @@ type Comment struct {
 
 // IssueLink represents a link between two Jira issues.
 type IssueLink struct {
-	Type       string // e.g. "Blocks"
-	InwardKey  string // the issue that blocks (inward side)
-	OutwardKey string // the issue that is being blocked (outward side)
-	Direction  string // "inward" or "outward" relative to this ticket
+	Type                 string // e.g. "Blocks"
+	InwardKey            string // the issue that blocks (inward side)
+	OutwardKey           string // the issue that is being blocked (outward side)
+	Direction            string // "inward" or "outward" relative to this ticket
+	BlockerStatusCategory string // status category key of the blocking issue (e.g. "done")
 }
 
 const searchPageSize = 50
@@ -232,6 +233,11 @@ func issueLinkToLink(selfKey string, link *model.IssueLinkScheme) IssueLink {
 	}
 	if link.InwardIssue != nil {
 		il.InwardKey = link.InwardIssue.Key
+		if f := link.InwardIssue.Fields; f != nil {
+			if s := f.Status; s != nil && s.StatusCategory != nil {
+				il.BlockerStatusCategory = s.StatusCategory.Key
+			}
+		}
 	}
 	if link.OutwardIssue != nil {
 		il.OutwardKey = link.OutwardIssue.Key

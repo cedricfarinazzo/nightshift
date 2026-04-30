@@ -36,8 +36,11 @@ func BuildDependencyGraph(tickets []Ticket) *DependencyGraph {
 			if link.Direction == "outward" && link.OutwardKey != "" {
 				g.addEdge(t.Key, link.OutwardKey)
 			}
-			// Direction "inward": InwardKey blocks t.Key
+			// Direction "inward": InwardKey blocks t.Key — skip if the blocker is already done.
 			if link.Direction == "inward" && link.InwardKey != "" {
+				if link.BlockerStatusCategory == "done" {
+					continue
+				}
 				g.addEdge(link.InwardKey, t.Key)
 			}
 		}

@@ -134,3 +134,25 @@ func TestBuildDependencyGraph_ExternalBlocker(t *testing.T) {
 	}
 	t.Error("expected A-2 to be ready")
 }
+
+func TestBuildDependencyGraph_DoneBlockerIgnored(t *testing.T) {
+	// A-1 is blocked by DONE-99 which has statusCategory="done" — should be treated as resolved.
+	tickets := []Ticket{
+		makeTicket("A-1", []IssueLink{{
+			Type:                 "Blocks",
+			InwardKey:            "DONE-99",
+			OutwardKey:           "A-1",
+			Direction:            "inward",
+			BlockerStatusCategory: "done",
+		}}),
+		makeTicket("A-2", nil),
+	}
+	g := BuildDependencyGraph(tickets)
+	ready, blocked := g.ResolveOrder()
+	if len(blocked) != 0 {
+		t.Fatalf("expected no blocked tickets, got %v", blocked)
+	}
+	if len(ready) != 2 {
+		t.Fatalf("expected both tickets ready, got %d ready", len(ready))
+	}
+}
