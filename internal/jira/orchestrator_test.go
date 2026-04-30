@@ -698,6 +698,39 @@ func TestProcessTicket_CommitPhase_HasChangesError(t *testing.T) {
 	}
 }
 
+func TestProcessTicket_CommitPhase_BranchAheadError(t *testing.T) {
+	sc := &stubJiraClient{}
+	o, ws := makeOrchestratorWithRepo(sc)
+	o.fnHasChanges = func(_ context.Context, _ string) (bool, error) { return false, nil }
+	o.fnBranchAheadOfBase = func(_ context.Context, _, _, _ string) (bool, error) {
+		return false, errors.New("git branch-ahead check failed")
+	}
+	o.fnCommitAndPush = func(_ context.Context, _, _ string) error {
+		t.Error("CommitAndPush should not be called when HasChanges=false")
+		return nil
+	}
+
+	result, err := o.ProcessTicket(context.Background(), Ticket{Key: "T-1", Summary: "Test"}, ws)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Status != TicketFailed {
+		t.Errorf("Status = %q, want %q", result.Status, TicketFailed)
+	}
+	if result.Phase != PhaseCommit {
+		t.Errorf("Phase = %q, want %q", result.Phase, PhaseCommit)
+	}
+	hasErrorComment := false
+	for _, c := range sc.postCommentCalls {
+		if c.Type == CommentError {
+			hasErrorComment = true
+		}
+	}
+	if !hasErrorComment {
+		t.Error("expected error comment to be posted")
+	}
+}
+
 func TestProcessTicket_CommitPhase_CommitAndPushError(t *testing.T) {
 	sc := &stubJiraClient{}
 	o, ws := makeOrchestratorWithRepo(sc)

@@ -2,8 +2,10 @@ package jira
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os/exec"
+	"strconv"
 	"strings"
 )
 
@@ -91,19 +93,49 @@ func setupBranch(ctx context.Context, repoPath, branchName, baseBranch string) (
 
 // BranchAheadOfBase reports whether branch has commits ahead of origin/base on the remote.
 // Returns (false, nil) when the remote ref for branch does not exist (branch not yet pushed)
-// or when there are no commits ahead. Only returns an error for unexpected git failures.
+// or when there are no commits ahead. Returns an error for missing base refs or unexpected
+// git failures.
 func BranchAheadOfBase(ctx context.Context, repoPath, branch, base string) (bool, error) {
-	out, err := gitExec(ctx, repoPath, "log", "origin/"+base+"..origin/"+branch, "--oneline")
+	branchRef := "refs/remotes/origin/" + branch
+	baseRef := "refs/remotes/origin/" + base
+
+	branchExists, err := remoteRefExists(ctx, repoPath, branchRef)
 	if err != nil {
-		msg := err.Error()
-		// Treat a missing remote ref as "not ahead" rather than an error.
-		if strings.Contains(msg, "unknown revision") || strings.Contains(msg, "bad revision") ||
-			strings.Contains(msg, "ambiguous argument") {
+		return false, err
+	}
+	if !branchExists {
+		return false, nil
+	}
+
+	baseExists, err := remoteRefExists(ctx, repoPath, baseRef)
+	if err != nil {
+		return false, err
+	}
+	if !baseExists {
+		return false, fmt.Errorf("git remote ref %s not found", baseRef)
+	}
+
+	out, err := gitExec(ctx, repoPath, "rev-list", "--count", baseRef+".."+branchRef)
+	if err != nil {
+		return false, err
+	}
+	count, err := strconv.Atoi(out)
+	if err != nil {
+		return false, fmt.Errorf("parse git rev-list count %q: %w", out, err)
+	}
+	return count > 0, nil
+}
+
+func remoteRefExists(ctx context.Context, repoPath, ref string) (bool, error) {
+	_, err := gitExec(ctx, repoPath, "rev-parse", "--verify", "--quiet", ref)
+	if err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
 			return false, nil
 		}
 		return false, err
 	}
-	return len(out) > 0, nil
+	return true, nil
 }
 
 // gitExec runs a git command in repoPath and returns trimmed combined output.

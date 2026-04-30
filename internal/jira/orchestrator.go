@@ -444,10 +444,12 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 		for _, repo := range skippedRepos {
 			ahead, err := o.fnBranchAheadOfBase(ctx, repo.Path, repo.Branch, repo.BaseBranch)
 			if err != nil {
-				// Non-fatal: log and skip PR recovery for this repo rather than failing
-				// the ticket. This covers cases such as the remote branch not existing yet.
-				o.log.Errorf("ticket %s: branch-ahead check for %s: %v (skipping PR recovery)", ticket.Key, repo.Name, err)
-				continue
+				o.postErrorComment(ctx, ticket.Key, PhaseCommit, err)
+				result.Status = TicketFailed
+				result.Error = err.Error()
+				result.Duration = time.Since(start)
+				o.log.Errorf("ticket %s: branch-ahead check for %s: %v", ticket.Key, repo.Name, err)
+				return result, nil
 			}
 			if ahead {
 				o.emit("  branch %s already pushed — recovering PR creation", repo.Branch)
