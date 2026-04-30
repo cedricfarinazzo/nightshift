@@ -53,16 +53,36 @@ func CommitAndPush(ctx context.Context, repoPath, message string) error {
 	return nil
 }
 
-// setupBranch checks out branchName in repoPath, creating it from origin/baseBranch if needed.
-// Returns isNew=true when the branch was freshly created.
+// setupBranch checks out branchName in repoPath, syncing with origin.
+// Priority order:
+//  1. Local branch exists → checkout + pull --rebase to sync with remote.
+//  2. Remote branch exists (origin/branchName) → create local tracking branch.
+//  3. Neither → create fresh from origin/baseBranch (isNew=true).
 func setupBranch(ctx context.Context, repoPath, branchName, baseBranch string) (isNew bool, err error) {
+	// Always fetch so remote refs are current.
+	if _, err = gitExec(ctx, repoPath, "fetch", "origin"); err != nil {
+		return false, fmt.Errorf("git fetch origin: %w", err)
+	}
+
+	// Case 1: local branch already exists — checkout and sync.
 	if _, err = gitExec(ctx, repoPath, "checkout", branchName); err == nil {
+		// Pull remote changes so we don't push-reject on the next commit.
+		if _, pullErr := gitExec(ctx, repoPath, "pull", "--rebase", "origin", branchName); pullErr != nil {
+			// No-op if remote branch doesn't exist yet (first run, not yet pushed).
+			_ = pullErr
+		}
 		return false, nil
 	}
-	// Fetch so origin/<baseBranch> is available even on a fresh clone.
-	if _, err = gitExec(ctx, repoPath, "fetch", "origin", baseBranch); err != nil {
-		return false, fmt.Errorf("git fetch base branch %s: %w", baseBranch, err)
+
+	// Case 2: remote branch exists — track it instead of branching from base.
+	if _, err = gitExec(ctx, repoPath, "rev-parse", "--verify", "origin/"+branchName); err == nil {
+		if _, err = gitExec(ctx, repoPath, "checkout", "-b", branchName, "--track", "origin/"+branchName); err != nil {
+			return false, fmt.Errorf("git checkout tracking branch %s: %w", branchName, err)
+		}
+		return false, nil
 	}
+
+	// Case 3: branch is brand new — create from base branch.
 	if _, err = gitExec(ctx, repoPath, "checkout", "-b", branchName, "origin/"+baseBranch); err != nil {
 		return false, fmt.Errorf("git create branch %s from origin/%s: %w", branchName, baseBranch, err)
 	}
