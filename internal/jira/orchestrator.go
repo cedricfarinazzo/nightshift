@@ -231,8 +231,20 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 	}
 	if o.fnHasChanges == nil {
 		o.fnHasChanges = HasChanges
+	}
+	if o.fnCommitAndPush == nil {
 		o.fnCommitAndPush = CommitAndPush
+	}
+	if o.fnCreatePR == nil {
 		o.fnCreatePR = CreateOrUpdatePR
+	}
+	if o.fnFindPR == nil {
+		o.fnFindPR = func(ctx context.Context, repoPath, branch string) (*PRInfo, error) {
+			return findExistingPR(ctx, repoPath, branch)
+		}
+	}
+	if o.fnFetchReviews == nil {
+		o.fnFetchReviews = FetchPRReviewComments
 	}
 	if o.fnPostPRComment == nil {
 		o.fnPostPRComment = func(ctx context.Context, repoPath, prURL, body string) error {

@@ -990,6 +990,44 @@ func TestProcessTicket_AlreadyComplete_EarlyExit(t *testing.T) {
 	}
 }
 
+func TestProcessTicket_DefaultInjectablesWhenFnHasChangesSet(t *testing.T) {
+	client := &stubJiraClient{}
+	validationAgent := &stubAgent{output: `{"score": 9, "valid": true, "reasoning": "ok"}`}
+	implAgent := &stubAgent{output: "plan"}
+	o := &Orchestrator{
+		client:          client,
+		validationAgent: validationAgent,
+		implAgent:       implAgent,
+		fnHasChanges:    func(_ context.Context, _ string) (bool, error) { return false, nil },
+	}
+	ticket := Ticket{
+		Key: "T-100",
+		Comments: []Comment{
+			nightshiftComment(CommentValidation, "ok"),
+			nightshiftComment(CommentPlan, "plan"),
+			nightshiftComment(CommentImplement, "done"),
+			nightshiftComment(CommentPR, "PRs created:\nhttps://github.com/org/repo/pull/1"),
+		},
+	}
+	ws := &Workspace{
+		Repos: []RepoWorkspace{{Name: "repo", Path: "/tmp", Branch: "feature/T-100", BaseBranch: "main"}},
+	}
+
+	result, err := o.ProcessTicket(context.Background(), ticket, ws)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Status != TicketCompleted {
+		t.Errorf("Status = %q, want %q", result.Status, TicketCompleted)
+	}
+	if o.fnFindPR == nil {
+		t.Error("fnFindPR should be initialized independently")
+	}
+	if o.fnFetchReviews == nil {
+		t.Error("fnFetchReviews should be initialized independently")
+	}
+}
+
 func TestParsePRURLsFromComment(t *testing.T) {
 	body := "PRs created:\nhttps://github.com/org/repo/pull/42\nhttps://github.com/org/repo/pull/43\nsome other line"
 	urls := parsePRURLsFromComment(body)
