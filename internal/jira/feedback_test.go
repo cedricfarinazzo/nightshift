@@ -441,3 +441,38 @@ func TestProcessFeedback_FindPRError(t *testing.T) {
 		t.Errorf("error should mention 'find pr', got: %v", err)
 	}
 }
+
+// TestProcessFeedback_OnlyFnHasChangesSet_NoPanic reproduces VC-52: if fnHasChanges is
+// overridden but fnCommitAndPush is left nil, ProcessFeedback must not panic.
+func TestProcessFeedback_OnlyFnHasChangesSet_NoPanic(t *testing.T) {
+	sc := &stubJiraClient{}
+	ra := &stubAgent{name: "fix", output: "done"}
+	o := &Orchestrator{
+		client:         sc,
+		cfg:            JiraConfig{},
+		reviewFixAgent: ra,
+		fnHasChanges: func(_ context.Context, _ string) (bool, error) {
+			return true, nil
+		},
+		// fnCommitAndPush intentionally left nil — this was the panic path before the fix.
+		fnFindPR: func(_ context.Context, _, _ string) (*PRInfo, error) {
+			return &PRInfo{URL: "https://github.com/org/repo/pull/1", Number: 1}, nil
+		},
+		fnFetchReviews: func(_ context.Context, _, _ string) (*PRReviewState, error) {
+			return &PRReviewState{
+				ReviewDecision: "CHANGES_REQUESTED",
+				Reviews:        []Review{{Author: "alice", State: "CHANGES_REQUESTED", Body: "fix it"}},
+			}, nil
+		},
+		fnPostPRComment: func(_ context.Context, _, _, _ string) error { return nil },
+	}
+
+	ws := &Workspace{
+		TicketKey: "X-1",
+		Repos:     []RepoWorkspace{{Name: "repo", Path: "/tmp/repo", Branch: "feature/X-1"}},
+	}
+
+	// Must not panic. CommitAndPush will fail because /tmp/repo is not a git repo — that is
+	// acceptable; the test only verifies the nil guard fires before the call site.
+	_, _ = o.ProcessFeedback(context.Background(), Ticket{Key: "X-1"}, ws)
+}
