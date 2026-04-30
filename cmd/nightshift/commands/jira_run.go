@@ -80,9 +80,13 @@ func runJira(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("discover statuses: %w", err)
 	}
 
-	validationAgent, err := createJiraAgent(cfg, cfg.Jira.Validation)
-	if err != nil {
-		return fmt.Errorf("validation agent: %w", err)
+	var validationAgent agents.Agent
+	if !skipValidation {
+		var err error
+		validationAgent, err = createJiraAgent(cfg, cfg.Jira.Validation)
+		if err != nil {
+			return fmt.Errorf("validation agent: %w", err)
+		}
 	}
 	implAgent, err := createJiraAgent(cfg, cfg.Jira.Implement)
 	if err != nil {
@@ -96,12 +100,15 @@ func runJira(cmd *cobra.Command, _ []string) error {
 	orchOpts := []jira.OrchestratorOption{
 		jira.WithImplAgent(implAgent),
 		jira.WithReviewFixAgent(reviewFixAgent),
-		jira.WithValidationAgent(validationAgent),
 		jira.WithPhaseCallback(func(ticketKey string, phase jira.Phase, done bool) {
 			if !done {
 				switch phase {
 				case jira.PhaseValidate:
-					fmt.Printf("    ⟳ validate      checking ticket quality…\n")
+					if skipValidation {
+						fmt.Printf("    ⟳ validate      skipped (validation disabled)…\n")
+					} else {
+						fmt.Printf("    ⟳ validate      checking ticket quality…\n")
+					}
 				case jira.PhasePlan:
 					fmt.Printf("    ⟳ plan          generating implementation plan…\n")
 				case jira.PhaseImplement:
@@ -123,10 +130,12 @@ func runJira(cmd *cobra.Command, _ []string) error {
 	}
 	if skipValidation {
 		orchOpts = append(orchOpts, jira.WithSkipValidation())
+	} else {
+		orchOpts = append(orchOpts, jira.WithValidationAgent(validationAgent))
 	}
 	orch := jira.NewOrchestrator(client, cfg.Jira, orchOpts...)
 
-	printJiraPreflightSummary(cfg.Jira, statusMap)
+	printJiraPreflightSummary(cfg.Jira, skipValidation, statusMap)
 
 	var results []jira.TicketResult
 	var feedbackResults []jira.FeedbackResult
@@ -397,13 +406,17 @@ func createJiraAgent(cfg *config.Config, phase jira.PhaseConfig) (agents.Agent, 
 	}
 }
 
-func printJiraPreflightSummary(cfg jira.JiraConfig, _ *jira.StatusMap) {
+func printJiraPreflightSummary(cfg jira.JiraConfig, skipValidation bool, _ *jira.StatusMap) {
 	fmt.Println("🌙 Nightshift Jira Run")
 	fmt.Println("──────────────────────────────")
 	fmt.Printf("  Site:         %s.atlassian.net\n", cfg.Site)
 	fmt.Printf("  Project:      %s\n", cfg.Project)
 	fmt.Printf("  Label:        %s\n", cfg.Label)
-	fmt.Printf("  Validation:   %s/%s\n", cfg.Validation.Provider, cfg.Validation.Model)
+	if skipValidation {
+		fmt.Printf("  Validation:   skipped\n")
+	} else {
+		fmt.Printf("  Validation:   %s/%s\n", cfg.Validation.Provider, cfg.Validation.Model)
+	}
 	fmt.Printf("  Implement:    %s/%s\n", cfg.Implement.Provider, cfg.Implement.Model)
 	fmt.Printf("  ReviewFix:    %s/%s\n", cfg.ReviewFix.Provider, cfg.ReviewFix.Model)
 	fmt.Printf("  Max tickets:  %d\n", cfg.MaxTickets)
