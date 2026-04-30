@@ -46,6 +46,7 @@ type IssueLink struct {
 }
 
 const searchPageSize = 50
+const acKeyword = "acceptance criteria"
 
 // FetchTodoTickets fetches issues in the "To Do" status category filtered by the configured label.
 func (c *Client) FetchTodoTickets(ctx context.Context) ([]Ticket, error) {
@@ -311,7 +312,6 @@ func isBlockNode(n *model.CommentNodeScheme) bool {
 // It looks for a heading line that starts with "acceptance criteria" (case-insensitive) and
 // returns all text until the next heading or end of string.
 func extractAcceptanceCriteria(description string) string {
-	const acKeyword = "acceptance criteria"
 	for start := 0; start <= len(description); {
 		end := strings.IndexByte(description[start:], '\n')
 		line := description[start:]
@@ -367,11 +367,11 @@ func acceptanceCriteriaBodyFromLine(line string) (string, bool) {
 		trimmed = strings.TrimLeft(trimmed, " \t")
 	}
 
-	if len(trimmed) < len("acceptance criteria") || !strings.EqualFold(trimmed[:len("acceptance criteria")], "acceptance criteria") {
+	if len(trimmed) < len(acKeyword) || !strings.EqualFold(trimmed[:len(acKeyword)], acKeyword) {
 		return "", false
 	}
 
-	rest := strings.TrimLeft(trimmed[len("acceptance criteria"):], ": \t")
+	rest := strings.TrimLeft(trimmed[len(acKeyword):], ": \t")
 	if rest == "" {
 		return "", true
 	}
