@@ -21,12 +21,14 @@ type Workspace struct {
 
 // RepoWorkspace holds the state of one repository inside a Workspace.
 type RepoWorkspace struct {
-	Name       string
-	Path       string
-	URL        string
-	Branch     string
-	BaseBranch string
-	IsNew      bool
+	Name        string
+	Path        string
+	URL         string
+	Branch      string
+	BaseBranch  string
+	IsNew       bool
+	LintCommand string // empty means auto-discover
+	TestCommand string // empty means auto-discover
 }
 
 // SetupWorkspace creates (or reuses) an isolated workspace for ticketKey.
@@ -71,12 +73,14 @@ func SetupWorkspace(ctx context.Context, cfg JiraConfig, ticketKey string) (*Wor
 			return nil, fmt.Errorf("branch %s in %s: %w", branch, r.Name, err)
 		}
 		repos = append(repos, RepoWorkspace{
-			Name:       r.Name,
-			Path:       repoPath,
-			URL:        r.URL,
-			Branch:     branch,
-			BaseBranch: baseBranch,
-			IsNew:      isNew,
+			Name:        r.Name,
+			Path:        repoPath,
+			URL:         r.URL,
+			Branch:      branch,
+			BaseBranch:  baseBranch,
+			IsNew:       isNew,
+			LintCommand: r.LintCommand,
+			TestCommand: r.TestCommand,
 		})
 	}
 	return &Workspace{TicketKey: ticketKey, Root: wsRoot, Repos: repos}, nil

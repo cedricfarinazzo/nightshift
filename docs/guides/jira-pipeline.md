@@ -101,6 +101,8 @@ jira:
     - name: myrepo
       url: git@github.com:org/repo.git   # Use SSH to avoid interactive auth
       base_branch: main
+      lint_command: golangci-lint run ./...  # optional: defaults to "golangci-lint run ./..."
+      test_command: go test ./...            # optional: defaults to "go test ./..."
   validation:
     provider: claude
     model: claude-haiku-4-5-20251001
