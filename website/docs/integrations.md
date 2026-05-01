@@ -9,30 +9,16 @@ Nightshift integrates with your existing development workflow.
 
 ## Claude Code
 
-Nightshift uses the Claude Code CLI to execute tasks. Authenticate via subscription or API key:
-
-```bash
-claude
-/login
-```
+Nightshift uses the Claude Code CLI to execute tasks. See [Agent Integrations](/docs/agents#claude-code) for installation, authentication, CLI flags, and config options.
 
 ## Codex
 
-Nightshift supports OpenAI's Codex CLI as an alternative provider:
-
-```bash
-codex --login
-```
+Nightshift supports OpenAI's Codex CLI as an alternative provider. See [Agent Integrations](/docs/agents#codex) for setup details.
 
 ## GitHub Copilot
 
-Nightshift supports GitHub Copilot as a third provider via `gh copilot`:
+Nightshift supports GitHub Copilot via `gh copilot` or standalone `copilot` binary. See [Agent Integrations](/docs/agents#github-copilot) for setup details.
 
-```bash
-gh auth login
-```
-
-Set `providers.copilot.enabled: true` in config. The `gh` CLI must be installed and authenticated.
 
 ## GitHub
 

@@ -41,14 +41,34 @@ nightshift --help
 
 ## Prerequisites
 
-- **Claude Code CLI** (`claude`) and/or **Codex CLI** (`codex`) installed
-- Authenticated via subscription login or API keys:
+At least one AI agent CLI must be installed and authenticated. Nightshift supports three:
+
+### Claude Code
 
 ```bash
-# Claude Code
+npm install -g @anthropic-ai/claude-code
 claude
 /login
-
-# Codex
-codex --login
+# or: export ANTHROPIC_API_KEY=sk-ant-...
 ```
+
+### Codex
+
+```bash
+npm install -g @openai/codex
+codex --login
+# or: export OPENAI_API_KEY=sk-...
+```
+
+### GitHub Copilot
+
+```bash
+# Install gh CLI and the Copilot extension
+brew install gh
+gh extension install github/gh-copilot
+gh auth login
+```
+
+Requires a GitHub account with an active Copilot subscription.
+
+See [Agent Integrations](/docs/agents) for detailed configuration options for each provider.
