@@ -73,7 +73,9 @@ type Orchestrator struct {
 	fnFindPR            func(ctx context.Context, repoPath, branch string) (*PRInfo, error)
 	fnFetchReviews      func(ctx context.Context, repoPath, prURL string) (*PRReviewState, error)
 	fnPostPRComment     func(ctx context.Context, repoPath, prURL, body string) error
-	fnBranchAheadOfBase func(ctx context.Context, repoPath, branch, base string) (bool, error)
+	fnBranchAheadOfBase      func(ctx context.Context, repoPath, branch, base string) (bool, error)
+	fnLocalBranchAheadOfBase func(ctx context.Context, repoPath, base string) (bool, error)
+	fnPushBranch             func(ctx context.Context, repoPath string) error
 }
 
 // OrchestratorOption configures an Orchestrator.
@@ -130,7 +132,9 @@ func NewOrchestrator(client *Client, cfg JiraConfig, opts ...OrchestratorOption)
 			_, err := ghExec(ctx, repoPath, "pr", "comment", prURL, "--body", body)
 			return err
 		},
-		fnBranchAheadOfBase: BranchAheadOfBase,
+		fnBranchAheadOfBase:      BranchAheadOfBase,
+		fnLocalBranchAheadOfBase: LocalBranchAheadOfBase,
+		fnPushBranch:             PushBranch,
 	}
 	for _, opt := range opts {
 		opt(o)
@@ -256,6 +260,12 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 	}
 	if o.fnBranchAheadOfBase == nil {
 		o.fnBranchAheadOfBase = BranchAheadOfBase
+	}
+	if o.fnLocalBranchAheadOfBase == nil {
+		o.fnLocalBranchAheadOfBase = LocalBranchAheadOfBase
+	}
+	if o.fnPushBranch == nil {
+		o.fnPushBranch = PushBranch
 	}
 
 	start := time.Now()
@@ -424,6 +434,29 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 					return result, nil
 				}
 				if !changed {
+					// Agent may have committed locally but not pushed. Check local HEAD vs origin/base.
+					localAhead, err := o.fnLocalBranchAheadOfBase(ctx, repo.Path, repo.BaseBranch)
+					if err != nil {
+						o.postErrorComment(ctx, ticket.Key, PhaseCommit, err)
+						result.Status = TicketFailed
+						result.Error = err.Error()
+						result.Duration = time.Since(start)
+						o.notifyPhase(ticket.Key, PhaseCommit, true)
+						return result, nil
+					}
+					if localAhead {
+						o.emit("  agent committed in repo %s — pushing", repo.Name)
+						if err := o.fnPushBranch(ctx, repo.Path); err != nil {
+							o.postErrorComment(ctx, ticket.Key, PhaseCommit, err)
+							result.Status = TicketFailed
+							result.Error = err.Error()
+							result.Duration = time.Since(start)
+							o.notifyPhase(ticket.Key, PhaseCommit, true)
+							return result, nil
+						}
+						changedRepos = append(changedRepos, repo)
+						continue
+					}
 					o.emit("  no changes in repo %s — skipping commit", repo.Name)
 					// NOTE: If the agent only modified repo[0] but the ticket required
 					// changes in this repo too, we silently skip it here. Enforcement
@@ -466,6 +499,21 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 				o.emit("  branch %s already pushed — recovering PR creation", repo.Branch)
 				recoveredRepos = append(recoveredRepos, repo)
 			}
+		}
+
+		// Fail the ticket when the implementation produced no changes at all.
+		// This prevents silently moving a ticket to review with zero PRs.
+		// Only applies when repos are configured — ws with no repos is valid for
+		// tickets that don't require code changes (e.g. documentation-only work).
+		if ws != nil && len(ws.Repos) > 0 && len(changedRepos) == 0 && len(recoveredRepos) == 0 {
+			implErr := fmt.Errorf("implementation produced no file changes — agent did not modify any repository")
+			o.postErrorComment(ctx, ticket.Key, PhaseCommit, implErr)
+			result.Status = TicketFailed
+			result.Error = implErr.Error()
+			result.Duration = time.Since(start)
+			o.log.Errorf("ticket %s: %v", ticket.Key, implErr)
+			o.notifyPhase(ticket.Key, PhaseCommit, true)
+			return result, nil
 		}
 
 		// Phase 5: PR
