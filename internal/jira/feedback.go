@@ -151,13 +151,14 @@ func (o *Orchestrator) ProcessFeedback(ctx context.Context, ticket Ticket, ws *W
 
 			// Build a prompt from the review comments and execute the agent.
 			prompt := buildReworkPrompt(ticket, reviewState, repo)
-			timeout := parseTimeout(o.cfg.ReviewFix.Timeout, 20*time.Minute)
-			o.emit("🤖 %s running: review-fix  (%s, timeout %s)", o.cfg.ReviewFix.Provider, o.cfg.ReviewFix.Model, timeout.Round(time.Minute))
+			rfCfg := o.cfg.EffectiveReviewFix(o.proj)
+			timeout := parseTimeout(rfCfg.Timeout, 20*time.Minute)
+			o.emit("🤖 %s running: review-fix  (%s, timeout %s)", rfCfg.Provider, rfCfg.Model, timeout.Round(time.Minute))
 			agentResult, err := agent.Execute(ctx, agents.ExecuteOptions{
 				Prompt:  prompt,
 				WorkDir: repo.Path,
 				Timeout: timeout,
-				Model:   o.cfg.ReviewFix.Model,
+				Model:   rfCfg.Model,
 			})
 			if err != nil {
 				return nil, fmt.Errorf("jira: feedback: rework agent %s: %w", repo.Name, err)

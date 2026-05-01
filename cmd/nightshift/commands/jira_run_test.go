@@ -13,12 +13,13 @@ import (
 func TestPrintJiraPreflightSummary(t *testing.T) {
 	cfg := jira.JiraConfig{
 		Site:       "testsite",
-		Project:    "PROJ",
-		Label:      "nightshift",
 		MaxTickets: 5,
 		Validation: jira.PhaseConfig{Provider: "claude", Model: "claude-haiku-4.5"},
 		Implement:  jira.PhaseConfig{Provider: "claude", Model: "claude-sonnet-4.5"},
 		ReviewFix:  jira.PhaseConfig{Provider: "claude", Model: "claude-sonnet-4.5"},
+		Projects: []jira.ProjectConfig{
+			{Key: "PROJ", Label: "nightshift", Repos: []jira.RepoConfig{{Name: "repo", URL: "git@github.com:org/repo.git"}}},
+		},
 	}
 
 	out := captureStdout(t, func() {
@@ -43,9 +44,10 @@ func TestPrintJiraPreflightSummary(t *testing.T) {
 func TestPrintJiraPreflightSummary_SkippedValidation(t *testing.T) {
 	cfg := jira.JiraConfig{
 		Site:       "testsite",
-		Project:    "PROJ",
-		Label:      "nightshift",
 		Validation: jira.PhaseConfig{Provider: "claude", Model: "claude-haiku-4.5"},
+		Projects: []jira.ProjectConfig{
+			{Key: "PROJ", Label: "nightshift", Repos: []jira.RepoConfig{{Name: "repo", URL: "git@github.com:org/repo.git"}}},
+		},
 	}
 
 	out := captureStdout(t, func() {

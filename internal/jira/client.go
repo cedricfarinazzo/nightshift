@@ -34,9 +34,6 @@ func NewClient(cfg JiraConfig) (*Client, error) {
 	if cfg.TokenEnv == "" {
 		return nil, fmt.Errorf("jira: token_env is required")
 	}
-	if cfg.Project == "" {
-		return nil, fmt.Errorf("jira: project key is required")
-	}
 	apiToken := os.Getenv(cfg.TokenEnv)
 	if apiToken == "" {
 		return nil, fmt.Errorf("jira: env var %s not set", cfg.TokenEnv)

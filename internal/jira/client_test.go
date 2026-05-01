@@ -53,16 +53,6 @@ func TestNewClient(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name: "missing project",
-			cfg: func() JiraConfig {
-				c := validCfg()
-				c.Project = ""
-				return c
-			}(),
-			envVal:  "test-token",
-			wantErr: true,
-		},
-		{
 			name: "missing email",
 			cfg: func() JiraConfig {
 				c := validCfg()

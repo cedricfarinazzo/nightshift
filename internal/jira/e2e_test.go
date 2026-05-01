@@ -32,6 +32,19 @@ func e2eClient(t *testing.T) *Client {
 	return client
 }
 
+// e2eProject returns the VC ProjectConfig used by e2e tests.
+func e2eProject() ProjectConfig {
+	return ProjectConfig{
+		Key:   "VC",
+		Label: "nightshift",
+		Repos: []RepoConfig{{
+			Name:       "nightshift",
+			URL:        "git@github.com:cedricfarinazzo/nightshift.git",
+			BaseBranch: "main",
+		}},
+	}
+}
+
 func TestE2E_Ping(t *testing.T) {
 	client := e2eClient(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -65,7 +78,7 @@ func TestE2E_FetchTodoTickets(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	tickets, err := client.FetchTodoTickets(ctx)
+	tickets, err := client.FetchTodoTickets(ctx, e2eProject())
 	if err != nil {
 		t.Fatalf("FetchTodoTickets: %v", err)
 	}
@@ -90,7 +103,7 @@ func TestE2E_FetchReviewTickets(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DiscoverStatuses: %v", err)
 	}
-	tickets, err := client.FetchReviewTickets(ctx, sm)
+	tickets, err := client.FetchReviewTickets(ctx, e2eProject(), sm)
 	if err != nil {
 		t.Fatalf("FetchReviewTickets: %v", err)
 	}
@@ -106,7 +119,7 @@ func TestE2E_FetchReviewTickets_NilStatusMap(t *testing.T) {
 	defer cancel()
 
 	// nil statusMap must not panic and must return (nil, nil)
-	tickets, err := client.FetchReviewTickets(ctx, nil)
+	tickets, err := client.FetchReviewTickets(ctx, e2eProject(), nil)
 	if err != nil {
 		t.Fatalf("unexpected error with nil statusMap: %v", err)
 	}
@@ -120,7 +133,7 @@ func TestE2E_DependencyGraph(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	tickets, err := client.FetchTodoTickets(ctx)
+	tickets, err := client.FetchTodoTickets(ctx, e2eProject())
 	if err != nil {
 		t.Fatalf("FetchTodoTickets: %v", err)
 	}
@@ -326,7 +339,7 @@ func TestE2E_VC6_ValidateTicket_WithStubAgent(t *testing.T) {
 	defer cancel()
 
 	// Fetch a real ticket from Jira to validate the full pipeline.
-	tickets, err := client.FetchTodoTickets(ctx)
+	tickets, err := client.FetchTodoTickets(ctx, e2eProject())
 	if err != nil {
 		t.Fatalf("FetchTodoTickets: %v", err)
 	}
@@ -356,7 +369,7 @@ func TestE2E_VC6_ValidateTicket_RejectedFlow(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	tickets, err := client.FetchTodoTickets(ctx)
+	tickets, err := client.FetchTodoTickets(ctx, e2eProject())
 	if err != nil {
 		t.Fatalf("FetchTodoTickets: %v", err)
 	}
@@ -424,7 +437,12 @@ func TestE2E_VC7_SetupWorkspace_InvalidKey(t *testing.T) {
 		CleanupAfterDays: 30,
 		Repos:            []RepoConfig{{Name: "repo", URL: "git@github.com:org/repo.git", BaseBranch: "main"}},
 	}
-	_, err := SetupWorkspace(context.Background(), cfg, "invalid-key")
+	proj := ProjectConfig{
+		Key:   "VC",
+		Label: "nightshift",
+		Repos: cfg.Repos,
+	}
+	_, err := SetupWorkspace(context.Background(), cfg, proj, "invalid-key")
 	if err == nil {
 		t.Error("SetupWorkspace with invalid key should return error")
 	}
@@ -562,7 +580,7 @@ func TestE2E_VC8_ProcessTicket_WithStubAgents(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
-	tickets, err := client.FetchTodoTickets(ctx)
+	tickets, err := client.FetchTodoTickets(ctx, e2eProject())
 	if err != nil {
 		t.Fatalf("FetchTodoTickets: %v", err)
 	}
@@ -627,7 +645,7 @@ func TestE2E_VC8_NewOrchestrator_Defaults(t *testing.T) {
 	va := &stubAgent{name: "va"}
 	ia := &stubAgent{name: "ia"}
 
-	o := NewOrchestrator(client, client.cfg,
+	o := NewOrchestrator(client, client.cfg, e2eProject(),
 		WithValidationAgent(va),
 		WithImplAgent(ia),
 	)
@@ -747,7 +765,7 @@ func TestE2E_VC10_BuildReworkPrompt_RealTicket(t *testing.T) {
 		t.Fatalf("DiscoverStatuses: %v", err)
 	}
 
-	tickets, err := client.FetchReviewTickets(ctx, sm)
+	tickets, err := client.FetchReviewTickets(ctx, e2eProject(), sm)
 	if err != nil {
 		t.Fatalf("FetchReviewTickets: %v", err)
 	}

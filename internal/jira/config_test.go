@@ -6,6 +6,7 @@ import (
 )
 
 func TestJiraConfig_Validate(t *testing.T) {
+	validProject := ProjectConfig{Key: "P", Label: "nightshift", Repos: []RepoConfig{{Name: "r", URL: "u"}}}
 	tests := []struct {
 		name    string
 		cfg     JiraConfig
@@ -13,37 +14,37 @@ func TestJiraConfig_Validate(t *testing.T) {
 	}{
 		{
 			"valid full config",
-			JiraConfig{Site: "x", Email: "a@b", Project: "P", Repos: []RepoConfig{{Name: "r", URL: "u"}}},
+			JiraConfig{Site: "x", Email: "a@b", Projects: []ProjectConfig{validProject}},
 			"",
 		},
 		{
 			"missing site",
-			JiraConfig{Email: "a@b", Project: "P", Repos: []RepoConfig{{Name: "r", URL: "u"}}},
+			JiraConfig{Email: "a@b", Projects: []ProjectConfig{validProject}},
 			"jira.site is required",
 		},
 		{
 			"missing email",
-			JiraConfig{Site: "x", Project: "P", Repos: []RepoConfig{{Name: "r", URL: "u"}}},
+			JiraConfig{Site: "x", Projects: []ProjectConfig{validProject}},
 			"jira.email is required",
 		},
 		{
 			"missing project",
-			JiraConfig{Site: "x", Email: "a@b", Repos: []RepoConfig{{Name: "r", URL: "u"}}},
-			"jira.project is required",
+			JiraConfig{Site: "x", Email: "a@b", Projects: []ProjectConfig{}},
+			"at least one project is required",
 		},
 		{
 			"no repos",
-			JiraConfig{Site: "x", Email: "a@b", Project: "P"},
+			JiraConfig{Site: "x", Email: "a@b", Projects: []ProjectConfig{{Key: "P", Label: "nightshift"}}},
 			"at least one repo",
 		},
 		{
 			"repo missing url",
-			JiraConfig{Site: "x", Email: "a@b", Project: "P", Repos: []RepoConfig{{Name: "r"}}},
+			JiraConfig{Site: "x", Email: "a@b", Projects: []ProjectConfig{{Key: "P", Label: "nightshift", Repos: []RepoConfig{{Name: "r"}}}}},
 			"repos[0].url is required",
 		},
 		{
 			"repo missing name",
-			JiraConfig{Site: "x", Email: "a@b", Project: "P", Repos: []RepoConfig{{URL: "u"}}},
+			JiraConfig{Site: "x", Email: "a@b", Projects: []ProjectConfig{{Key: "P", Label: "nightshift", Repos: []RepoConfig{{URL: "u"}}}}},
 			"repos[0].name is required",
 		},
 	}
@@ -115,5 +116,83 @@ func TestJiraConfig_Defaults_NoOverwrite(t *testing.T) {
 	}
 	if cfg.Validation.Model != "my-model" {
 		t.Errorf("Validation.Model overwritten, got %q", cfg.Validation.Model)
+	}
+}
+
+func TestJiraConfig_BackwardCompatPromotion(t *testing.T) {
+	// Old flat config with Project+Label+Repos should be promoted to Projects[0] by Defaults().
+	cfg := JiraConfig{
+		Site:     "x",
+		Email:    "a@b",
+		Project:  "VC",
+		Label:    "nightshift",
+		TokenEnv: "MY_TOKEN",
+		Repos:    []RepoConfig{{Name: "repo", URL: "git@github.com:org/repo.git", BaseBranch: "main"}},
+	}
+	cfg.Defaults()
+
+	if len(cfg.Projects) != 1 {
+		t.Fatalf("expected 1 project after promotion, got %d", len(cfg.Projects))
+	}
+	if cfg.Projects[0].Key != "VC" {
+		t.Errorf("Projects[0].Key = %q, want VC", cfg.Projects[0].Key)
+	}
+	if cfg.Projects[0].Label != "nightshift" {
+		t.Errorf("Projects[0].Label = %q, want nightshift", cfg.Projects[0].Label)
+	}
+	if len(cfg.Projects[0].Repos) != 1 || cfg.Projects[0].Repos[0].Name != "repo" {
+		t.Errorf("Projects[0].Repos not promoted correctly: %+v", cfg.Projects[0].Repos)
+	}
+
+	// Should also validate without error.
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("Validate after backward-compat promotion: %v", err)
+	}
+}
+
+func TestJiraConfig_MultiProject(t *testing.T) {
+	cfg := JiraConfig{
+		Site:  "x",
+		Email: "a@b",
+		// Global defaults
+		Implement: PhaseConfig{Provider: "copilot", Model: "claude-sonnet-4.6", Timeout: "30m"},
+		Projects: []ProjectConfig{
+			{
+				Key:   "VC",
+				Label: "nightshift",
+				Repos: []RepoConfig{{Name: "r", URL: "u"}},
+				// No per-project override — should inherit global
+			},
+			{
+				Key:   "INFRA",
+				Label: "nightshift",
+				Repos: []RepoConfig{{Name: "infra", URL: "git@github.com:org/infra.git"}},
+				// Per-project override for implement phase
+				Implement: PhaseConfig{Timeout: "45m"},
+			},
+		},
+	}
+	cfg.Defaults()
+
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+
+	// VC project inherits global implement config.
+	effVC := cfg.EffectiveImplement(cfg.Projects[0])
+	if effVC.Model != "claude-sonnet-4.6" {
+		t.Errorf("VC EffectiveImplement.Model = %q, want claude-sonnet-4.6", effVC.Model)
+	}
+	if effVC.Timeout != "30m" {
+		t.Errorf("VC EffectiveImplement.Timeout = %q, want 30m", effVC.Timeout)
+	}
+
+	// INFRA project overrides timeout but inherits model.
+	effINFRA := cfg.EffectiveImplement(cfg.Projects[1])
+	if effINFRA.Model != "claude-sonnet-4.6" {
+		t.Errorf("INFRA EffectiveImplement.Model = %q, want claude-sonnet-4.6", effINFRA.Model)
+	}
+	if effINFRA.Timeout != "45m" {
+		t.Errorf("INFRA EffectiveImplement.Timeout = %q, want 45m", effINFRA.Timeout)
 	}
 }

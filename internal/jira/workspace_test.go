@@ -148,11 +148,15 @@ func TestSetupWorkspace_InvalidTicketKey(t *testing.T) {
 	cfg := JiraConfig{
 		WorkspaceRoot:    t.TempDir(),
 		CleanupAfterDays: 30,
-		Repos:            []RepoConfig{{Name: "repo", URL: "git@github.com:org/repo.git", BaseBranch: "main"}},
+	}
+	proj := ProjectConfig{
+		Key:   "PROJ",
+		Label: "nightshift",
+		Repos: []RepoConfig{{Name: "repo", URL: "git@github.com:org/repo.git", BaseBranch: "main"}},
 	}
 	ctx := context.Background()
 	for _, bad := range []string{"../escape", "proj-1", "PROJ", "PROJ-", "PROJ-abc", ""} {
-		_, err := SetupWorkspace(ctx, cfg, bad)
+		_, err := SetupWorkspace(ctx, cfg, proj, bad)
 		if err == nil {
 			t.Errorf("SetupWorkspace with key %q should fail", bad)
 		}
@@ -163,9 +167,13 @@ func TestSetupWorkspace_InvalidRepoName(t *testing.T) {
 	cfg := JiraConfig{
 		WorkspaceRoot:    t.TempDir(),
 		CleanupAfterDays: 30,
-		Repos:            []RepoConfig{{Name: "../evil", URL: "git@github.com:org/repo.git", BaseBranch: "main"}},
 	}
-	_, err := SetupWorkspace(context.Background(), cfg, "PROJ-1")
+	proj := ProjectConfig{
+		Key:   "PROJ",
+		Label: "nightshift",
+		Repos: []RepoConfig{{Name: "../evil", URL: "git@github.com:org/repo.git", BaseBranch: "main"}},
+	}
+	_, err := SetupWorkspace(context.Background(), cfg, proj, "PROJ-1")
 	if err == nil {
 		t.Error("SetupWorkspace with repo name '../evil' should fail")
 	}

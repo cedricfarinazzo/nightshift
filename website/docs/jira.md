@@ -66,12 +66,11 @@ Find or create a token at: https://id.atlassian.com/manage-profile/security/api-
 
 ```yaml
 jira:
-  site: "https://yourorg.atlassian.net"
+  site: "yourorg"           # Atlassian site name (yourorg.atlassian.net)
   email: "you@example.com"
-  project: "PROJ"
-  label: "nightshift"
+  token_env: NIGHTSHIFT_JIRA_TOKEN
 
-  # Phases — configure provider/model/timeout per phase
+  # Phases — global defaults, overridable per project
   validation:
     provider: copilot
     model: gpt-5.4-mini
@@ -86,19 +85,53 @@ jira:
     timeout: 30m
   review_fix:
     provider: copilot
-    model: gpt-5.4-mini
+    model: claude-sonnet-4.6
     timeout: 20m
 
-  # Workspace (repos cloned here; reused across runs)
-  workspace_root: "~/.local/share/nightshift/jira-workspaces"
-  cleanup_after_days: 14
+  budget_enabled: true
+  max_tickets: 10
 
-  # Repos the agent will operate on (SSH URL required)
-  repos:
-    - name: myrepo
-      url: "git@github.com:org/myrepo.git"
-      base_branch: main
+  projects:
+    - key: PROJ
+      label: nightshift
+      repos:
+        - name: myrepo
+          url: "git@github.com:org/myrepo.git"  # SSH URL required
+          base_branch: main
 ```
+
+#### Multi-project example
+
+```yaml
+jira:
+  site: "yourorg"
+  email: "you@example.com"
+  token_env: NIGHTSHIFT_JIRA_TOKEN
+
+  implement:
+    provider: copilot
+    model: claude-sonnet-4.6
+    timeout: 30m
+
+  projects:
+    - key: WEBAPP
+      label: nightshift
+      repos:
+        - name: webapp
+          url: "git@github.com:org/webapp.git"
+          base_branch: main
+
+    - key: INFRA
+      label: nightshift
+      repos:
+        - name: infra
+          url: "git@github.com:org/infra.git"
+          base_branch: trunk
+      implement:
+        timeout: 45m   # longer timeout for infrastructure changes
+```
+
+`nightshift jira run` iterates all projects, fetching and processing tickets from each independently.
 
 ### 3. Label your tickets
 

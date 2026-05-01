@@ -48,11 +48,11 @@ type IssueLink struct {
 const searchPageSize = 50
 const acKeyword = "acceptance criteria"
 
-// FetchTodoTickets fetches issues in the "To Do" status category filtered by the configured label.
-func (c *Client) FetchTodoTickets(ctx context.Context) ([]Ticket, error) {
+// FetchTodoTickets fetches issues in the "To Do" status category filtered by the project's label.
+func (c *Client) FetchTodoTickets(ctx context.Context, proj ProjectConfig) ([]Ticket, error) {
 	jql := fmt.Sprintf(
 		`project = "%s" AND statusCategory = "To Do" AND labels = "%s" ORDER BY created ASC`,
-		c.cfg.Project, c.cfg.Label,
+		proj.Key, proj.Label,
 	)
 	tickets, err := c.fetchTickets(ctx, jql)
 	if err != nil {
@@ -62,9 +62,9 @@ func (c *Client) FetchTodoTickets(ctx context.Context) ([]Ticket, error) {
 }
 
 // FetchInProgressTickets fetches issues that are in a non-review "indeterminate" status,
-// filtered by the configured label. These are tickets that were started by nightshift but
+// filtered by the project's label. These are tickets that were started by nightshift but
 // failed mid-run (e.g. during plan or implement) and need to be resumed.
-func (c *Client) FetchInProgressTickets(ctx context.Context, statusMap *StatusMap) ([]Ticket, error) {
+func (c *Client) FetchInProgressTickets(ctx context.Context, proj ProjectConfig, statusMap *StatusMap) ([]Ticket, error) {
 	if statusMap == nil || len(statusMap.InProgressStatuses) == 0 {
 		return nil, nil
 	}
@@ -74,7 +74,7 @@ func (c *Client) FetchInProgressTickets(ctx context.Context, statusMap *StatusMa
 	}
 	jql := fmt.Sprintf(
 		`project = "%s" AND status in (%s) AND labels = "%s" ORDER BY created ASC`,
-		c.cfg.Project, strings.Join(names, ", "), c.cfg.Label,
+		proj.Key, strings.Join(names, ", "), proj.Label,
 	)
 	tickets, err := c.fetchTickets(ctx, jql)
 	if err != nil {
@@ -83,8 +83,8 @@ func (c *Client) FetchInProgressTickets(ctx context.Context, statusMap *StatusMa
 	return c.fetchParentDescriptions(ctx, tickets), nil
 }
 
-// FetchReviewTickets fetches issues that are in a review status, filtered by the configured label.
-func (c *Client) FetchReviewTickets(ctx context.Context, statusMap *StatusMap) ([]Ticket, error) {
+// FetchReviewTickets fetches issues that are in a review status, filtered by the project's label.
+func (c *Client) FetchReviewTickets(ctx context.Context, proj ProjectConfig, statusMap *StatusMap) ([]Ticket, error) {
 	if statusMap == nil || len(statusMap.ReviewStatuses) == 0 {
 		return nil, nil
 	}
@@ -94,7 +94,7 @@ func (c *Client) FetchReviewTickets(ctx context.Context, statusMap *StatusMap) (
 	}
 	jql := fmt.Sprintf(
 		`project = "%s" AND status in (%s) AND labels = "%s" ORDER BY created ASC`,
-		c.cfg.Project, strings.Join(names, ", "), c.cfg.Label,
+		proj.Key, strings.Join(names, ", "), proj.Label,
 	)
 	tickets, err := c.fetchTickets(ctx, jql)
 	if err != nil {
