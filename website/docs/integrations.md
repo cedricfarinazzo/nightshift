@@ -24,9 +24,46 @@ Nightshift supports OpenAI's Codex CLI as an alternative provider:
 codex --login
 ```
 
+## GitHub Copilot
+
+Nightshift supports GitHub Copilot as a third provider via `gh copilot`:
+
+```bash
+gh auth login
+```
+
+Set `providers.copilot.enabled: true` in config. The `gh` CLI must be installed and authenticated.
+
 ## GitHub
 
-All output is PR-based. Nightshift creates branches and pull requests for its findings.
+All output is PR-based. Nightshift creates branches and pull requests for its findings. The GitHub integration also supports sourcing tasks from issues:
+
+```yaml
+integrations:
+  github_issues:
+    enabled: true
+    label: "nightshift"
+```
+
+Issues labeled `nightshift` are picked up as tasks. The agent reads the issue body and comments for context.
+
+## Jira Autonomous Pipeline
+
+Nightshift can autonomously implement Jira tickets. Enable by configuring the `jira:` block:
+
+```yaml
+jira:
+  site: "https://yourorg.atlassian.net"
+  project: "PROJ"
+  label: "nightshift"
+  repos:
+    - name: myrepo
+      url: "git@github.com:org/myrepo.git"
+```
+
+Set `NIGHTSHIFT_JIRA_TOKEN` as an environment variable.
+
+Tickets labeled `nightshift` move through: **validate → plan → implement → commit → PR → status transition**. Progress is posted as comments on the Jira ticket. See [Jira Pipeline](/docs/jira) for full documentation.
 
 ## td (Task Management)
 
@@ -44,13 +81,7 @@ integrations:
 
 Nightshift reads project-level instruction files to understand context when executing tasks. Place a `CLAUDE.md` or `AGENTS.md` in your repo root to give Nightshift project-specific guidance. Tasks mentioned in these files get a priority bonus (+2).
 
-## GitHub Issues
-
-Source tasks from GitHub issues labeled with `nightshift`:
-
 ```yaml
 integrations:
-  github_issues:
-    enabled: true
-    label: "nightshift"
+  claude_md: true
 ```

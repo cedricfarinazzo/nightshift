@@ -127,4 +127,106 @@ If `state/state.json` exists from older versions, Nightshift migrates it to the 
 
 ## Providers
 
-Nightshift supports Claude Code and Codex as execution providers. It will use whichever has budget remaining, in the order specified by `preference`.
+Nightshift supports Claude Code, Codex, and GitHub Copilot as execution providers. It uses whichever has budget remaining, in the order specified by `preference`.
+
+```yaml
+providers:
+  preference:
+    - claude
+    - codex
+    - copilot
+  claude:
+    enabled: true
+    data_path: "~/.claude"
+    dangerously_skip_permissions: true
+    dangerously_bypass_approvals_and_sandbox: true
+  codex:
+    enabled: true
+    data_path: "~/.codex"
+    dangerously_bypass_approvals_and_sandbox: true
+  copilot:
+    enabled: true
+```
+
+## Integrations
+
+```yaml
+integrations:
+  claude_md: true           # Read CLAUDE.md from project root for context
+  task_sources:
+    - td:
+        enabled: true
+        teach_agent: true   # Include td workflow in prompts
+  github_issues:
+    enabled: true
+    label: "nightshift"
+```
+
+## Logging
+
+```yaml
+logging:
+  level: info               # debug | info | warn | error
+  format: json              # json | text
+```
+
+## Jira Autonomous Pipeline
+
+Configure the Jira pipeline to autonomously implement, commit, and PR Jira tickets:
+
+```yaml
+jira:
+  site: "https://yourorg.atlassian.net"
+  token: ""                 # Use NIGHTSHIFT_JIRA_TOKEN env var instead
+  email: "you@example.com"
+  project: "PROJ"
+  label: "nightshift"       # Only tickets with this label are processed
+
+  # AI agent phases
+  validation:
+    provider: copilot
+    model: gpt-5.4-mini
+    timeout: 2m
+  plan:
+    provider: copilot
+    model: claude-sonnet-4.6
+    timeout: 5m
+  implement:
+    provider: copilot
+    model: claude-sonnet-4.6
+    timeout: 30m
+  review_fix:
+    provider: copilot
+    model: gpt-5.4-mini
+    timeout: 20m
+
+  # Git workspace settings
+  workspace_root: "~/.local/share/nightshift/jira-workspaces"
+  cleanup_after_days: 14
+
+  # Repositories to operate on
+  repos:
+    - name: myrepo
+      url: "git@github.com:org/myrepo.git"   # SSH URL required
+      base_branch: main
+      lint_command: "golangci-lint run ./..."
+      test_command: "go test ./..."
+
+  # Jira status names (auto-discovered; set explicitly if discovery fails)
+  statuses:
+    todo: "To Do"
+    in_progress: "In Progress"
+    review: "In Review"
+    done: "Done"
+    needs_info: "Needs Info"
+```
+
+### Jira environment variables
+
+| Variable | Description |
+|----------|-------------|
+| `NIGHTSHIFT_JIRA_TOKEN` | Jira API token (preferred over config) |
+| `ANTHROPIC_API_KEY` | Required for Claude provider |
+| `OPENAI_API_KEY` | Required for Codex provider |
+
+> **SSH required**: repos must use `git@github.com:...` URLs. HTTPS remotes fail silently in non-interactive contexts.

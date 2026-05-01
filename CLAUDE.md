@@ -106,6 +106,8 @@ internal/
                         # findExistingPR uses --state open to avoid matching closed PRs; ghExec is a
                         # package-level var for test substitution
     comments.go         # CommentType/NightshiftComment; PostComment(), ParseNightshiftComments()
+    feedback.go         # ProcessFeedback, buildReworkPrompt, filterNewComments; idempotency filter
+                        # by lastReworkAt — skips review comments posted before the last CommentRework
 
   integrations/         # Readers for external config and task sources
     integrations.go     # Reader interface + Result/TaskItem/Hint types
@@ -214,6 +216,7 @@ SECURITY_AUDIT.md       # Security findings
   - Run reports: `~/.local/share/nightshift/reports/run-YYYY-MM-DD-HHMMSS.md`
   - Daily summaries: `~/.local/share/nightshift/summaries/summary-YYYY-MM-DD.md`
   - Database: `~/.local/share/nightshift/nightshift.db`
+  - Audit log: `~/.local/share/nightshift/audit/audit-YYYY-MM-DD.jsonl`
 
 ---
 
@@ -319,3 +322,7 @@ Agents MUST follow these rules:
 - **`nightshift jira preview` invocation** — use `go run ./cmd/nightshift jira preview --plain` (arguments after the package path are passed to the program by `go run`). The `--` form (`go run ./cmd/nightshift -- jira preview`) is also valid.
 - **Jira French status names** — the VC project uses "À faire" (todo), "En cours" (in-progress), "Revue en cours" (review), "Terminé" (done). `isReviewStatus` checks for "revue" keyword so it correctly classifies "Revue en cours". `TransitionToReview` is called in `PhaseStatus` after PR creation; if the pipeline fails at commit, `PhaseStatus` is never reached and the ticket stays "En cours".
 - **`findExistingPR` requires `--state open`** — without it, closed PRs on the same branch match and `gh pr edit` runs on a closed PR instead of creating a new one. Fixed in VC-44.
+- **Workspace reuse** — `SetupWorkspace` does NOT re-clone on subsequent runs for the same ticket. If the repo directory already exists, it is reused. `setupBranch` runs `git fetch origin` + `git pull --rebase origin <branch>` on every setup to sync with remote. First run sets `isNew=true`; subsequent runs set `isNew=false`.
+- **Plan injected into implement prompt** — `buildImplementPrompt(ticket, plan, ws)` receives `result.Plan` (the plan agent's output). This is the text of the plan comment posted to Jira. It is injected as a "Plan" section in the implement prompt so the agent knows what to implement.
+- **In-progress ticket resumption** — `detectResumeState` reads Nightshift comments to determine the furthest completed phase. If the plan phase is done (plan comment present) but implement is not, the next run resumes from implement. To force a full restart, set the ticket back to "À faire" (or equivalent todo status) — this causes `FetchTodoTickets` to pick it up fresh. WARNING: if phases are skipped via resume, the agent will not re-post the plan or re-validate. Only reset if you want a clean slate.
+- **`--skip-validation` works** (since VC-38) — when `--skip-validation` is passed, the validation agent is not created and `WithSkipValidation()` is used. `ProcessTicket` permits a nil `validationAgent` when `skipValidation=true`. The phase is shown as "skipped" in preflight output.

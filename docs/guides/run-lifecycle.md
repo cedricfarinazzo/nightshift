@@ -16,6 +16,7 @@ This guide explains what happens from a scheduled trigger to a finished run, inc
 ## Where Output Goes
 
 - **Structured logs**: `~/.local/share/nightshift/logs/nightshift-YYYY-MM-DD.log`
+- **Audit log**: `~/.local/share/nightshift/audit/audit-YYYY-MM-DD.jsonl` (append-only JSONL; records agent start/complete/error, file operations, git operations, security events)
 - **Run report**: `~/.local/share/nightshift/reports/run-YYYY-MM-DD-HHMMSS.md`
 - **Daily summary** (if `reporting.morning_summary: true`):
   `~/.local/share/nightshift/summaries/summary-YYYY-MM-DD.md`
