@@ -234,6 +234,19 @@ jira:
 
 When multiple providers are enabled, Nightshift selects them in the order specified by `preference`, skipping providers with no remaining budget:
 
+```mermaid
+flowchart TD
+    Start([Select provider for task]) --> List["Iterate preference list\ne.g. claude → codex → copilot"]
+    List --> Enabled{Enabled\nin config?}
+    Enabled -->|No| Next[Try next]
+    Enabled -->|Yes| Budget{Has remaining\nbudget?}
+    Budget -->|No| Next
+    Budget -->|Yes| Use([Use this provider])
+    Next --> More{More in\nlist?}
+    More -->|Yes| Enabled
+    More -->|No| Skip([Skip run — no budget])
+```
+
 ```yaml
 providers:
   preference:

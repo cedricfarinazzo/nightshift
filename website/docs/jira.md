@@ -11,8 +11,13 @@ Nightshift can autonomously implement Jira tickets overnight. It validates the t
 
 Each ticket goes through six phases:
 
-```
-validate → plan → implement → commit → PR → status
+```mermaid
+flowchart LR
+    V[validate] --> P[plan]
+    P --> I[implement]
+    I --> C[commit]
+    C --> PR[PR]
+    PR --> S[status]
 ```
 
 | Phase | What happens |
@@ -25,6 +30,27 @@ validate → plan → implement → commit → PR → status
 | **status** | Jira ticket transitions to "In Review". |
 
 Progress is posted as `🤖` comments on the Jira ticket after each phase. On the next run, Nightshift reads these comments to resume from the furthest completed phase — no work is duplicated.
+
+```mermaid
+flowchart TD
+    Start([nightshift jira run]) --> Fetch[Fetch labeled tickets]
+    Fetch --> Deps[Resolve dependency order]
+    Deps --> Ready{Any ready?}
+    Ready -->|No| Done([Done])
+    Ready -->|Yes| WS["Setup workspace\n(clone once / pull + rebase)"]
+    WS --> Resume["Read 🤖 comments\ndetect furthest phase"]
+    Resume --> V
+
+    V["PhaseValidate\nLLM score ≥ 6 / 10"] -->|Pass| P
+    V -->|Fail| NI["→ Needs Info\npost comment"]
+    NI --> Done
+
+    P["PhasePlan\npost plan as Jira comment"] --> I
+    I["PhaseImplement\nLLM writes code"] --> C
+    C["PhaseCommit\ngit commit + push"] --> PR
+    PR["PhasePR\ncreate / update PR"] --> S
+    S["PhaseStatus\ntransition → In Review"] --> Done
+```
 
 ## Setup
 
@@ -127,6 +153,20 @@ To force a full restart: move the ticket back to "To Do" status in Jira.
 ## Review Feedback Loop
 
 After a PR is opened and you or a reviewer leaves comments:
+
+```mermaid
+flowchart TD
+    Start([nightshift jira run]) --> Fetch[Fetch In-Review tickets]
+    Fetch --> FindPR[Find open PR]
+    FindPR --> Filter["Fetch PR review comments\nfilter: newer than last rework"]
+    Filter --> Any{New actionable\ncomments?}
+    Any -->|No| Skip["✓ skip — nothing new"]
+    Any -->|Yes| Fix["review_fix agent\naddress all feedback"]
+    Fix --> Push[Commit + push fixes]
+    Push --> Comment[Post rework summary\non PR and Jira]
+    Skip --> Done([Done])
+    Comment --> Done
+```
 
 1. Nightshift detects review threads (inline comments, change requests)
 2. The `review_fix` agent addresses the feedback

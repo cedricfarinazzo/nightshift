@@ -6,17 +6,31 @@ This guide describes Nightshift's internal architecture: how the major packages 
 
 ## High-Level Architecture
 
-```
-nightshift CLI (cmd/)
-  ├── Providers (internal/providers/) — track usage + cost per AI service
-  ├── Agents   (internal/agents/)    — spawn external CLIs (claude, codex, gh)
-  ├── Budget   (internal/budget/)    — calculate available tokens
-  ├── Tasks    (internal/tasks/)     — define + select what to run
-  ├── Orchestrator (internal/orchestrator/) — coordinate task lifecycle
-  ├── Jira orchestrator (internal/jira/)    — drive ticket lifecycle
-  ├── DB       (internal/db/)        — SQLite persistence (all SQL here)
-  ├── Config   (internal/config/)    — YAML + viper (all config access here)
-  └── Security (internal/security/)  — credentials, audit log, sandbox
+```mermaid
+graph TD
+    CLI["nightshift CLI\ncmd/nightshift"]
+
+    CLI --> Config["Config\ninternal/config\nYAML + viper"]
+    CLI --> Budget["Budget\ninternal/budget"]
+    CLI --> Tasks["Tasks\ninternal/tasks\n59 built-in"]
+    CLI --> Orch["Task Orchestrator\ninternal/orchestrator"]
+    CLI --> JiraOrch["Jira Orchestrator\ninternal/jira"]
+    CLI --> DB["Database\ninternal/db · SQLite"]
+    CLI --> Security["Security\ninternal/security\ncredentials · audit"]
+
+    Orch --> Agents["Agents\ninternal/agents\nclaude · codex · gh"]
+    Orch --> Providers["Providers\ninternal/providers\nusage + cost tracking"]
+    Orch --> Integrations["Integrations\ninternal/integrations\nCLAUDE.md · AGENTS.md · td"]
+    Orch --> Reporting["Reporting\ninternal/reporting"]
+    Orch --> State["State\ninternal/state"]
+
+    JiraOrch --> Agents
+    JiraOrch --> JiraAPI["Jira API\ngo-atlassian"]
+    JiraOrch --> GitHub["GitHub\ngh CLI"]
+
+    Budget --> Snapshots["Snapshots\ninternal/snapshots"]
+    Budget --> Calibrator["Calibrator\ninternal/calibrator"]
+    Budget --> Tmux["tmux scraper\ninternal/tmux"]
 ```
 
 ---
@@ -36,22 +50,22 @@ A provider tracks how many tokens were used and at what cost. An agent is what a
 
 ## Task Run Lifecycle
 
-```
-nightshift run
-  ↓
-Load config (internal/config/)
-  ↓
-Check budget (internal/budget/)
-  ↓
-Select tasks (internal/tasks/selector.go)
-  ↓
-For each project × task:
-  Load integrations (internal/integrations/)
-  Build prompt
-  Execute agent (internal/agents/)
-  Track usage (internal/providers/)
-  Update state (internal/state/)
-  Write report (internal/reporting/)
+```mermaid
+flowchart TD
+    Start([nightshift run]) --> LoadCfg[Load config]
+    LoadCfg --> CheckBudget{Budget\nsufficient?}
+    CheckBudget -->|No| Skip([Skip run])
+    CheckBudget -->|Yes| SelectTasks[Select tasks\nbudget-aware + staleness-aware]
+    SelectTasks --> ForEach["For each project × task"]
+    ForEach --> Integrations[Load integrations\nCLAUDE.md · AGENTS.md · td]
+    Integrations --> Prompt[Build prompt]
+    Prompt --> Plan[Plan phase\nLLM outlines approach]
+    Plan --> Impl[Implement phase\nLLM executes]
+    Impl --> Review{Review\npasses?}
+    Review -->|Yes| Done([Write report\nUpdate state])
+    Review -->|No| Retry{Iterations\n< 3?}
+    Retry -->|Yes| Impl
+    Retry -->|No| Abandon([Abandon task])
 ```
 
 The task orchestrator (`internal/orchestrator/orchestrator.go`) coordinates this with a plan → implement → review loop (up to `DefaultMaxIterations=3`).
@@ -60,25 +74,21 @@ The task orchestrator (`internal/orchestrator/orchestrator.go`) coordinates this
 
 ## Jira Ticket Lifecycle
 
-```
-nightshift jira run
-  ↓
-Connect to Jira (internal/jira/client.go)
-Discover statuses (internal/jira/status.go)
-  ↓
-FetchTodoTickets() — tickets in todo status + nightshift label
-BuildDependencyGraph() — resolve order, detect cycles
-  ↓
-For each ready ticket:
-  SetupWorkspace() — clone (first time) or reuse + pull --rebase
-  detectResumeState() — read 🤖 comments to find furthest completed phase
-  ProcessTicket():
-    PhaseValidate → PhaseCommit → PhaseCreatePR → PhaseStatus
-  PostComment() — progress on each phase
-  ↓
-FetchReviewTickets() — tickets in review status
-For each review ticket:
-  ProcessFeedback() — find PR, check review comments, fix, push
+```mermaid
+flowchart TD
+    Start([nightshift jira run]) --> Connect[Connect to Jira\nDiscover statuses]
+    Connect --> FetchTodo["FetchTodoTickets()\nnightshift label + todo status"]
+    FetchTodo --> Graph["BuildDependencyGraph()\nresolve order, detect cycles"]
+    Graph --> Ready{Ready\ntickets?}
+    Ready -->|No| FetchReview
+    Ready -->|Yes| WS["SetupWorkspace()\nclone once, reuse + pull --rebase"]
+    WS --> Resume["detectResumeState()\nread 🤖 comments"]
+    Resume --> Process["ProcessTicket()\nvalidate→plan→implement→commit→PR→status"]
+    Process --> Comment["PostComment()\nafter each phase"]
+    Comment --> FetchReview
+
+    FetchReview["FetchReviewTickets()\nnightshift label + review status"] --> ReviewLoop
+    ReviewLoop["ProcessFeedback()\nPR review comments → fix → push"] --> Done([Done])
 ```
 
 See `docs/guides/jira-pipeline.md` for detailed phase descriptions.
