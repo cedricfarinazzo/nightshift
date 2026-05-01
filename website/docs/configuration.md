@@ -172,17 +172,17 @@ logging:
 
 ## Jira Autonomous Pipeline
 
-Configure the Jira pipeline to autonomously implement, commit, and PR Jira tickets:
+Configure the Jira pipeline to autonomously implement, commit, and PR Jira tickets.
+
+### Multi-project config (recommended)
 
 ```yaml
 jira:
-  site: "https://yourorg.atlassian.net"
-  token: ""                 # Use NIGHTSHIFT_JIRA_TOKEN env var instead
+  site: "yourorg"              # Atlassian site name (yourorg.atlassian.net)
   email: "you@example.com"
-  project: "PROJ"
-  label: "nightshift"       # Only tickets with this label are processed
+  token_env: NIGHTSHIFT_JIRA_TOKEN   # env var holding the API token
 
-  # AI agent phases
+  # Global AI agent phases — shared by all projects, overridable per-project
   validation:
     provider: copilot
     model: gpt-5.4-mini
@@ -197,29 +197,49 @@ jira:
     timeout: 30m
   review_fix:
     provider: copilot
-    model: gpt-5.4-mini
+    model: claude-sonnet-4.6
     timeout: 20m
 
-  # Git workspace settings
-  workspace_root: "~/.local/share/nightshift/jira-workspaces"
-  cleanup_after_days: 14
+  budget_enabled: true
+  max_tickets: 10
 
-  # Repositories to operate on
+  projects:
+    - key: VC
+      label: nightshift
+      repos:
+        - name: nightshift
+          url: "git@github.com:org/nightshift.git"   # SSH URL required
+          base_branch: main
+
+    - key: INFRA
+      label: nightshift
+      repos:
+        - name: infra
+          url: "git@github.com:org/infra.git"
+          base_branch: trunk
+      # Optional per-project phase override (inherits global if omitted):
+      implement:
+        timeout: 45m
+```
+
+### Backward-compatible single-project config
+
+Old configs with flat `project`, `label`, and `repos` fields continue to work:
+
+```yaml
+jira:
+  site: "yourorg"
+  email: "you@example.com"
+  token_env: NIGHTSHIFT_JIRA_TOKEN
+  project: "PROJ"
+  label: "nightshift"
   repos:
     - name: myrepo
-      url: "git@github.com:org/myrepo.git"   # SSH URL required
+      url: "git@github.com:org/myrepo.git"
       base_branch: main
-      lint_command: "golangci-lint run ./..."
-      test_command: "go test ./..."
-
-  # Jira status names (auto-discovered; set explicitly if discovery fails)
-  statuses:
-    todo: "To Do"
-    in_progress: "In Progress"
-    review: "In Review"
-    done: "Done"
-    needs_info: "Needs Info"
 ```
+
+Nightshift automatically promotes these to a single `Projects[0]` entry on startup.
 
 ### Jira environment variables
 

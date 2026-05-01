@@ -58,6 +58,7 @@ type jiraClient interface {
 type Orchestrator struct {
 	client          jiraClient
 	cfg             JiraConfig
+	proj            ProjectConfig // the specific project this orchestrator serves
 	validationAgent agents.Agent
 	implAgent       agents.Agent
 	reviewFixAgent  agents.Agent
@@ -113,11 +114,12 @@ func WithProgressPrinter(fn func(format string, args ...any)) OrchestratorOption
 	return func(o *Orchestrator) { o.progressf = fn }
 }
 
-// NewOrchestrator creates an Orchestrator with the given client, config, and options.
-func NewOrchestrator(client *Client, cfg JiraConfig, opts ...OrchestratorOption) *Orchestrator {
+// NewOrchestrator creates an Orchestrator with the given client, config, project, and options.
+func NewOrchestrator(client *Client, cfg JiraConfig, proj ProjectConfig, opts ...OrchestratorOption) *Orchestrator {
 	o := &Orchestrator{
 		client:          client,
 		cfg:             cfg,
+		proj:            proj,
 		log:             logging.Component("jira.orchestrator"),
 		fnHasChanges:    HasChanges,
 		fnCommitAndPush: CommitAndPush,
@@ -350,12 +352,13 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 	if !skip(PhasePlan) {
 		result.Phase = PhasePlan
 		o.notifyPhase(ticket.Key, PhasePlan, false)
-		o.emit("🤖 %s running: plan  (%s)", o.cfg.Plan.Provider, o.cfg.Plan.Model)
+		planCfg := o.cfg.EffectivePlan(o.proj)
+		o.emit("🤖 %s running: plan  (%s)", planCfg.Provider, planCfg.Model)
 		planStart := time.Now()
 		planResult, err := o.implAgent.Execute(ctx, agents.ExecuteOptions{
 			Prompt:  o.buildPlanPrompt(ticket),
-			Timeout: parseTimeout(o.cfg.Plan.Timeout, 5*time.Minute),
-			Model:   o.cfg.Plan.Model,
+			Timeout: parseTimeout(planCfg.Timeout, 5*time.Minute),
+			Model:   planCfg.Model,
 		})
 		if err != nil {
 			o.postErrorComment(ctx, ticket.Key, PhasePlan, err)
@@ -377,8 +380,9 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 	if !skip(PhaseImplement) {
 		result.Phase = PhaseImplement
 		o.notifyPhase(ticket.Key, PhaseImplement, false)
-		timeout := parseTimeout(o.cfg.Implement.Timeout, 30*time.Minute)
-		o.emit("🤖 %s running: implement  (%s, timeout %s)", o.cfg.Implement.Provider, o.cfg.Implement.Model, timeout.Round(time.Minute))
+		implCfg := o.cfg.EffectiveImplement(o.proj)
+		timeout := parseTimeout(implCfg.Timeout, 30*time.Minute)
+		o.emit("🤖 %s running: implement  (%s, timeout %s)", implCfg.Provider, implCfg.Model, timeout.Round(time.Minute))
 		implStart := time.Now()
 		workDir := ""
 		if ws != nil && len(ws.Repos) > 0 {
@@ -388,7 +392,7 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 			Prompt:  o.buildImplementPrompt(ticket, result.Plan, ws),
 			WorkDir: workDir,
 			Timeout: timeout,
-			Model:   o.cfg.Implement.Model,
+			Model:   implCfg.Model,
 		})
 		if err != nil {
 			o.postErrorComment(ctx, ticket.Key, PhaseImplement, err)
@@ -702,11 +706,14 @@ func buildPRImplementationComment(ticket Ticket, summary, jiraSite string) strin
 func (o *Orchestrator) providerForCommentType(ct CommentType) (provider, model string) {
 	switch ct {
 	case CommentValidation:
-		return o.cfg.Validation.Provider, o.cfg.Validation.Model
+		cfg := o.cfg.EffectiveValidation(o.proj)
+		return cfg.Provider, cfg.Model
 	case CommentPlan:
-		return o.cfg.Plan.Provider, o.cfg.Plan.Model
+		cfg := o.cfg.EffectivePlan(o.proj)
+		return cfg.Provider, cfg.Model
 	default:
-		return o.cfg.Implement.Provider, o.cfg.Implement.Model
+		cfg := o.cfg.EffectiveImplement(o.proj)
+		return cfg.Provider, cfg.Model
 	}
 }
 

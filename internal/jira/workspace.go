@@ -32,13 +32,13 @@ type RepoWorkspace struct {
 }
 
 // SetupWorkspace creates (or reuses) an isolated workspace for ticketKey.
-// Each configured repo is cloned into {WorkspaceRoot}/{ticketKey}/{repo.Name}
+// Each repo configured in proj is cloned into {WorkspaceRoot}/{ticketKey}/{repo.Name}
 // and checked out on feature/{ticketKey}.
-func SetupWorkspace(ctx context.Context, cfg JiraConfig, ticketKey string) (*Workspace, error) {
+func SetupWorkspace(ctx context.Context, cfg JiraConfig, proj ProjectConfig, ticketKey string) (*Workspace, error) {
 	if !validTicketKey.MatchString(ticketKey) {
 		return nil, fmt.Errorf("invalid ticket key %q: must match ^[A-Z][A-Z0-9]+-\\d+$", ticketKey)
 	}
-	for _, r := range cfg.Repos {
+	for _, r := range proj.Repos {
 		if strings.ContainsAny(r.Name, `/\`) || strings.Contains(r.Name, "..") {
 			return nil, fmt.Errorf("repo name %q contains path separators or '..'", r.Name)
 		}
@@ -53,8 +53,8 @@ func SetupWorkspace(ctx context.Context, cfg JiraConfig, ticketKey string) (*Wor
 	}
 
 	branch := BranchName(ticketKey)
-	repos := make([]RepoWorkspace, 0, len(cfg.Repos))
-	for _, r := range cfg.Repos {
+	repos := make([]RepoWorkspace, 0, len(proj.Repos))
+	for _, r := range proj.Repos {
 		repoPath := filepath.Join(wsRoot, r.Name)
 		if _, err := os.Stat(repoPath); err != nil {
 			if !os.IsNotExist(err) {

@@ -7,6 +7,21 @@ import (
 	"path/filepath"
 )
 
+// ProjectConfig defines a single Jira project with its own key, label, repos,
+// and optional per-project phase overrides that take precedence over the global
+// phase configs on JiraConfig.
+type ProjectConfig struct {
+	Key   string       `mapstructure:"key"`   // Jira project key (e.g., "PROJ")
+	Label string       `mapstructure:"label"` // label filter (e.g., "nightshift")
+	Repos []RepoConfig `mapstructure:"repos"`
+
+	// Optional per-project phase overrides; zero-value means inherit global.
+	Validation PhaseConfig `mapstructure:"validation"`
+	Plan       PhaseConfig `mapstructure:"plan"`
+	Implement  PhaseConfig `mapstructure:"implement"`
+	ReviewFix  PhaseConfig `mapstructure:"review_fix"`
+}
+
 // JiraConfig holds all Jira-related configuration.
 type JiraConfig struct {
 	// Connection
@@ -14,14 +29,17 @@ type JiraConfig struct {
 	Email    string `mapstructure:"email"`     // Jira user email for auth
 	TokenEnv string `mapstructure:"token_env"` // env var name holding API token (default: JIRA_API_TOKEN)
 
-	// Project
-	Project string `mapstructure:"project"` // Jira project key (e.g., "PROJ")
-	Label   string `mapstructure:"label"`   // label filter (e.g., "nightshift")
+	// Multi-project list (preferred). Each project has its own key, label, repos.
+	Projects []ProjectConfig `mapstructure:"projects"`
 
-	// Repos (multi-repo support)
-	Repos []RepoConfig `mapstructure:"repos"`
+	// Deprecated flat single-project fields — kept for backward compatibility.
+	// When Projects is empty and Project is non-empty, Defaults() promotes them
+	// to Projects[0] automatically.
+	Project string       `mapstructure:"project"` // deprecated: use Projects[0].Key
+	Label   string       `mapstructure:"label"`   // deprecated: use Projects[0].Label
+	Repos   []RepoConfig `mapstructure:"repos"`   // deprecated: use Projects[0].Repos
 
-	// Per-phase provider selection
+	// Per-phase provider selection (global defaults, overridable per-project).
 	Validation PhaseConfig `mapstructure:"validation"`
 	Plan       PhaseConfig `mapstructure:"plan"`
 	Implement  PhaseConfig `mapstructure:"implement"`
@@ -56,7 +74,46 @@ type PhaseConfig struct {
 	Timeout  string `mapstructure:"timeout"`  // e.g., "30m", "2m"
 }
 
+// mergePhaseConfig returns the project-level override merged over the global default.
+// A non-empty field in override takes precedence over the corresponding global field.
+func mergePhaseConfig(global, override PhaseConfig) PhaseConfig {
+	result := global
+	if override.Provider != "" {
+		result.Provider = override.Provider
+	}
+	if override.Model != "" {
+		result.Model = override.Model
+	}
+	if override.Timeout != "" {
+		result.Timeout = override.Timeout
+	}
+	return result
+}
+
+// EffectiveValidation returns the effective validation PhaseConfig for the given project.
+// The project's override takes precedence over the global default when non-empty.
+func (c *JiraConfig) EffectiveValidation(proj ProjectConfig) PhaseConfig {
+	return mergePhaseConfig(c.Validation, proj.Validation)
+}
+
+// EffectivePlan returns the effective plan PhaseConfig for the given project.
+func (c *JiraConfig) EffectivePlan(proj ProjectConfig) PhaseConfig {
+	return mergePhaseConfig(c.Plan, proj.Plan)
+}
+
+// EffectiveImplement returns the effective implement PhaseConfig for the given project.
+func (c *JiraConfig) EffectiveImplement(proj ProjectConfig) PhaseConfig {
+	return mergePhaseConfig(c.Implement, proj.Implement)
+}
+
+// EffectiveReviewFix returns the effective review-fix PhaseConfig for the given project.
+func (c *JiraConfig) EffectiveReviewFix(proj ProjectConfig) PhaseConfig {
+	return mergePhaseConfig(c.ReviewFix, proj.ReviewFix)
+}
+
 // Validate checks that required config fields are set.
+// Defaults() must be called before Validate() so that old flat fields are
+// promoted to Projects when needed.
 func (c *JiraConfig) Validate() error {
 	if c.Site == "" {
 		return fmt.Errorf("jira.site is required")
@@ -64,18 +121,23 @@ func (c *JiraConfig) Validate() error {
 	if c.Email == "" {
 		return fmt.Errorf("jira.email is required")
 	}
-	if c.Project == "" {
-		return fmt.Errorf("jira.project is required")
+	if len(c.Projects) == 0 {
+		return fmt.Errorf("jira.projects: at least one project is required")
 	}
-	if len(c.Repos) == 0 {
-		return fmt.Errorf("jira.repos: at least one repo is required")
-	}
-	for i, r := range c.Repos {
-		if r.Name == "" {
-			return fmt.Errorf("jira.repos[%d].name is required", i)
+	for i, p := range c.Projects {
+		if p.Key == "" {
+			return fmt.Errorf("jira.projects[%d].key is required", i)
 		}
-		if r.URL == "" {
-			return fmt.Errorf("jira.repos[%d].url is required", i)
+		if len(p.Repos) == 0 {
+			return fmt.Errorf("jira.projects[%d].repos: at least one repo is required", i)
+		}
+		for j, r := range p.Repos {
+			if r.Name == "" {
+				return fmt.Errorf("jira.projects[%d].repos[%d].name is required", i, j)
+			}
+			if r.URL == "" {
+				return fmt.Errorf("jira.projects[%d].repos[%d].url is required", i, j)
+			}
 		}
 	}
 	return nil
@@ -103,12 +165,13 @@ func (c *JiraConfig) Defaults() {
 	if c.MaxTickets == 0 {
 		c.MaxTickets = 10
 	}
+	// Apply base-branch defaults to the legacy flat repos list.
 	for i := range c.Repos {
 		if c.Repos[i].BaseBranch == "" {
 			c.Repos[i].BaseBranch = "main"
 		}
 	}
-	// Phase defaults
+	// Phase defaults (global)
 	if c.Validation.Provider == "" {
 		c.Validation.Provider = "claude"
 	}
@@ -144,5 +207,33 @@ func (c *JiraConfig) Defaults() {
 	}
 	if c.ReviewFix.Timeout == "" {
 		c.ReviewFix.Timeout = "20m"
+	}
+
+	// Backward compat: if no projects are configured but the old flat fields are
+	// present, auto-promote them to Projects[0].
+	if len(c.Projects) == 0 && c.Project != "" {
+		label := c.Label
+		if label == "" {
+			label = "nightshift"
+		}
+		repos := make([]RepoConfig, len(c.Repos))
+		copy(repos, c.Repos)
+		c.Projects = []ProjectConfig{{
+			Key:   c.Project,
+			Label: label,
+			Repos: repos,
+		}}
+	}
+
+	// Apply defaults to each project's repos and label.
+	for i := range c.Projects {
+		if c.Projects[i].Label == "" {
+			c.Projects[i].Label = "nightshift"
+		}
+		for j := range c.Projects[i].Repos {
+			if c.Projects[i].Repos[j].BaseBranch == "" {
+				c.Projects[i].Repos[j].BaseBranch = "main"
+			}
+		}
 	}
 }

@@ -22,8 +22,10 @@ WorkspaceRoot/               # cfg.jira.workspace_root (default: ~/.local/share/
 ## SetupWorkspace
 
 ```go
-func SetupWorkspace(ctx context.Context, cfg JiraConfig, ticketKey string) (*Workspace, error)
+func SetupWorkspace(ctx context.Context, cfg JiraConfig, proj ProjectConfig, ticketKey string) (*Workspace, error)
 ```
+
+`cfg` provides the workspace root and cleanup settings. `proj` supplies the list of repos to clone — each project has its own repo list, so different projects can operate on different codebases in isolation.
 
 ### Validation
 

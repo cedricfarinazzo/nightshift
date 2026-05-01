@@ -52,8 +52,11 @@ func runJira(cmd *cobra.Command, _ []string) error {
 	if v, _ := cmd.Flags().GetInt("max-tickets"); v > 0 {
 		cfg.Jira.MaxTickets = v
 	}
+	// Apply --label override to all projects.
 	if v, _ := cmd.Flags().GetString("label"); v != "" {
-		cfg.Jira.Label = v
+		for i := range cfg.Jira.Projects {
+			cfg.Jira.Projects[i].Label = v
+		}
 	}
 	skipValidation, _ := cmd.Flags().GetBool("skip-validation")
 	todoOnly, _ := cmd.Flags().GetBool("todo-only")
@@ -80,21 +83,69 @@ func runJira(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("discover statuses: %w", err)
 	}
 
+	printJiraPreflightSummary(cfg.Jira, skipValidation, statusMap)
+
+	var results []jira.TicketResult
+	var feedbackResults []jira.FeedbackResult
+	start := time.Now()
+
+	if singleTicket != "" {
+		found, err := runSingleTicket(ctx, log, client, cfg, statusMap, singleTicket, skipValidation, &results, &feedbackResults)
+		if err != nil {
+			return err
+		}
+		if !found {
+			return fmt.Errorf("ticket %s not found in TODO or ON REVIEW lists", singleTicket)
+		}
+	} else {
+		for _, proj := range cfg.Jira.Projects {
+			orch, err := buildOrchestrator(client, cfg, proj, skipValidation)
+			if err != nil {
+				return err
+			}
+			if !reviewOnly {
+				if err := runTodoPhase(ctx, log, orch, client, cfg.Jira, proj, statusMap, &results); err != nil {
+					return err
+				}
+			}
+			if !todoOnly {
+				if err := runReviewPhase(ctx, log, orch, client, cfg.Jira, proj, statusMap, &feedbackResults); err != nil {
+					return err
+				}
+			}
+		}
+	}
+
+	if n, err := jira.CleanupStaleWorkspaces(cfg.Jira); err != nil {
+		log.Errorf("workspace cleanup: %v", err)
+	} else if n > 0 {
+		log.Infof("cleaned up %d stale workspaces", n)
+	}
+
+	printJiraRunSummary(results, feedbackResults, time.Since(start))
+	return nil
+}
+
+// buildOrchestrator creates an Orchestrator for the given project,
+// constructing agents from the project's effective phase configs.
+func buildOrchestrator(client *jira.Client, cfg *config.Config, proj jira.ProjectConfig, skipValidation bool) (*jira.Orchestrator, error) {
+	jiracfg := cfg.Jira
+
 	var validationAgent agents.Agent
 	if !skipValidation {
 		var err error
-		validationAgent, err = createJiraAgent(cfg, cfg.Jira.Validation)
+		validationAgent, err = createJiraAgent(cfg, jiracfg.EffectiveValidation(proj))
 		if err != nil {
-			return fmt.Errorf("validation agent: %w", err)
+			return nil, fmt.Errorf("validation agent: %w", err)
 		}
 	}
-	implAgent, err := createJiraAgent(cfg, cfg.Jira.Implement)
+	implAgent, err := createJiraAgent(cfg, jiracfg.EffectiveImplement(proj))
 	if err != nil {
-		return fmt.Errorf("implement agent: %w", err)
+		return nil, fmt.Errorf("implement agent: %w", err)
 	}
-	reviewFixAgent, err := createJiraAgent(cfg, cfg.Jira.ReviewFix)
+	reviewFixAgent, err := createJiraAgent(cfg, jiracfg.EffectiveReviewFix(proj))
 	if err != nil {
-		return fmt.Errorf("review-fix agent: %w", err)
+		return nil, fmt.Errorf("review-fix agent: %w", err)
 	}
 
 	orchOpts := []jira.OrchestratorOption{
@@ -133,114 +184,82 @@ func runJira(cmd *cobra.Command, _ []string) error {
 	} else {
 		orchOpts = append(orchOpts, jira.WithValidationAgent(validationAgent))
 	}
-	orch := jira.NewOrchestrator(client, cfg.Jira, orchOpts...)
-
-	printJiraPreflightSummary(cfg.Jira, skipValidation, statusMap)
-
-	var results []jira.TicketResult
-	var feedbackResults []jira.FeedbackResult
-	start := time.Now()
-
-	if singleTicket != "" {
-		found, err := runSingleTicket(ctx, log, orch, client, cfg.Jira, statusMap, singleTicket, &results, &feedbackResults)
-		if err != nil {
-			return err
-		}
-		if !found {
-			return fmt.Errorf("ticket %s not found in TODO or ON REVIEW lists", singleTicket)
-		}
-	} else {
-		// Phase A: TODO + in-progress tickets (resume failed runs).
-		if !reviewOnly {
-			if err := runTodoPhase(ctx, log, orch, client, cfg.Jira, statusMap, &results); err != nil {
-				return err
-			}
-		}
-
-		// Phase B: ON REVIEW feedback.
-		if !todoOnly {
-			if err := runReviewPhase(ctx, log, orch, client, cfg.Jira, statusMap, &feedbackResults); err != nil {
-				return err
-			}
-		}
-	}
-
-	if n, err := jira.CleanupStaleWorkspaces(cfg.Jira); err != nil {
-		log.Errorf("workspace cleanup: %v", err)
-	} else if n > 0 {
-		log.Infof("cleaned up %d stale workspaces", n)
-	}
-
-	printJiraRunSummary(results, feedbackResults, time.Since(start))
-	return nil
+	return jira.NewOrchestrator(client, jiracfg, proj, orchOpts...), nil
 }
 
 func runSingleTicket(
 	ctx context.Context,
 	log *logging.Logger,
-	orch *jira.Orchestrator,
 	client *jira.Client,
-	jiracfg jira.JiraConfig,
+	cfg *config.Config,
 	statusMap *jira.StatusMap,
 	key string,
+	skipValidation bool,
 	results *[]jira.TicketResult,
 	feedbackResults *[]jira.FeedbackResult,
 ) (found bool, err error) {
-	todoTickets, err := client.FetchTodoTickets(ctx)
-	if err != nil {
-		return false, fmt.Errorf("fetch tickets: %w", err)
-	}
-	inProgressTickets, err := client.FetchInProgressTickets(ctx, statusMap)
-	if err != nil {
-		return false, fmt.Errorf("fetch in-progress tickets: %w", err)
-	}
-	reviewTickets, err := client.FetchReviewTickets(ctx, statusMap)
-	if err != nil {
-		return false, fmt.Errorf("fetch review tickets: %w", err)
-	}
-
-	for _, t := range append(todoTickets, inProgressTickets...) {
-		if t.Key != key {
-			continue
-		}
-		found = true
-		ws, err := jira.SetupWorkspace(ctx, jiracfg, t.Key)
+	jiracfg := cfg.Jira
+	for _, proj := range jiracfg.Projects {
+		orch, err := buildOrchestrator(client, cfg, proj, skipValidation)
 		if err != nil {
-			log.Errorf("workspace setup: %v", err)
-			*results = append(*results, jira.TicketResult{TicketKey: t.Key, Status: jira.TicketFailed, Error: err.Error()})
+			return false, err
+		}
+
+		todoTickets, err := client.FetchTodoTickets(ctx, proj)
+		if err != nil {
+			return false, fmt.Errorf("fetch tickets: %w", err)
+		}
+		inProgressTickets, err := client.FetchInProgressTickets(ctx, proj, statusMap)
+		if err != nil {
+			return false, fmt.Errorf("fetch in-progress tickets: %w", err)
+		}
+		reviewTickets, err := client.FetchReviewTickets(ctx, proj, statusMap)
+		if err != nil {
+			return false, fmt.Errorf("fetch review tickets: %w", err)
+		}
+
+		for _, t := range append(todoTickets, inProgressTickets...) {
+			if t.Key != key {
+				continue
+			}
+			found = true
+			ws, err := jira.SetupWorkspace(ctx, jiracfg, proj, t.Key)
+			if err != nil {
+				log.Errorf("workspace setup: %v", err)
+				*results = append(*results, jira.TicketResult{TicketKey: t.Key, Status: jira.TicketFailed, Error: err.Error()})
+				return found, nil
+			}
+			result, err := orch.ProcessTicket(ctx, t, ws)
+			if err != nil {
+				log.Errorf("process ticket %s: %v", t.Key, err)
+			}
+			if result != nil {
+				*results = append(*results, *result)
+			}
 			return found, nil
 		}
-		result, err := orch.ProcessTicket(ctx, t, ws)
-		if err != nil {
-			log.Errorf("process ticket %s: %v", t.Key, err)
-		}
-		if result != nil {
-			*results = append(*results, *result)
-		}
-		return found, nil
-	}
 
-	for _, t := range reviewTickets {
-		if t.Key != key {
-			continue
-		}
-		found = true
-		ws, err := jira.SetupWorkspace(ctx, jiracfg, t.Key)
-		if err != nil {
-			log.Errorf("workspace setup: %v", err)
-			*feedbackResults = append(*feedbackResults, jira.FeedbackResult{TicketKey: t.Key, Error: err.Error()})
+		for _, t := range reviewTickets {
+			if t.Key != key {
+				continue
+			}
+			found = true
+			ws, err := jira.SetupWorkspace(ctx, jiracfg, proj, t.Key)
+			if err != nil {
+				log.Errorf("workspace setup: %v", err)
+				*feedbackResults = append(*feedbackResults, jira.FeedbackResult{TicketKey: t.Key, Error: err.Error()})
+				return found, nil
+			}
+			result, err := orch.ProcessFeedback(ctx, t, ws)
+			if err != nil {
+				log.Errorf("process feedback %s: %v", t.Key, err)
+			}
+			if result != nil {
+				*feedbackResults = append(*feedbackResults, *result)
+			}
 			return found, nil
 		}
-		result, err := orch.ProcessFeedback(ctx, t, ws)
-		if err != nil {
-			log.Errorf("process feedback %s: %v", t.Key, err)
-		}
-		if result != nil {
-			*feedbackResults = append(*feedbackResults, *result)
-		}
-		return found, nil
 	}
-
 	return false, nil
 }
 
@@ -250,19 +269,20 @@ func runTodoPhase(
 	orch *jira.Orchestrator,
 	client *jira.Client,
 	jiracfg jira.JiraConfig,
+	proj jira.ProjectConfig,
 	statusMap *jira.StatusMap,
 	results *[]jira.TicketResult,
 ) error {
-	todoTickets, err := client.FetchTodoTickets(ctx)
+	todoTickets, err := client.FetchTodoTickets(ctx, proj)
 	if err != nil {
 		return fmt.Errorf("fetch todo tickets: %w", err)
 	}
-	inProgressTickets, err := client.FetchInProgressTickets(ctx, statusMap)
+	inProgressTickets, err := client.FetchInProgressTickets(ctx, proj, statusMap)
 	if err != nil {
 		return fmt.Errorf("fetch in-progress tickets: %w", err)
 	}
 	allTickets := append(todoTickets, inProgressTickets...)
-	log.Infof("todo tickets: %d found (%d in-progress)", len(allTickets), len(inProgressTickets))
+	log.Infof("todo tickets [%s]: %d found (%d in-progress)", proj.Key, len(allTickets), len(inProgressTickets))
 
 	graph := jira.BuildDependencyGraph(allTickets)
 	ready, blocked := graph.ResolveOrder()
@@ -271,7 +291,7 @@ func runTodoPhase(
 		fmt.Printf("  ⏭  %s  blocked by %v\n", b.Ticket.Key, b.Blockers)
 	}
 	if len(ready) == 0 {
-		fmt.Println("  no tickets ready to process")
+		fmt.Printf("  no tickets ready to process [%s]\n", proj.Key)
 	}
 
 	count := 0
@@ -281,7 +301,7 @@ func runTodoPhase(
 		}
 		fmt.Printf("\n  ▶ %s  %s\n", ticket.Key, ticket.Summary)
 		fmt.Printf("    setting up workspace…\n")
-		ws, err := jira.SetupWorkspace(ctx, jiracfg, ticket.Key)
+		ws, err := jira.SetupWorkspace(ctx, jiracfg, proj, ticket.Key)
 		if err != nil {
 			log.Errorf("workspace %s: %v", ticket.Key, err)
 			fmt.Printf("    ✗ workspace setup failed: %v\n", err)
@@ -308,22 +328,23 @@ func runReviewPhase(
 	orch *jira.Orchestrator,
 	client *jira.Client,
 	jiracfg jira.JiraConfig,
+	proj jira.ProjectConfig,
 	statusMap *jira.StatusMap,
 	feedbackResults *[]jira.FeedbackResult,
 ) error {
-	reviewTickets, err := client.FetchReviewTickets(ctx, statusMap)
+	reviewTickets, err := client.FetchReviewTickets(ctx, proj, statusMap)
 	if err != nil {
 		return fmt.Errorf("fetch review tickets: %w", err)
 	}
-	log.Infof("review tickets: %d found", len(reviewTickets))
+	log.Infof("review tickets [%s]: %d found", proj.Key, len(reviewTickets))
 
 	if len(reviewTickets) == 0 {
-		fmt.Println("  no tickets in review")
+		fmt.Printf("  no tickets in review [%s]\n", proj.Key)
 	}
 	for _, ticket := range reviewTickets {
 		fmt.Printf("\n  🔍 %s  %s\n", ticket.Key, ticket.Summary)
 		fmt.Printf("    setting up workspace…\n")
-		ws, err := jira.SetupWorkspace(ctx, jiracfg, ticket.Key)
+		ws, err := jira.SetupWorkspace(ctx, jiracfg, proj, ticket.Key)
 		if err != nil {
 			log.Errorf("workspace %s: %v", ticket.Key, err)
 			fmt.Printf("    ✗ workspace setup failed: %v\n", err)
@@ -410,8 +431,6 @@ func printJiraPreflightSummary(cfg jira.JiraConfig, skipValidation bool, _ *jira
 	fmt.Println("🌙 Nightshift Jira Run")
 	fmt.Println("──────────────────────────────")
 	fmt.Printf("  Site:         %s.atlassian.net\n", cfg.Site)
-	fmt.Printf("  Project:      %s\n", cfg.Project)
-	fmt.Printf("  Label:        %s\n", cfg.Label)
 	if skipValidation {
 		fmt.Printf("  Validation:   skipped\n")
 	} else {
@@ -420,6 +439,10 @@ func printJiraPreflightSummary(cfg jira.JiraConfig, skipValidation bool, _ *jira
 	fmt.Printf("  Implement:    %s/%s\n", cfg.Implement.Provider, cfg.Implement.Model)
 	fmt.Printf("  ReviewFix:    %s/%s\n", cfg.ReviewFix.Provider, cfg.ReviewFix.Model)
 	fmt.Printf("  Max tickets:  %d\n", cfg.MaxTickets)
+	fmt.Printf("  Projects (%d):\n", len(cfg.Projects))
+	for _, p := range cfg.Projects {
+		fmt.Printf("    • %s  [label: %s]  %d repo(s)\n", p.Key, p.Label, len(p.Repos))
+	}
 }
 
 func printTicketResult(r *jira.TicketResult) {

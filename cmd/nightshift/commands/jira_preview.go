@@ -91,7 +91,7 @@ type jiraPreviewSkipped struct {
 }
 
 func runJiraPreview(cmd *cobra.Command, _ []string) error {
-	projectOverride, _ := cmd.Flags().GetString("project")
+	projectFilter, _ := cmd.Flags().GetString("project")
 	labelOverride, _ := cmd.Flags().GetString("label")
 	jsonOutput, _ := cmd.Flags().GetBool("json")
 	plainOutput, _ := cmd.Flags().GetBool("plain")
@@ -105,11 +105,32 @@ func runJiraPreview(cmd *cobra.Command, _ []string) error {
 	}
 	cfg.Jira.Defaults()
 
-	if projectOverride != "" {
-		cfg.Jira.Project = projectOverride
-	}
+	// Apply --label override to all projects.
 	if labelOverride != "" {
-		cfg.Jira.Label = labelOverride
+		for i := range cfg.Jira.Projects {
+			cfg.Jira.Projects[i].Label = labelOverride
+		}
+	}
+
+	// Filter projects with --project flag.
+	projects := cfg.Jira.Projects
+	if projectFilter != "" {
+		var filtered []jira.ProjectConfig
+		for _, p := range projects {
+			if strings.EqualFold(p.Key, projectFilter) {
+				filtered = append(filtered, p)
+			}
+		}
+		if len(filtered) == 0 {
+			return fmt.Errorf("no project with key %q found in config", projectFilter)
+		}
+		projects = filtered
+	}
+
+	// Build comma-joined project keys for display/JSON.
+	keys := make([]string, len(projects))
+	for i, p := range projects {
+		keys[i] = p.Key
 	}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -117,7 +138,7 @@ func runJiraPreview(cmd *cobra.Command, _ []string) error {
 
 	result := &jiraPreviewResult{
 		GeneratedAt: time.Now(),
-		JiraProject: cfg.Jira.Project,
+		JiraProject: strings.Join(keys, ", "),
 		Phases: []jiraPreviewPhase{
 			{Name: "validation", Provider: cfg.Jira.Validation.Provider, Model: cfg.Jira.Validation.Model, Timeout: cfg.Jira.Validation.Timeout},
 			{Name: "plan", Provider: cfg.Jira.Plan.Provider, Model: cfg.Jira.Plan.Model, Timeout: cfg.Jira.Plan.Timeout},
@@ -126,7 +147,7 @@ func runJiraPreview(cmd *cobra.Command, _ []string) error {
 		},
 	}
 
-	// Optionally prepare the validation agent up front.
+	// Optionally prepare the validation agent up front (uses global validation config).
 	var valAgent agents.Agent
 	if runValidate {
 		a, agentErr := createJiraAgent(cfg, cfg.Jira.Validation)
@@ -151,7 +172,7 @@ func runJiraPreview(cmd *cobra.Command, _ []string) error {
 		result.JiraUser = cfg.Jira.Email
 	}
 
-	// Fetch tickets if connection succeeded.
+	// Fetch tickets from each project if connection succeeded.
 	if result.ConnectionOK {
 		statusMap, err := client.DiscoverStatuses(ctx)
 		if err != nil {
@@ -160,17 +181,19 @@ func runJiraPreview(cmd *cobra.Command, _ []string) error {
 				Reason: fmt.Sprintf("discover statuses: %v", err),
 			})
 		} else {
-			todoTickets, err := client.FetchTodoTickets(ctx)
-			if err != nil {
-				result.SkippedTickets = append(result.SkippedTickets, jiraPreviewSkipped{
-					Key:    "*",
-					Reason: fmt.Sprintf("fetch todo tickets: %v", err),
-				})
-			} else {
-				inProgressTickets, ipErr := client.FetchInProgressTickets(ctx, statusMap)
+			for _, proj := range projects {
+				todoTickets, err := client.FetchTodoTickets(ctx, proj)
+				if err != nil {
+					result.SkippedTickets = append(result.SkippedTickets, jiraPreviewSkipped{
+						Key:    proj.Key + ":*",
+						Reason: fmt.Sprintf("fetch todo tickets: %v", err),
+					})
+					continue
+				}
+				inProgressTickets, ipErr := client.FetchInProgressTickets(ctx, proj, statusMap)
 				if ipErr != nil {
 					result.SkippedTickets = append(result.SkippedTickets, jiraPreviewSkipped{
-						Key:    "*",
+						Key:    proj.Key + ":*",
 						Reason: fmt.Sprintf("fetch in-progress tickets: %v", ipErr),
 					})
 				} else {
@@ -223,17 +246,17 @@ func runJiraPreview(cmd *cobra.Command, _ []string) error {
 						Blockers: bt.Blockers,
 					})
 				}
-			}
 
-			reviewTickets, err := client.FetchReviewTickets(ctx, statusMap)
-			if err != nil {
-				result.SkippedTickets = append(result.SkippedTickets, jiraPreviewSkipped{
-					Key:    "*review*",
-					Reason: fmt.Sprintf("fetch review tickets: %v", err),
-				})
-			} else {
-				for _, t := range reviewTickets {
-					result.ReviewTickets = append(result.ReviewTickets, buildJiraPreviewTicket(t))
+				reviewTickets, err := client.FetchReviewTickets(ctx, proj, statusMap)
+				if err != nil {
+					result.SkippedTickets = append(result.SkippedTickets, jiraPreviewSkipped{
+						Key:    proj.Key + ":*review*",
+						Reason: fmt.Sprintf("fetch review tickets: %v", err),
+					})
+				} else {
+					for _, t := range reviewTickets {
+						result.ReviewTickets = append(result.ReviewTickets, buildJiraPreviewTicket(t))
+					}
 				}
 			}
 		}
