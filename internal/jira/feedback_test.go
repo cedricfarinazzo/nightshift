@@ -41,7 +41,15 @@ func TestFilterNewComments(t *testing.T) {
 // ── buildReworkPrompt ─────────────────────────────────────────────────────────
 
 func TestBuildReworkPrompt(t *testing.T) {
-	ticket := Ticket{Key: "VC-10", Summary: "feedback loop"}
+	ticket := Ticket{
+		Key:                "VC-10",
+		Summary:            "feedback loop",
+		Description:        "Implement the PR feedback loop for review-fix.",
+		AcceptanceCriteria: "Agent addresses all reviewer comments.",
+		Comments: []Comment{
+			{Author: "alice", Body: "please also check edge cases"},
+		},
+	}
 	review := &PRReviewState{
 		URL:            "https://github.com/org/repo/pull/42",
 		ReviewDecision: "CHANGES_REQUESTED",
@@ -60,7 +68,14 @@ func TestBuildReworkPrompt(t *testing.T) {
 	prompt := buildReworkPrompt(ticket, review, repo)
 
 	mustContain := []string{
+		// Ticket context
 		"VC-10",
+		"feedback loop",                           // Summary
+		"Implement the PR feedback loop",          // Description
+		"Agent addresses all reviewer comments",   // AcceptanceCriteria
+		"please also check edge cases",            // Comment body
+		"alice",                                   // Comment author
+		// PR review context
 		"https://github.com/org/repo/pull/42",
 		"nightshift",
 		"feature/VC-10",
@@ -83,6 +98,31 @@ func TestBuildReworkPrompt(t *testing.T) {
 	// General comment without path must NOT appear as inline.
 	if strings.Contains(prompt, "general comment no path") {
 		t.Error("prompt should not include general comments in inline section")
+	}
+}
+
+func TestBuildReworkPrompt_NoAcceptanceCriteria(t *testing.T) {
+	ticket := Ticket{
+		Key:         "VC-10",
+		Summary:     "feedback loop",
+		Description: "Some description.",
+		// AcceptanceCriteria intentionally empty
+	}
+	review := &PRReviewState{
+		URL: "https://github.com/org/repo/pull/1",
+		Reviews: []Review{
+			{Author: "alice", State: "CHANGES_REQUESTED", Body: "fix it"},
+		},
+	}
+	repo := RepoWorkspace{Name: "nightshift", Branch: "feature/VC-10"}
+
+	prompt := buildReworkPrompt(ticket, review, repo)
+
+	if strings.Contains(prompt, "Acceptance Criteria") {
+		t.Error("prompt should not include Acceptance Criteria section when empty")
+	}
+	if !strings.Contains(prompt, "Some description.") {
+		t.Error("prompt missing Description")
 	}
 }
 
