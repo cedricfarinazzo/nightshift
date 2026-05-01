@@ -67,12 +67,13 @@ type Orchestrator struct {
 	log             *logging.Logger
 
 	// ops are injectable for testing; set to real functions by NewOrchestrator.
-	fnHasChanges    func(ctx context.Context, repoPath string) (bool, error)
-	fnCommitAndPush func(ctx context.Context, repoPath, message string) error
-	fnCreatePR      func(ctx context.Context, repo RepoWorkspace, ticket Ticket, jiraSite string) (*PRInfo, error)
-	fnFindPR        func(ctx context.Context, repoPath, branch string) (*PRInfo, error)
-	fnFetchReviews  func(ctx context.Context, repoPath, prURL string) (*PRReviewState, error)
-	fnPostPRComment func(ctx context.Context, repoPath, prURL, body string) error
+	fnHasChanges        func(ctx context.Context, repoPath string) (bool, error)
+	fnCommitAndPush     func(ctx context.Context, repoPath, message string) error
+	fnCreatePR          func(ctx context.Context, repo RepoWorkspace, ticket Ticket, jiraSite string) (*PRInfo, error)
+	fnFindPR            func(ctx context.Context, repoPath, branch string) (*PRInfo, error)
+	fnFetchReviews      func(ctx context.Context, repoPath, prURL string) (*PRReviewState, error)
+	fnPostPRComment     func(ctx context.Context, repoPath, prURL, body string) error
+	fnBranchAheadOfBase func(ctx context.Context, repoPath, branch, base string) (bool, error)
 }
 
 // OrchestratorOption configures an Orchestrator.
@@ -129,6 +130,7 @@ func NewOrchestrator(client *Client, cfg JiraConfig, opts ...OrchestratorOption)
 			_, err := ghExec(ctx, repoPath, "pr", "comment", prURL, "--body", body)
 			return err
 		},
+		fnBranchAheadOfBase: BranchAheadOfBase,
 	}
 	for _, opt := range opts {
 		opt(o)
@@ -252,6 +254,9 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 			return err
 		}
 	}
+	if o.fnBranchAheadOfBase == nil {
+		o.fnBranchAheadOfBase = BranchAheadOfBase
+	}
 
 	start := time.Now()
 	result := &TicketResult{TicketKey: ticket.Key}
@@ -308,6 +313,7 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 				result.Error = err.Error()
 				result.Duration = time.Since(start)
 				o.log.Errorf("ticket %s: validation failed: %v", ticket.Key, err)
+				o.notifyPhase(ticket.Key, PhaseValidate, true)
 				return result, nil
 			}
 			if !vr.Valid {
@@ -318,6 +324,7 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 				result.Summary = fmt.Sprintf("rejected: score %d/10", vr.Score)
 				result.Duration = time.Since(start)
 				o.log.Infof("ticket %s rejected (score %d/10)", ticket.Key, vr.Score)
+				o.notifyPhase(ticket.Key, PhaseValidate, true)
 				return result, nil
 			}
 			o.postPhaseComment(ctx, ticket.Key, CommentValidation,
@@ -333,8 +340,10 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 			result.Status = TicketFailed
 			result.Error = err.Error()
 			result.Duration = time.Since(start)
+			o.notifyPhase(ticket.Key, PhaseValidate, true)
 			return result, nil
 		}
+		o.notifyPhase(ticket.Key, PhaseValidate, true)
 	}
 
 	// Phase 2: Plan
@@ -354,12 +363,14 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 			result.Error = err.Error()
 			result.Duration = time.Since(start)
 			o.log.Errorf("ticket %s: plan failed: %v", ticket.Key, err)
+			o.notifyPhase(ticket.Key, PhasePlan, true)
 			return result, nil
 		}
 		result.Plan = planResult.Output
 		o.emit("📝 posting plan to Jira %s", ticket.Key)
 		o.postPhaseComment(ctx, ticket.Key, CommentPlan, planResult.Output, time.Since(planStart))
 		o.log.Infof("ticket %s: plan complete", ticket.Key)
+		o.notifyPhase(ticket.Key, PhasePlan, true)
 	}
 
 	// Phase 3: Implement
@@ -385,12 +396,14 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 			result.Error = err.Error()
 			result.Duration = time.Since(start)
 			o.log.Errorf("ticket %s: implement failed: %v", ticket.Key, err)
+			o.notifyPhase(ticket.Key, PhaseImplement, true)
 			return result, nil
 		}
 		result.ImplementationSummary = implResult.Output
 		o.emit("📝 posting implementation summary to Jira %s", ticket.Key)
 		o.postPhaseComment(ctx, ticket.Key, CommentImplement, implResult.Output, time.Since(implStart))
 		o.log.Infof("ticket %s: implementation complete", ticket.Key)
+		o.notifyPhase(ticket.Key, PhaseImplement, true)
 	}
 
 	// Phase 4: Commit
@@ -398,6 +411,7 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 		result.Phase = PhaseCommit
 		o.notifyPhase(ticket.Key, PhaseCommit, false)
 		var changedRepos []RepoWorkspace
+		var skippedRepos []RepoWorkspace // repos with no uncommitted changes
 		if ws != nil {
 			for _, repo := range ws.Repos {
 				changed, err := o.fnHasChanges(ctx, repo.Path)
@@ -406,6 +420,7 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 					result.Status = TicketFailed
 					result.Error = err.Error()
 					result.Duration = time.Since(start)
+					o.notifyPhase(ticket.Key, PhaseCommit, true)
 					return result, nil
 				}
 				if !changed {
@@ -414,6 +429,7 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 					// changes in this repo too, we silently skip it here. Enforcement
 					// (fail-fast when expected repos are untouched) is deferred to a
 					// follow-up ticket.
+					skippedRepos = append(skippedRepos, repo)
 					continue
 				}
 				msg := CommitMessage(ticket.Key, "", ticket.Summary)
@@ -423,9 +439,32 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 					result.Status = TicketFailed
 					result.Error = err.Error()
 					result.Duration = time.Since(start)
+					o.notifyPhase(ticket.Key, PhaseCommit, true)
 					return result, nil
 				}
 				changedRepos = append(changedRepos, repo)
+			}
+		}
+		o.notifyPhase(ticket.Key, PhaseCommit, true)
+
+		// Recovery pass: a repo with no uncommitted changes may have been committed and pushed
+		// in a prior run that crashed before the CommentPR was posted. If the branch is ahead
+		// of its base on the remote, treat it as if it was committed in this run so the PR
+		// creation loop can create or recover the PR.
+		var recoveredRepos []RepoWorkspace
+		for _, repo := range skippedRepos {
+			ahead, err := o.fnBranchAheadOfBase(ctx, repo.Path, repo.Branch, repo.BaseBranch)
+			if err != nil {
+				o.postErrorComment(ctx, ticket.Key, PhaseCommit, err)
+				result.Status = TicketFailed
+				result.Error = err.Error()
+				result.Duration = time.Since(start)
+				o.log.Errorf("ticket %s: branch-ahead check for %s: %v", ticket.Key, repo.Name, err)
+				return result, nil
+			}
+			if ahead {
+				o.emit("  branch %s already pushed — recovering PR creation", repo.Branch)
+				recoveredRepos = append(recoveredRepos, repo)
 			}
 		}
 
@@ -438,6 +477,9 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 			url  string
 		}
 		var repoPRs []repoPR
+
+		// Repos committed in this run: create or update the PR via fnCreatePR (which
+		// already handles deduplication internally via findExistingPR).
 		for _, repo := range changedRepos {
 			o.emit("  creating PR for %s (%s → %s)", repo.Name, repo.Branch, repo.BaseBranch)
 			prInfo, err := o.fnCreatePR(ctx, repo, ticket, o.cfg.Site)
@@ -446,12 +488,44 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 				result.Status = TicketFailed
 				result.Error = err.Error()
 				result.Duration = time.Since(start)
+				o.notifyPhase(ticket.Key, PhasePR, true)
 				return result, nil
 			}
 			o.emit("  ✓ PR created: %s", prInfo.URL)
 			result.PRURLs = append(result.PRURLs, prInfo.URL)
 			repoPRs = append(repoPRs, repoPR{repo: repo, url: prInfo.URL})
 		}
+
+		// Recovered repos: check for an existing open PR first to avoid duplicates.
+		for _, repo := range recoveredRepos {
+			existing, err := o.fnFindPR(ctx, repo.Path, repo.Branch)
+			if err != nil {
+				o.postErrorComment(ctx, ticket.Key, PhasePR, err)
+				result.Status = TicketFailed
+				result.Error = err.Error()
+				result.Duration = time.Since(start)
+				return result, nil
+			}
+			if existing != nil {
+				o.emit("  PR already exists for %s: %s", repo.Name, existing.URL)
+				result.PRURLs = append(result.PRURLs, existing.URL)
+				repoPRs = append(repoPRs, repoPR{repo: repo, url: existing.URL})
+			} else {
+				o.emit("  creating PR for %s (%s → %s)", repo.Name, repo.Branch, repo.BaseBranch)
+				prInfo, err := o.fnCreatePR(ctx, repo, ticket, o.cfg.Site)
+				if err != nil {
+					o.postErrorComment(ctx, ticket.Key, PhasePR, err)
+					result.Status = TicketFailed
+					result.Error = err.Error()
+					result.Duration = time.Since(start)
+					return result, nil
+				}
+				o.emit("  ✓ PR created: %s", prInfo.URL)
+				result.PRURLs = append(result.PRURLs, prInfo.URL)
+				repoPRs = append(repoPRs, repoPR{repo: repo, url: prInfo.URL})
+			}
+		}
+
 		if len(result.PRURLs) > 0 {
 			o.emit("📝 posting PR links to Jira %s", ticket.Key)
 			o.postPhaseComment(ctx, ticket.Key, CommentPR,
@@ -468,6 +542,7 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 				}
 			}
 		}
+		o.notifyPhase(ticket.Key, PhasePR, true)
 	} else if skip(PhaseCommit) && !skip(PhaseStatus) {
 		// Resuming at PhaseStatus: scan workspace repos for open PRs and merge with
 		// any URLs recovered from comments, deduplicating to avoid duplicates when
@@ -500,8 +575,10 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 			result.Status = TicketFailed
 			result.Error = err.Error()
 			result.Duration = time.Since(start)
+			o.notifyPhase(ticket.Key, PhaseStatus, true)
 			return result, nil
 		}
+		o.notifyPhase(ticket.Key, PhaseStatus, true)
 	}
 
 	result.Status = TicketCompleted

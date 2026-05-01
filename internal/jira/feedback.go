@@ -33,6 +33,8 @@ func (o *Orchestrator) ProcessFeedback(ctx context.Context, ticket Ticket, ws *W
 	}
 	if o.fnHasChanges == nil {
 		o.fnHasChanges = HasChanges
+	}
+	if o.fnCommitAndPush == nil {
 		o.fnCommitAndPush = CommitAndPush
 	}
 	if o.fnFindPR == nil {

@@ -3,6 +3,7 @@ package jira
 import (
 	"context"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -660,6 +661,7 @@ func TestProcessTicket_CommitPhase_NoChanges(t *testing.T) {
 	sc := &stubJiraClient{}
 	o, ws := makeOrchestratorWithRepo(sc)
 	o.fnHasChanges = func(_ context.Context, _ string) (bool, error) { return false, nil }
+	o.fnBranchAheadOfBase = func(_ context.Context, _, _, _ string) (bool, error) { return false, nil }
 	o.fnCommitAndPush = func(_ context.Context, _, _ string) error { t.Error("CommitAndPush called unexpectedly"); return nil }
 	o.fnCreatePR = func(_ context.Context, _ RepoWorkspace, _ Ticket, _ string) (*PRInfo, error) {
 		t.Error("CreateOrUpdatePR called unexpectedly")
@@ -694,6 +696,39 @@ func TestProcessTicket_CommitPhase_HasChangesError(t *testing.T) {
 	}
 	if result.Phase != PhaseCommit {
 		t.Errorf("Phase = %q, want %q", result.Phase, PhaseCommit)
+	}
+}
+
+func TestProcessTicket_CommitPhase_BranchAheadError(t *testing.T) {
+	sc := &stubJiraClient{}
+	o, ws := makeOrchestratorWithRepo(sc)
+	o.fnHasChanges = func(_ context.Context, _ string) (bool, error) { return false, nil }
+	o.fnBranchAheadOfBase = func(_ context.Context, _, _, _ string) (bool, error) {
+		return false, errors.New("git branch-ahead check failed")
+	}
+	o.fnCommitAndPush = func(_ context.Context, _, _ string) error {
+		t.Error("CommitAndPush should not be called when HasChanges=false")
+		return nil
+	}
+
+	result, err := o.ProcessTicket(context.Background(), Ticket{Key: "T-1", Summary: "Test"}, ws)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Status != TicketFailed {
+		t.Errorf("Status = %q, want %q", result.Status, TicketFailed)
+	}
+	if result.Phase != PhaseCommit {
+		t.Errorf("Phase = %q, want %q", result.Phase, PhaseCommit)
+	}
+	hasErrorComment := false
+	for _, c := range sc.postCommentCalls {
+		if c.Type == CommentError {
+			hasErrorComment = true
+		}
+	}
+	if !hasErrorComment {
+		t.Error("expected error comment to be posted")
 	}
 }
 
@@ -768,6 +803,159 @@ func TestProcessTicket_PRPhase_Success(t *testing.T) {
 	}
 	if !hasPRComment {
 		t.Error("expected PR comment to be posted")
+	}
+}
+
+// ── PhaseCommit resume tests ──────────────────────────────────────────────────
+
+// makeResumeAtCommitOrchestrator builds a minimal Orchestrator and Workspace configured
+// to resume at PhaseCommit (ticket already has CommentImplement). The caller should set
+// fnHasChanges, fnBranchAheadOfBase, fnFindPR, and fnCreatePR as needed.
+func makeResumeAtCommitOrchestrator(sc jiraClient) (*Orchestrator, *Workspace, Ticket) {
+	ticket := Ticket{
+		Key:     "RC-1",
+		Summary: "Resume commit test",
+		Comments: []Comment{
+			nightshiftComment(CommentValidation, "Ticket validated (score 8/10)."),
+			nightshiftComment(CommentPlan, "Step 1: do the thing."),
+			nightshiftComment(CommentImplement, "Implementation complete."),
+		},
+	}
+	ws := &Workspace{
+		TicketKey: "RC-1",
+		Repos:     []RepoWorkspace{{Name: "repo", Path: "/fake/repo", Branch: "feature/RC-1", BaseBranch: "main"}},
+	}
+	o := &Orchestrator{
+		client:          sc,
+		cfg:             JiraConfig{},
+		implAgent:       &stubAgent{name: "impl", output: "impl output"},
+		validationAgent: &stubAgent{name: "va", output: `{"valid": true, "score": 8}`},
+		fnPostPRComment: func(_ context.Context, _, _, _ string) error { return nil },
+		fnFetchReviews:  func(_ context.Context, _, _ string) (*PRReviewState, error) { return nil, nil },
+	}
+	return o, ws, ticket
+}
+
+// TestProcessTicket_ResumeAtPhaseCommit_BranchAhead_PRCreated verifies that when resuming
+// at PhaseCommit with no uncommitted changes but a branch already ahead of base on the remote,
+// a new PR is created and the CommentPR is posted to Jira.
+func TestProcessTicket_ResumeAtPhaseCommit_BranchAhead_PRCreated(t *testing.T) {
+	sc := &stubJiraClient{}
+	o, ws, ticket := makeResumeAtCommitOrchestrator(sc)
+
+	o.fnHasChanges = func(_ context.Context, _ string) (bool, error) { return false, nil }
+	o.fnBranchAheadOfBase = func(_ context.Context, _, _, _ string) (bool, error) { return true, nil }
+	o.fnFindPR = func(_ context.Context, _, _ string) (*PRInfo, error) { return nil, nil }
+	createPRCalls := 0
+	o.fnCreatePR = func(_ context.Context, _ RepoWorkspace, _ Ticket, _ string) (*PRInfo, error) {
+		createPRCalls++
+		return &PRInfo{URL: "https://github.com/org/repo/pull/42", Number: 42, IsNew: true}, nil
+	}
+	o.fnCommitAndPush = func(_ context.Context, _, _ string) error {
+		t.Error("CommitAndPush should not be called when HasChanges=false")
+		return nil
+	}
+
+	result, err := o.ProcessTicket(context.Background(), ticket, ws)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Status != TicketCompleted {
+		t.Errorf("Status = %q, want %q", result.Status, TicketCompleted)
+	}
+	if len(result.PRURLs) != 1 || result.PRURLs[0] != "https://github.com/org/repo/pull/42" {
+		t.Errorf("PRURLs = %v, want one URL", result.PRURLs)
+	}
+	if createPRCalls != 1 {
+		t.Errorf("fnCreatePR called %d times, want 1", createPRCalls)
+	}
+	hasPRComment := false
+	for _, c := range sc.postCommentCalls {
+		if c.Type == CommentPR {
+			hasPRComment = true
+		}
+	}
+	if !hasPRComment {
+		t.Error("expected CommentPR to be posted to Jira")
+	}
+}
+
+// TestProcessTicket_ResumeAtPhaseCommit_BranchAhead_ExistingPR verifies that when an open PR
+// already exists for the branch, its URL is recorded without calling fnCreatePR.
+func TestProcessTicket_ResumeAtPhaseCommit_BranchAhead_ExistingPR(t *testing.T) {
+	sc := &stubJiraClient{}
+	o, ws, ticket := makeResumeAtCommitOrchestrator(sc)
+
+	o.fnHasChanges = func(_ context.Context, _ string) (bool, error) { return false, nil }
+	o.fnBranchAheadOfBase = func(_ context.Context, _, _, _ string) (bool, error) { return true, nil }
+	o.fnFindPR = func(_ context.Context, _, _ string) (*PRInfo, error) {
+		return &PRInfo{URL: "https://github.com/org/repo/pull/42", Number: 42}, nil
+	}
+	o.fnCreatePR = func(_ context.Context, _ RepoWorkspace, _ Ticket, _ string) (*PRInfo, error) {
+		t.Error("fnCreatePR must not be called when open PR already exists")
+		return nil, nil
+	}
+	o.fnCommitAndPush = func(_ context.Context, _, _ string) error {
+		t.Error("CommitAndPush should not be called when HasChanges=false")
+		return nil
+	}
+
+	result, err := o.ProcessTicket(context.Background(), ticket, ws)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Status != TicketCompleted {
+		t.Errorf("Status = %q, want %q", result.Status, TicketCompleted)
+	}
+	if len(result.PRURLs) != 1 || result.PRURLs[0] != "https://github.com/org/repo/pull/42" {
+		t.Errorf("PRURLs = %v, want existing PR URL", result.PRURLs)
+	}
+	hasPRComment := false
+	for _, c := range sc.postCommentCalls {
+		if c.Type == CommentPR {
+			hasPRComment = true
+		}
+	}
+	if !hasPRComment {
+		t.Error("expected CommentPR to be posted to Jira")
+	}
+}
+
+// TestProcessTicket_ResumeAtPhaseCommit_BranchNotAhead_NoPR verifies the genuine no-op case:
+// when HasChanges=false and the branch is not ahead of base, no PR is created.
+func TestProcessTicket_ResumeAtPhaseCommit_BranchNotAhead_NoPR(t *testing.T) {
+	sc := &stubJiraClient{}
+	o, ws, ticket := makeResumeAtCommitOrchestrator(sc)
+
+	o.fnHasChanges = func(_ context.Context, _ string) (bool, error) { return false, nil }
+	o.fnBranchAheadOfBase = func(_ context.Context, _, _, _ string) (bool, error) { return false, nil }
+	o.fnFindPR = func(_ context.Context, _, _ string) (*PRInfo, error) {
+		t.Error("fnFindPR must not be called when branch is not ahead")
+		return nil, nil
+	}
+	o.fnCreatePR = func(_ context.Context, _ RepoWorkspace, _ Ticket, _ string) (*PRInfo, error) {
+		t.Error("fnCreatePR must not be called when branch is not ahead")
+		return nil, nil
+	}
+	o.fnCommitAndPush = func(_ context.Context, _, _ string) error {
+		t.Error("CommitAndPush should not be called when HasChanges=false")
+		return nil
+	}
+
+	result, err := o.ProcessTicket(context.Background(), ticket, ws)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Status != TicketCompleted {
+		t.Errorf("Status = %q, want %q", result.Status, TicketCompleted)
+	}
+	if len(result.PRURLs) != 0 {
+		t.Errorf("PRURLs = %v, want empty (genuine no-op)", result.PRURLs)
+	}
+	for _, c := range sc.postCommentCalls {
+		if c.Type == CommentPR {
+			t.Error("CommentPR should not be posted when no PRs were created")
+		}
 	}
 }
 
@@ -1170,4 +1358,374 @@ func TestValidationCommentMetadataMatchesPhase(t *testing.T) {
 			t.Errorf("comment[%d] metadata = %s/%s, want claude/claude-haiku-4.5", i, c.Provider, c.Model)
 		}
 	}
+}
+
+// ── WithPhaseCallback contract tests ──────────────────────────────────────────
+
+type phaseCall struct {
+	phase Phase
+	done  bool
+}
+
+func collectPhaseCalls() (func(string, Phase, bool), *[]phaseCall) {
+	var calls []phaseCall
+	return func(_ string, p Phase, d bool) {
+		calls = append(calls, phaseCall{p, d})
+	}, &calls
+}
+
+func assertPhaseCallPairs(t *testing.T, got []phaseCall, wantPhases []Phase) {
+	t.Helper()
+	var want []phaseCall
+	for _, p := range wantPhases {
+		want = append(want, phaseCall{p, false}, phaseCall{p, true})
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("phase callbacks\ngot:  %v\nwant: %v", got, want)
+	}
+}
+
+func newPhaseCallbackOrchestrator(cb func(string, Phase, bool)) *Orchestrator {
+	sc := &stubJiraClient{}
+	va := &stubAgent{
+		name:   "validator",
+		output: `{"valid": true, "score": 8, "issues": [], "missing": [], "suggestions": []}`,
+	}
+	ia := &stubAgent{name: "impl", output: "output"}
+	o := &Orchestrator{
+		client:          sc,
+		cfg:             JiraConfig{},
+		validationAgent: va,
+		implAgent:       ia,
+		onPhase:         cb,
+	}
+	return o
+}
+
+func TestPhaseCallback_HappyPath(t *testing.T) {
+	cb, calls := collectPhaseCalls()
+	o := newPhaseCallbackOrchestrator(cb)
+	ticket := Ticket{Key: "T-CB1", Summary: "cb test"}
+	ws := &Workspace{TicketKey: "T-CB1"} // no repos — Commit/PR still fire but do no work
+
+	_, err := o.ProcessTicket(context.Background(), ticket, ws)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// All 6 phases fire even with no repos; Commit/PR have nothing to commit/push/create.
+	assertPhaseCallPairs(t, *calls, []Phase{PhaseValidate, PhasePlan, PhaseImplement, PhaseCommit, PhasePR, PhaseStatus})
+}
+
+func TestPhaseCallback_HappyPath_WithCommitAndPR(t *testing.T) {
+	cb, calls := collectPhaseCalls()
+	sc := &stubJiraClient{}
+	va := &stubAgent{output: `{"valid": true, "score": 8, "issues": [], "missing": [], "suggestions": []}`}
+	ia := &stubAgent{name: "impl", output: "output"}
+	o := &Orchestrator{
+		client:          sc,
+		cfg:             JiraConfig{},
+		validationAgent: va,
+		implAgent:       ia,
+		onPhase:         cb,
+		fnHasChanges:    func(_ context.Context, _ string) (bool, error) { return true, nil },
+		fnCommitAndPush: func(_ context.Context, _, _ string) error { return nil },
+		fnCreatePR: func(_ context.Context, _ RepoWorkspace, _ Ticket, _ string) (*PRInfo, error) {
+			return &PRInfo{URL: "https://github.com/org/repo/pull/1"}, nil
+		},
+		fnFindPR:        func(_ context.Context, _, _ string) (*PRInfo, error) { return nil, nil },
+		fnFetchReviews:  func(_ context.Context, _, _ string) (*PRReviewState, error) { return nil, nil },
+		fnPostPRComment: func(_ context.Context, _, _, _ string) error { return nil },
+	}
+	ticket := Ticket{Key: "T-CB2", Summary: "with commit and PR"}
+	ws := &Workspace{
+		TicketKey: "T-CB2",
+		Repos:     []RepoWorkspace{{Name: "repo", Path: "/tmp", Branch: "feature/T-CB2", BaseBranch: "main"}},
+	}
+
+	_, err := o.ProcessTicket(context.Background(), ticket, ws)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	assertPhaseCallPairs(t, *calls, []Phase{PhaseValidate, PhasePlan, PhaseImplement, PhaseCommit, PhasePR, PhaseStatus})
+}
+
+func TestPhaseCallback_ValidationError(t *testing.T) {
+	cb, calls := collectPhaseCalls()
+	sc := &stubJiraClient{}
+	va := &stubAgent{name: "validator", err: errors.New("agent timeout")}
+	ia := &stubAgent{name: "impl"}
+	o := &Orchestrator{
+		client:          sc,
+		cfg:             JiraConfig{},
+		validationAgent: va,
+		implAgent:       ia,
+		onPhase:         cb,
+	}
+
+	_, err := o.ProcessTicket(context.Background(), Ticket{Key: "T-CB3"}, &Workspace{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	assertPhaseCallPairs(t, *calls, []Phase{PhaseValidate})
+}
+
+func TestPhaseCallback_ValidationReject(t *testing.T) {
+	cb, calls := collectPhaseCalls()
+	sc := &stubJiraClient{}
+	va := &stubAgent{
+		name:   "validator",
+		output: `{"valid": false, "score": 3, "issues": ["no AC"], "missing": [], "suggestions": []}`,
+	}
+	ia := &stubAgent{name: "impl"}
+	o := &Orchestrator{
+		client:          sc,
+		cfg:             JiraConfig{},
+		validationAgent: va,
+		implAgent:       ia,
+		onPhase:         cb,
+	}
+
+	_, err := o.ProcessTicket(context.Background(), Ticket{Key: "T-CB4"}, &Workspace{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	assertPhaseCallPairs(t, *calls, []Phase{PhaseValidate})
+}
+
+func TestPhaseCallback_PlanError(t *testing.T) {
+	cb, calls := collectPhaseCalls()
+	sc := &stubJiraClient{}
+	va := &stubAgent{output: `{"valid": true, "score": 8, "issues": [], "missing": [], "suggestions": []}`}
+	// implAgent always errors, so the plan phase fails immediately
+	ia := &stubAgent{name: "impl", err: errors.New("plan failed")}
+	o := &Orchestrator{
+		client:          sc,
+		cfg:             JiraConfig{},
+		validationAgent: va,
+		implAgent:       ia,
+		onPhase:         cb,
+	}
+
+	_, err := o.ProcessTicket(context.Background(), Ticket{Key: "T-CB5"}, &Workspace{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	assertPhaseCallPairs(t, *calls, []Phase{PhaseValidate, PhasePlan})
+}
+
+func TestPhaseCallback_ImplementError(t *testing.T) {
+	cb, calls := collectPhaseCalls()
+	sc := &stubJiraClient{}
+	va := &stubAgent{output: `{"valid": true, "score": 8, "issues": [], "missing": [], "suggestions": []}`}
+
+	callCount := 0
+	ia := &stubAgentFunc{
+		fn: func(opts agents.ExecuteOptions) (*agents.ExecuteResult, error) {
+			callCount++
+			if callCount == 1 {
+				// plan phase succeeds
+				return &agents.ExecuteResult{Output: "plan output"}, nil
+			}
+			// implement phase fails
+			return nil, errors.New("impl failed")
+		},
+	}
+	o := &Orchestrator{
+		client:          sc,
+		cfg:             JiraConfig{},
+		validationAgent: va,
+		implAgent:       ia,
+		onPhase:         cb,
+	}
+
+	_, err := o.ProcessTicket(context.Background(), Ticket{Key: "T-CB6"}, &Workspace{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	assertPhaseCallPairs(t, *calls, []Phase{PhaseValidate, PhasePlan, PhaseImplement})
+}
+
+func TestPhaseCallback_CommitError(t *testing.T) {
+	cb, calls := collectPhaseCalls()
+	sc := &stubJiraClient{}
+	va := &stubAgent{output: `{"valid": true, "score": 8, "issues": [], "missing": [], "suggestions": []}`}
+	ia := &stubAgent{name: "impl", output: "output"}
+	o := &Orchestrator{
+		client:          sc,
+		cfg:             JiraConfig{},
+		validationAgent: va,
+		implAgent:       ia,
+		onPhase:         cb,
+		fnHasChanges:    func(_ context.Context, _ string) (bool, error) { return false, errors.New("git error") },
+		fnCommitAndPush: func(_ context.Context, _, _ string) error { return nil },
+		fnCreatePR: func(_ context.Context, _ RepoWorkspace, _ Ticket, _ string) (*PRInfo, error) {
+			return &PRInfo{URL: "u"}, nil
+		},
+		fnFindPR:        func(_ context.Context, _, _ string) (*PRInfo, error) { return nil, nil },
+		fnFetchReviews:  func(_ context.Context, _, _ string) (*PRReviewState, error) { return nil, nil },
+		fnPostPRComment: func(_ context.Context, _, _, _ string) error { return nil },
+	}
+	ticket := Ticket{Key: "T-CB7", Summary: "commit error"}
+	ws := &Workspace{
+		TicketKey: "T-CB7",
+		Repos:     []RepoWorkspace{{Name: "repo", Path: "/tmp", Branch: "feature/T-CB7", BaseBranch: "main"}},
+	}
+
+	_, err := o.ProcessTicket(context.Background(), ticket, ws)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	assertPhaseCallPairs(t, *calls, []Phase{PhaseValidate, PhasePlan, PhaseImplement, PhaseCommit})
+}
+
+func TestPhaseCallback_PRError(t *testing.T) {
+	cb, calls := collectPhaseCalls()
+	sc := &stubJiraClient{}
+	va := &stubAgent{output: `{"valid": true, "score": 8, "issues": [], "missing": [], "suggestions": []}`}
+	ia := &stubAgent{name: "impl", output: "output"}
+	o := &Orchestrator{
+		client:          sc,
+		cfg:             JiraConfig{},
+		validationAgent: va,
+		implAgent:       ia,
+		onPhase:         cb,
+		fnHasChanges:    func(_ context.Context, _ string) (bool, error) { return true, nil },
+		fnCommitAndPush: func(_ context.Context, _, _ string) error { return nil },
+		fnCreatePR: func(_ context.Context, _ RepoWorkspace, _ Ticket, _ string) (*PRInfo, error) {
+			return nil, errors.New("PR creation failed")
+		},
+		fnFindPR:        func(_ context.Context, _, _ string) (*PRInfo, error) { return nil, nil },
+		fnFetchReviews:  func(_ context.Context, _, _ string) (*PRReviewState, error) { return nil, nil },
+		fnPostPRComment: func(_ context.Context, _, _, _ string) error { return nil },
+	}
+	ticket := Ticket{Key: "T-CB8", Summary: "PR error"}
+	ws := &Workspace{
+		TicketKey: "T-CB8",
+		Repos:     []RepoWorkspace{{Name: "repo", Path: "/tmp", Branch: "feature/T-CB8", BaseBranch: "main"}},
+	}
+
+	_, err := o.ProcessTicket(context.Background(), ticket, ws)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	assertPhaseCallPairs(t, *calls, []Phase{PhaseValidate, PhasePlan, PhaseImplement, PhaseCommit, PhasePR})
+}
+
+func TestPhaseCallback_StatusError(t *testing.T) {
+	cb, calls := collectPhaseCalls()
+	sc := &stubJiraClient{transitionErr: errors.New("transition failed")}
+	va := &stubAgent{output: `{"valid": true, "score": 8, "issues": [], "missing": [], "suggestions": []}`}
+	ia := &stubAgent{name: "impl", output: "output"}
+	o := &Orchestrator{
+		client:          sc,
+		cfg:             JiraConfig{},
+		validationAgent: va,
+		implAgent:       ia,
+		onPhase:         cb,
+	}
+	ticket := Ticket{Key: "T-CB9"}
+	ws := &Workspace{TicketKey: "T-CB9"} // no repos
+
+	_, err := o.ProcessTicket(context.Background(), ticket, ws)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// transitionErr affects both TransitionToInProgress (PhaseValidate) and TransitionToReview (PhaseStatus).
+	// PhaseValidate will fail, so only Validate fires.
+	assertPhaseCallPairs(t, *calls, []Phase{PhaseValidate})
+}
+
+func TestPhaseCallback_StatusError_OnlyStatus(t *testing.T) {
+	cb, calls := collectPhaseCalls()
+	// Use a client where only TransitionToReview fails.
+	sc := &stubJiraClientSelectiveErr{reviewErr: errors.New("review transition failed")}
+	va := &stubAgent{output: `{"valid": true, "score": 8, "issues": [], "missing": [], "suggestions": []}`}
+	ia := &stubAgent{name: "impl", output: "output"}
+	o := &Orchestrator{
+		client:          sc,
+		cfg:             JiraConfig{},
+		validationAgent: va,
+		implAgent:       ia,
+		onPhase:         cb,
+	}
+	ticket := Ticket{Key: "T-CB10"}
+	ws := &Workspace{TicketKey: "T-CB10"} // no repos
+
+	_, err := o.ProcessTicket(context.Background(), ticket, ws)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// All 6 phases fire; Status fails but still emits done=true before returning.
+	assertPhaseCallPairs(t, *calls, []Phase{PhaseValidate, PhasePlan, PhaseImplement, PhaseCommit, PhasePR, PhaseStatus})
+}
+
+func TestPhaseCallback_ResumeSkipsPhases(t *testing.T) {
+	cb, calls := collectPhaseCalls()
+	sc := &stubJiraClient{}
+	ia := &stubAgent{name: "impl", output: "output"}
+	o := &Orchestrator{
+		client:          sc,
+		cfg:             JiraConfig{},
+		validationAgent: &stubAgent{output: `{"valid": true, "score": 8}`},
+		implAgent:       ia,
+		onPhase:         cb,
+	}
+	// Ticket already has validation and plan comments → resume starts at Implement.
+	ticket := Ticket{
+		Key: "T-CB11",
+		Comments: []Comment{
+			nightshiftComment(CommentValidation, "validated"),
+			nightshiftComment(CommentPlan, "the plan"),
+		},
+	}
+	ws := &Workspace{TicketKey: "T-CB11"} // no repos
+
+	_, err := o.ProcessTicket(context.Background(), ticket, ws)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Validate and Plan are skipped (no callbacks); Implement, Commit, PR, Status run.
+	assertPhaseCallPairs(t, *calls, []Phase{PhaseImplement, PhaseCommit, PhasePR, PhaseStatus})
+}
+
+// stubAgentFunc is a stub that delegates Execute to a function, for per-call
+// control over success/failure.
+type stubAgentFunc struct {
+	fn func(opts agents.ExecuteOptions) (*agents.ExecuteResult, error)
+}
+
+func (s *stubAgentFunc) Execute(_ context.Context, opts agents.ExecuteOptions) (*agents.ExecuteResult, error) {
+	return s.fn(opts)
+}
+
+func (s *stubAgentFunc) Name() string { return "stubAgentFunc" }
+
+// stubJiraClientSelectiveErr allows specifying errors for each transition independently.
+type stubJiraClientSelectiveErr struct {
+	postCommentCalls   []NightshiftComment
+	handleInvalidCalls []string
+	transitionCalls    []string
+
+	inProgressErr error
+	reviewErr     error
+}
+
+func (s *stubJiraClientSelectiveErr) PostComment(_ context.Context, _ string, comment NightshiftComment) error {
+	s.postCommentCalls = append(s.postCommentCalls, comment)
+	return nil
+}
+
+func (s *stubJiraClientSelectiveErr) HandleInvalidTicket(_ context.Context, ticketKey string, _ *ValidationResult) error {
+	s.handleInvalidCalls = append(s.handleInvalidCalls, ticketKey)
+	return nil
+}
+
+func (s *stubJiraClientSelectiveErr) TransitionToInProgress(_ context.Context, issueKey string) error {
+	s.transitionCalls = append(s.transitionCalls, "inprogress:"+issueKey)
+	return s.inProgressErr
+}
+
+func (s *stubJiraClientSelectiveErr) TransitionToReview(_ context.Context, issueKey string) error {
+	s.transitionCalls = append(s.transitionCalls, "review:"+issueKey)
+	return s.reviewErr
 }
