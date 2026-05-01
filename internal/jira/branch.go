@@ -2,8 +2,10 @@ package jira
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os/exec"
+	"strconv"
 	"strings"
 )
 
@@ -85,6 +87,53 @@ func setupBranch(ctx context.Context, repoPath, branchName, baseBranch string) (
 	// Case 3: branch is brand new — create from base branch.
 	if _, err = gitExec(ctx, repoPath, "checkout", "-b", branchName, "origin/"+baseBranch); err != nil {
 		return false, fmt.Errorf("git create branch %s from origin/%s: %w", branchName, baseBranch, err)
+	}
+	return true, nil
+}
+
+// BranchAheadOfBase reports whether branch has commits ahead of origin/base on the remote.
+// Returns (false, nil) when the remote ref for branch does not exist (branch not yet pushed)
+// or when there are no commits ahead. Returns an error for missing base refs or unexpected
+// git failures.
+func BranchAheadOfBase(ctx context.Context, repoPath, branch, base string) (bool, error) {
+	branchRef := "refs/remotes/origin/" + branch
+	baseRef := "refs/remotes/origin/" + base
+
+	branchExists, err := remoteRefExists(ctx, repoPath, branchRef)
+	if err != nil {
+		return false, err
+	}
+	if !branchExists {
+		return false, nil
+	}
+
+	baseExists, err := remoteRefExists(ctx, repoPath, baseRef)
+	if err != nil {
+		return false, err
+	}
+	if !baseExists {
+		return false, fmt.Errorf("git remote ref %s not found", baseRef)
+	}
+
+	out, err := gitExec(ctx, repoPath, "rev-list", "--count", baseRef+".."+branchRef)
+	if err != nil {
+		return false, err
+	}
+	count, err := strconv.Atoi(out)
+	if err != nil {
+		return false, fmt.Errorf("parse git rev-list count %q: %w", out, err)
+	}
+	return count > 0, nil
+}
+
+func remoteRefExists(ctx context.Context, repoPath, ref string) (bool, error) {
+	_, err := gitExec(ctx, repoPath, "rev-parse", "--verify", "--quiet", ref)
+	if err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
+			return false, nil
+		}
+		return false, err
 	}
 	return true, nil
 }
