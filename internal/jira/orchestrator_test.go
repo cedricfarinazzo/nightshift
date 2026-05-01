@@ -661,6 +661,7 @@ func TestProcessTicket_CommitPhase_NoChanges(t *testing.T) {
 	sc := &stubJiraClient{}
 	o, ws := makeOrchestratorWithRepo(sc)
 	o.fnHasChanges = func(_ context.Context, _ string) (bool, error) { return false, nil }
+	o.fnBranchAheadOfBase = func(_ context.Context, _, _, _ string) (bool, error) { return false, nil }
 	o.fnCommitAndPush = func(_ context.Context, _, _ string) error { t.Error("CommitAndPush called unexpectedly"); return nil }
 	o.fnCreatePR = func(_ context.Context, _ RepoWorkspace, _ Ticket, _ string) (*PRInfo, error) {
 		t.Error("CreateOrUpdatePR called unexpectedly")
@@ -695,6 +696,39 @@ func TestProcessTicket_CommitPhase_HasChangesError(t *testing.T) {
 	}
 	if result.Phase != PhaseCommit {
 		t.Errorf("Phase = %q, want %q", result.Phase, PhaseCommit)
+	}
+}
+
+func TestProcessTicket_CommitPhase_BranchAheadError(t *testing.T) {
+	sc := &stubJiraClient{}
+	o, ws := makeOrchestratorWithRepo(sc)
+	o.fnHasChanges = func(_ context.Context, _ string) (bool, error) { return false, nil }
+	o.fnBranchAheadOfBase = func(_ context.Context, _, _, _ string) (bool, error) {
+		return false, errors.New("git branch-ahead check failed")
+	}
+	o.fnCommitAndPush = func(_ context.Context, _, _ string) error {
+		t.Error("CommitAndPush should not be called when HasChanges=false")
+		return nil
+	}
+
+	result, err := o.ProcessTicket(context.Background(), Ticket{Key: "T-1", Summary: "Test"}, ws)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Status != TicketFailed {
+		t.Errorf("Status = %q, want %q", result.Status, TicketFailed)
+	}
+	if result.Phase != PhaseCommit {
+		t.Errorf("Phase = %q, want %q", result.Phase, PhaseCommit)
+	}
+	hasErrorComment := false
+	for _, c := range sc.postCommentCalls {
+		if c.Type == CommentError {
+			hasErrorComment = true
+		}
+	}
+	if !hasErrorComment {
+		t.Error("expected error comment to be posted")
 	}
 }
 
@@ -769,6 +803,159 @@ func TestProcessTicket_PRPhase_Success(t *testing.T) {
 	}
 	if !hasPRComment {
 		t.Error("expected PR comment to be posted")
+	}
+}
+
+// ── PhaseCommit resume tests ──────────────────────────────────────────────────
+
+// makeResumeAtCommitOrchestrator builds a minimal Orchestrator and Workspace configured
+// to resume at PhaseCommit (ticket already has CommentImplement). The caller should set
+// fnHasChanges, fnBranchAheadOfBase, fnFindPR, and fnCreatePR as needed.
+func makeResumeAtCommitOrchestrator(sc jiraClient) (*Orchestrator, *Workspace, Ticket) {
+	ticket := Ticket{
+		Key:     "RC-1",
+		Summary: "Resume commit test",
+		Comments: []Comment{
+			nightshiftComment(CommentValidation, "Ticket validated (score 8/10)."),
+			nightshiftComment(CommentPlan, "Step 1: do the thing."),
+			nightshiftComment(CommentImplement, "Implementation complete."),
+		},
+	}
+	ws := &Workspace{
+		TicketKey: "RC-1",
+		Repos:     []RepoWorkspace{{Name: "repo", Path: "/fake/repo", Branch: "feature/RC-1", BaseBranch: "main"}},
+	}
+	o := &Orchestrator{
+		client:          sc,
+		cfg:             JiraConfig{},
+		implAgent:       &stubAgent{name: "impl", output: "impl output"},
+		validationAgent: &stubAgent{name: "va", output: `{"valid": true, "score": 8}`},
+		fnPostPRComment: func(_ context.Context, _, _, _ string) error { return nil },
+		fnFetchReviews:  func(_ context.Context, _, _ string) (*PRReviewState, error) { return nil, nil },
+	}
+	return o, ws, ticket
+}
+
+// TestProcessTicket_ResumeAtPhaseCommit_BranchAhead_PRCreated verifies that when resuming
+// at PhaseCommit with no uncommitted changes but a branch already ahead of base on the remote,
+// a new PR is created and the CommentPR is posted to Jira.
+func TestProcessTicket_ResumeAtPhaseCommit_BranchAhead_PRCreated(t *testing.T) {
+	sc := &stubJiraClient{}
+	o, ws, ticket := makeResumeAtCommitOrchestrator(sc)
+
+	o.fnHasChanges = func(_ context.Context, _ string) (bool, error) { return false, nil }
+	o.fnBranchAheadOfBase = func(_ context.Context, _, _, _ string) (bool, error) { return true, nil }
+	o.fnFindPR = func(_ context.Context, _, _ string) (*PRInfo, error) { return nil, nil }
+	createPRCalls := 0
+	o.fnCreatePR = func(_ context.Context, _ RepoWorkspace, _ Ticket, _ string) (*PRInfo, error) {
+		createPRCalls++
+		return &PRInfo{URL: "https://github.com/org/repo/pull/42", Number: 42, IsNew: true}, nil
+	}
+	o.fnCommitAndPush = func(_ context.Context, _, _ string) error {
+		t.Error("CommitAndPush should not be called when HasChanges=false")
+		return nil
+	}
+
+	result, err := o.ProcessTicket(context.Background(), ticket, ws)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Status != TicketCompleted {
+		t.Errorf("Status = %q, want %q", result.Status, TicketCompleted)
+	}
+	if len(result.PRURLs) != 1 || result.PRURLs[0] != "https://github.com/org/repo/pull/42" {
+		t.Errorf("PRURLs = %v, want one URL", result.PRURLs)
+	}
+	if createPRCalls != 1 {
+		t.Errorf("fnCreatePR called %d times, want 1", createPRCalls)
+	}
+	hasPRComment := false
+	for _, c := range sc.postCommentCalls {
+		if c.Type == CommentPR {
+			hasPRComment = true
+		}
+	}
+	if !hasPRComment {
+		t.Error("expected CommentPR to be posted to Jira")
+	}
+}
+
+// TestProcessTicket_ResumeAtPhaseCommit_BranchAhead_ExistingPR verifies that when an open PR
+// already exists for the branch, its URL is recorded without calling fnCreatePR.
+func TestProcessTicket_ResumeAtPhaseCommit_BranchAhead_ExistingPR(t *testing.T) {
+	sc := &stubJiraClient{}
+	o, ws, ticket := makeResumeAtCommitOrchestrator(sc)
+
+	o.fnHasChanges = func(_ context.Context, _ string) (bool, error) { return false, nil }
+	o.fnBranchAheadOfBase = func(_ context.Context, _, _, _ string) (bool, error) { return true, nil }
+	o.fnFindPR = func(_ context.Context, _, _ string) (*PRInfo, error) {
+		return &PRInfo{URL: "https://github.com/org/repo/pull/42", Number: 42}, nil
+	}
+	o.fnCreatePR = func(_ context.Context, _ RepoWorkspace, _ Ticket, _ string) (*PRInfo, error) {
+		t.Error("fnCreatePR must not be called when open PR already exists")
+		return nil, nil
+	}
+	o.fnCommitAndPush = func(_ context.Context, _, _ string) error {
+		t.Error("CommitAndPush should not be called when HasChanges=false")
+		return nil
+	}
+
+	result, err := o.ProcessTicket(context.Background(), ticket, ws)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Status != TicketCompleted {
+		t.Errorf("Status = %q, want %q", result.Status, TicketCompleted)
+	}
+	if len(result.PRURLs) != 1 || result.PRURLs[0] != "https://github.com/org/repo/pull/42" {
+		t.Errorf("PRURLs = %v, want existing PR URL", result.PRURLs)
+	}
+	hasPRComment := false
+	for _, c := range sc.postCommentCalls {
+		if c.Type == CommentPR {
+			hasPRComment = true
+		}
+	}
+	if !hasPRComment {
+		t.Error("expected CommentPR to be posted to Jira")
+	}
+}
+
+// TestProcessTicket_ResumeAtPhaseCommit_BranchNotAhead_NoPR verifies the genuine no-op case:
+// when HasChanges=false and the branch is not ahead of base, no PR is created.
+func TestProcessTicket_ResumeAtPhaseCommit_BranchNotAhead_NoPR(t *testing.T) {
+	sc := &stubJiraClient{}
+	o, ws, ticket := makeResumeAtCommitOrchestrator(sc)
+
+	o.fnHasChanges = func(_ context.Context, _ string) (bool, error) { return false, nil }
+	o.fnBranchAheadOfBase = func(_ context.Context, _, _, _ string) (bool, error) { return false, nil }
+	o.fnFindPR = func(_ context.Context, _, _ string) (*PRInfo, error) {
+		t.Error("fnFindPR must not be called when branch is not ahead")
+		return nil, nil
+	}
+	o.fnCreatePR = func(_ context.Context, _ RepoWorkspace, _ Ticket, _ string) (*PRInfo, error) {
+		t.Error("fnCreatePR must not be called when branch is not ahead")
+		return nil, nil
+	}
+	o.fnCommitAndPush = func(_ context.Context, _, _ string) error {
+		t.Error("CommitAndPush should not be called when HasChanges=false")
+		return nil
+	}
+
+	result, err := o.ProcessTicket(context.Background(), ticket, ws)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Status != TicketCompleted {
+		t.Errorf("Status = %q, want %q", result.Status, TicketCompleted)
+	}
+	if len(result.PRURLs) != 0 {
+		t.Errorf("PRURLs = %v, want empty (genuine no-op)", result.PRURLs)
+	}
+	for _, c := range sc.postCommentCalls {
+		if c.Type == CommentPR {
+			t.Error("CommentPR should not be posted when no PRs were created")
+		}
 	}
 }
 
