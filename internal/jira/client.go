@@ -53,8 +53,15 @@ func NewClient(cfg JiraConfig) (*Client, error) {
 
 // Ping validates the connection by fetching the current user.
 func (c *Client) Ping(ctx context.Context) error {
-	_, _, err := c.jira.MySelf.Details(ctx, nil)
+	_, resp, err := c.jira.MySelf.Details(ctx, nil)
 	if err != nil {
+		if resp != nil {
+			body := strings.TrimSpace(resp.Bytes.String())
+			if body == "" {
+				body = "(empty)"
+			}
+			return fmt.Errorf("jira: ping failed: HTTP %d: %s", resp.Code, body)
+		}
 		return fmt.Errorf("jira: ping failed: %w", err)
 	}
 	return nil

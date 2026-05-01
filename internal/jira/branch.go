@@ -91,6 +91,41 @@ func setupBranch(ctx context.Context, repoPath, branchName, baseBranch string) (
 	return true, nil
 }
 
+// PushBranch pushes the current local branch to origin without committing.
+func PushBranch(ctx context.Context, repoPath string) error {
+	branch, err := gitExec(ctx, repoPath, "rev-parse", "--abbrev-ref", "HEAD")
+	if err != nil {
+		return err
+	}
+	if _, err := gitExec(ctx, repoPath, "push", "origin", branch); err != nil {
+		return err
+	}
+	return nil
+}
+
+// LocalBranchAheadOfBase reports whether the local HEAD has commits ahead of origin/base.
+// This detects the case where an agent committed locally but never pushed.
+// Returns (false, nil) when origin/base does not exist.
+func LocalBranchAheadOfBase(ctx context.Context, repoPath, base string) (bool, error) {
+	baseRef := "refs/remotes/origin/" + base
+	baseExists, err := remoteRefExists(ctx, repoPath, baseRef)
+	if err != nil {
+		return false, err
+	}
+	if !baseExists {
+		return false, nil
+	}
+	out, err := gitExec(ctx, repoPath, "rev-list", "--count", baseRef+"..HEAD")
+	if err != nil {
+		return false, err
+	}
+	count, err := strconv.Atoi(out)
+	if err != nil {
+		return false, fmt.Errorf("parse git rev-list count %q: %w", out, err)
+	}
+	return count > 0, nil
+}
+
 // BranchAheadOfBase reports whether branch has commits ahead of origin/base on the remote.
 // Returns (false, nil) when the remote ref for branch does not exist (branch not yet pushed)
 // or when there are no commits ahead. Returns an error for missing base refs or unexpected
