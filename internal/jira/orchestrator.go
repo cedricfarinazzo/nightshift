@@ -662,15 +662,30 @@ func (o *Orchestrator) buildImplementPrompt(ticket Ticket, plan string, ws *Work
 	b.WriteString("\n## Instructions\n")
 	b.WriteString("1. Implement the plan step by step — complete EVERY step before stopping\n")
 	b.WriteString("2. Make all necessary code changes\n")
-	b.WriteString("3. Run tests and fix all failures before stopping\n")
-	b.WriteString("4. Verify ALL acceptance criteria are met before stopping\n")
-	b.WriteString("5. Do not commit or push — that will be handled separately\n")
-	b.WriteString("6. If you encounter ambiguity, make a reasonable assumption and document it in a comment\n")
-	b.WriteString("7. Do NOT stop early — continue until the entire plan is implemented and tests pass\n")
+	b.WriteString("3. Verify ALL acceptance criteria are met\n")
+	b.WriteString("4. Do not commit or push — that will be handled separately\n")
+	b.WriteString("5. If you encounter ambiguity, make a reasonable assumption and document it in a comment\n")
+	b.WriteString("6. Do NOT stop early — continue until the entire plan is implemented, lint passes, and tests pass\n")
+	if ws != nil && len(ws.Repos) > 0 {
+		b.WriteString("\n## Quality Checks (REQUIRED before finishing)\n")
+		b.WriteString("For each repo above, run the following commands and fix ALL failures before stopping:\n\n")
+		for _, repo := range ws.Repos {
+			lintCmd := repo.LintCommand
+			if lintCmd == "" {
+				lintCmd = "golangci-lint run ./..."
+			}
+			testCmd := repo.TestCommand
+			if testCmd == "" {
+				testCmd = "go test ./..."
+			}
+			fmt.Fprintf(&b, "**%s** (`%s`):\n", repo.Name, repo.Path)
+			fmt.Fprintf(&b, "  - Lint: `%s`\n", lintCmd)
+			fmt.Fprintf(&b, "  - Test: `%s`\n\n", testCmd)
+		}
+		b.WriteString("Do not finish until all lint and test commands exit with code 0.\n")
+	}
 	return b.String()
 }
-
-// buildPRImplementationComment builds the GitHub PR comment body with the agent's
 // implementation summary so reviewers have full context inline.
 func buildPRImplementationComment(ticket Ticket, summary, jiraSite string) string {
 	var b strings.Builder

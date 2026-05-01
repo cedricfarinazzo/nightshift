@@ -262,6 +262,19 @@ func buildReworkPrompt(ticket Ticket, review *PRReviewState, repo RepoWorkspace)
 	b.WriteString("1. Make the requested change\n")
 	b.WriteString("2. If you disagree, explain why in a code comment\n")
 	b.WriteString("3. Do not modify code unrelated to the review feedback\n")
+	lintCmd := repo.LintCommand
+	if lintCmd == "" {
+		lintCmd = "golangci-lint run ./..."
+	}
+	testCmd := repo.TestCommand
+	if testCmd == "" {
+		testCmd = "go test ./..."
+	}
+	b.WriteString("\n### Quality Checks (REQUIRED before finishing)\n")
+	b.WriteString("After addressing all feedback, run the following commands and fix ALL failures:\n\n")
+	fmt.Fprintf(&b, "- Lint: `%s`\n", lintCmd)
+	fmt.Fprintf(&b, "- Test: `%s`\n\n", testCmd)
+	b.WriteString("Do not finish until both commands exit with code 0. Do not commit or push — that will be handled separately.\n")
 	return b.String()
 }
 

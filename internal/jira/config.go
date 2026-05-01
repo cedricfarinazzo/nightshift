@@ -42,9 +42,11 @@ type JiraConfig struct {
 
 // RepoConfig defines a repository to work on.
 type RepoConfig struct {
-	Name       string `mapstructure:"name"`        // subdirectory name
-	URL        string `mapstructure:"url"`         // git clone URL
-	BaseBranch string `mapstructure:"base_branch"` // default: "main"
+	Name        string `mapstructure:"name"`         // subdirectory name
+	URL         string `mapstructure:"url"`          // git clone URL
+	BaseBranch  string `mapstructure:"base_branch"`  // default: "main"
+	LintCommand string `mapstructure:"lint_command"` // optional: command to run linter (e.g. "golangci-lint run ./...")
+	TestCommand string `mapstructure:"test_command"` // optional: command to run tests (e.g. "go test ./...")
 }
 
 // PhaseConfig specifies provider/model for a specific phase.
