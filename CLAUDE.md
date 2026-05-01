@@ -106,6 +106,8 @@ internal/
                         # findExistingPR uses --state open to avoid matching closed PRs; ghExec is a
                         # package-level var for test substitution
     comments.go         # CommentType/NightshiftComment; PostComment(), ParseNightshiftComments()
+    feedback.go         # ProcessFeedback, buildReworkPrompt, filterNewComments; idempotency filter
+                        # by lastReworkAt — skips review comments posted before the last CommentRework
 
   integrations/         # Readers for external config and task sources
     integrations.go     # Reader interface + Result/TaskItem/Hint types
@@ -174,13 +176,36 @@ internal/
     analyzer.go         # Analyzes run history for trends and anomalies
 
 docs/                   # Internal developer docs (NOT user-facing)
-  guides/               # Implementation guides: run-lifecycle, adding-tasks, agent-tmux-integration, etc.
+  guides/
+    architecture.md            # Full architecture reference (component graph, data flow)
+    run-lifecycle.md           # End-to-end run lifecycle (daemon → scheduler → orchestrator → agent)
+    adding-tasks.md            # How to add a new built-in or custom task type
+    tasks-internals.md         # CostTier, RiskLevel, TaskCategory, selector scoring formula
+    budget-internals.md        # Budget modes, reserve, calibration, Manager interfaces
+    state-and-snapshots.md     # RunRecord, staleness, Snapshot, Calibrator algorithm
+    scheduling.md              # Cron vs interval config, daemon mode, time windows
+    orchestrator-internals.md  # Task orchestrator state machine, Jira phase lifecycle, ghExec
+    jira-pipeline.md           # Jira autonomous pipeline deep dive
+    workspace-management.md    # Workspace setup/cleanup, SSH URL requirement, branch conventions
+    integrations-dev.md        # Reader interface, how to add a new integration, Hint types
+    reporting.md               # Run reports, JSON results, daily summaries, retention
+    bus-factor-analysis.md     # GitParser, HHI, Gini, risk levels, bus-factor count
+    security.md                # Credentials, audit log, sandbox model
+    database.md                # Schema, migration system, how to add migrations
+    logging.md                 # zerolog setup, component loggers, log levels, jq queries
+    testing.md                 # Test patterns, MockRunner, stubJiraClient, e2e tests
+    contributing.md            # Dev setup, git conventions, PR checklist
+    debugging.md               # Log locations, common errors + fixes
+    agent-tmux-integration.md  # Tmux session scraping for agent context
+    codex-budget-tracking.md   # Codex-specific usage tracking
+    provider-calibration.md    # Provider cost calibration utility
+    website.md                 # Docusaurus site development
   implemented/          # Design docs for completed features
   deprecated/           # Archived docs
 
 website/                # Docusaurus v3 user-facing documentation site
-  docs/                 # 11 user guides: installation, config, cli-reference, budget, scheduling,
-                        # tasks, troubleshooting, etc.
+  docs/                 # User guides: installation, config, cli-reference, budget, scheduling,
+                        # tasks, agents, jira, troubleshooting, etc.
   package.json          # Node.js deps; deployed to https://nightshift.haplab.com
 
 scripts/
@@ -214,6 +239,7 @@ SECURITY_AUDIT.md       # Security findings
   - Run reports: `~/.local/share/nightshift/reports/run-YYYY-MM-DD-HHMMSS.md`
   - Daily summaries: `~/.local/share/nightshift/summaries/summary-YYYY-MM-DD.md`
   - Database: `~/.local/share/nightshift/nightshift.db`
+  - Audit log: `~/.local/share/nightshift/audit/audit-YYYY-MM-DD.jsonl`
 
 ---
 
@@ -319,3 +345,7 @@ Agents MUST follow these rules:
 - **`nightshift jira preview` invocation** — use `go run ./cmd/nightshift jira preview --plain` (arguments after the package path are passed to the program by `go run`). The `--` form (`go run ./cmd/nightshift -- jira preview`) is also valid.
 - **Jira French status names** — the VC project uses "À faire" (todo), "En cours" (in-progress), "Revue en cours" (review), "Terminé" (done). `isReviewStatus` checks for "revue" keyword so it correctly classifies "Revue en cours". `TransitionToReview` is called in `PhaseStatus` after PR creation; if the pipeline fails at commit, `PhaseStatus` is never reached and the ticket stays "En cours".
 - **`findExistingPR` requires `--state open`** — without it, closed PRs on the same branch match and `gh pr edit` runs on a closed PR instead of creating a new one. Fixed in VC-44.
+- **Workspace reuse** — `SetupWorkspace` does NOT re-clone on subsequent runs for the same ticket. If the repo directory already exists, it is reused. `setupBranch` runs `git fetch origin` + `git pull --rebase origin <branch>` on every setup to sync with remote. First run sets `isNew=true`; subsequent runs set `isNew=false`.
+- **Plan injected into implement prompt** — `buildImplementPrompt(ticket, plan, ws)` receives `result.Plan` (the plan agent's output). This is the text of the plan comment posted to Jira. It is injected as a "Plan" section in the implement prompt so the agent knows what to implement.
+- **In-progress ticket resumption** — `detectResumeState` reads Nightshift comments to determine the furthest completed phase. If the plan phase is done (plan comment present) but implement is not, the next run resumes from implement. To force a full restart, set the ticket back to "À faire" (or equivalent todo status) — this causes `FetchTodoTickets` to pick it up fresh. WARNING: if phases are skipped via resume, the agent will not re-post the plan or re-validate. Only reset if you want a clean slate.
+- **`--skip-validation` works** (since VC-38) — when `--skip-validation` is passed, the validation agent is not created and `WithSkipValidation()` is used. `ProcessTicket` permits a nil `validationAgent` when `skipValidation=true`. The phase is shown as "skipped" in preflight output.

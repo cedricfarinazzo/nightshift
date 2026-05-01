@@ -51,6 +51,40 @@ logging:
   level: debug    # debug | info | warn | error
 ```
 
+## Jira Pipeline Issues
+
+**"Ticket not picked up"**
+- Ensure the ticket has the `nightshift` label (or the label configured in `jira.label`)
+- Check the ticket is in the "To Do" status (or equivalent configured in `jira.statuses.todo`)
+- Run `nightshift jira preview` to see what would be processed
+
+**"Push rejected: fetch first"**
+- Another process pushed to the branch before this run. Run again — `SetupWorkspace` will pull and rebase automatically.
+
+**"Ticket stays In Progress across runs"**
+- This is expected: the pipeline resumes from the furthest completed phase. If validation and plan succeeded but implement failed, the next run skips directly to implement.
+- To force a full restart, move the ticket back to "To Do" status in Jira.
+
+**"Workspace directory conflicts"**
+- Each ticket gets its own isolated directory: `{workspace_root}/{TICKET-KEY}/{repo-name}/`
+- Stale workspaces are cleaned up after `cleanup_after_days` (default 14 days)
+- Manually remove: `rm -rf ~/.local/share/nightshift/jira-workspaces/PROJ-123`
+
+**"Cannot authenticate to Jira"**
+- Set `NIGHTSHIFT_JIRA_TOKEN` as an environment variable (not in config)
+- Token must have read/write access to the project
+
+**"SSH authentication failure during clone"**
+- Repo URLs must use SSH (`git@github.com:org/repo.git`). HTTPS URLs fail silently in non-interactive contexts.
+
+**"Blocked ticket shows as ready"**
+- Done blockers are ignored (tickets are considered unblocked when their blocker is done)
+- If a blocker is incorrectly shown as done, check the Jira status category on the blocking ticket
+
+**"Validation fails every time"**
+- Use `nightshift jira run --skip-validation` to bypass LLM validation
+- Or improve the ticket description: add acceptance criteria, clear problem statement, and definition of done
+
 ## Getting Help
 
 ```bash

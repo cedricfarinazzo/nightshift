@@ -19,6 +19,8 @@ title: CLI Reference
 | `nightshift logs` | Stream or export logs |
 | `nightshift stats` | Token usage statistics |
 | `nightshift daemon` | Background scheduler |
+| `nightshift busfactor` | Analyze code ownership & bus factor |
+| `nightshift jira` | Autonomous Jira ticket pipeline |
 
 ## Run Options
 
@@ -131,3 +133,14 @@ nightshift jira preview --plain         # No TUI pager
 | `--verbose` | Verbose output |
 | `--provider` | Select provider (claude, codex) |
 | `--timeout` | Execution timeout (default 30m) |
+
+## Bus Factor Analysis
+
+```bash
+nightshift busfactor                        # Analyze all configured projects
+nightshift busfactor --project ~/code/repo  # Analyze specific project
+nightshift busfactor --since 6m             # Only consider last 6 months
+nightshift busfactor --json                 # JSON output
+```
+
+Outputs: ownership concentration (HHI), Gini coefficient, contributor share breakdown, risk rating (low/medium/high/critical), and suggested remediation tasks.

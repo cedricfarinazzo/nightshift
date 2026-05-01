@@ -8,9 +8,9 @@ title: Introduction
 
 > It finds what you forgot to look for.
 
-Nightshift is a Go CLI tool that runs AI-powered maintenance tasks on your codebase overnight, using your remaining daily token budget from Claude Code or Codex subscriptions. Wake up to a cleaner codebase without unexpected costs.
+Nightshift is a Go CLI tool that runs AI-powered maintenance tasks on your codebase overnight, using your remaining daily token budget from Claude Code, Codex, or GitHub Copilot subscriptions. Wake up to a cleaner codebase without unexpected costs.
 
-Your tokens get reset every week — you might as well use them. Nightshift runs overnight to find dead code, doc drift, test gaps, security issues, and 20+ other things silently accumulating while you ship features.
+Your tokens get reset every week — you might as well use them. Nightshift runs overnight to find dead code, doc drift, test gaps, security issues, and 59 other things silently accumulating while you ship features.
 
 Like a Roomba for your codebase. Runs overnight, worst case you close the PR.
 
@@ -20,6 +20,7 @@ Like a Roomba for your codebase. Runs overnight, worst case you close the PR.
 - **Budget-aware** — Uses remaining daily allotment, never exceeds your configured max (default 75%).
 - **Multi-project** — Point it at your repos, it already knows what to look for.
 - **Zero config defaults** — Works out of the box with sensible defaults. Customize when you need to.
+- **Autonomous Jira pipeline** — Implements Jira tickets overnight: validates, plans, codes, commits, opens PRs, and transitions status automatically.
 
 ## Quick Start
 
@@ -42,4 +43,5 @@ nightshift run
 - [Installation](/docs/installation) — All installation methods
 - [Quick Start](/docs/quick-start) — Get running in 2 minutes
 - [Configuration](/docs/configuration) — Customize budgets, schedules, and tasks
-- [Tasks](/docs/tasks) — Browse the 20+ built-in tasks
+- [Tasks](/docs/tasks) — Browse the 59 built-in tasks
+- [Jira Pipeline](/docs/jira) — Autonomous Jira ticket implementation
