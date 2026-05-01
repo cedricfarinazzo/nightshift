@@ -238,8 +238,20 @@ func hasActionableComments(rs *PRReviewState) bool {
 }
 
 // buildReworkPrompt constructs the agent prompt from PR review comments.
+// Ticket context (title, description, AC, comments) is prepended so the agent
+// can cross-reference the original intent while addressing feedback.
 func buildReworkPrompt(ticket Ticket, review *PRReviewState, repo RepoWorkspace) string {
 	var b strings.Builder
+
+	// Ticket context — mirrors buildPlanPrompt / buildImplementPrompt pattern.
+	fmt.Fprintf(&b, "## Ticket\nKey: %s\nTitle: %s\n", ticket.Key, ticket.Summary)
+	fmt.Fprintf(&b, "Description:\n%s\n", ticket.Description)
+	if ticket.AcceptanceCriteria != "" {
+		fmt.Fprintf(&b, "\nAcceptance Criteria:\n%s\n", ticket.AcceptanceCriteria)
+	}
+	buildCommentsSection(&b, ticket)
+	b.WriteString("\n---\n\n")
+
 	fmt.Fprintf(&b, "## Review Feedback for %s\n\n", ticket.Key)
 	fmt.Fprintf(&b, "PR: %s\nRepo: %s (branch: %s)\n\n", review.URL, repo.Name, repo.Branch)
 	b.WriteString("### Reviewer Comments\n\n")
