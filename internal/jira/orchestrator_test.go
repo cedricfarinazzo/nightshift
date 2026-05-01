@@ -661,6 +661,7 @@ func TestProcessTicket_CommitPhase_NoChanges(t *testing.T) {
 	sc := &stubJiraClient{}
 	o, ws := makeOrchestratorWithRepo(sc)
 	o.fnHasChanges = func(_ context.Context, _ string) (bool, error) { return false, nil }
+	o.fnLocalBranchAheadOfBase = func(_ context.Context, _, _ string) (bool, error) { return false, nil }
 	o.fnBranchAheadOfBase = func(_ context.Context, _, _, _ string) (bool, error) { return false, nil }
 	o.fnCommitAndPush = func(_ context.Context, _, _ string) error { t.Error("CommitAndPush called unexpectedly"); return nil }
 	o.fnCreatePR = func(_ context.Context, _ RepoWorkspace, _ Ticket, _ string) (*PRInfo, error) {
@@ -672,11 +673,56 @@ func TestProcessTicket_CommitPhase_NoChanges(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if result.Status != TicketCompleted {
-		t.Errorf("Status = %q, want %q", result.Status, TicketCompleted)
+	if result.Status != TicketFailed {
+		t.Errorf("Status = %q, want %q", result.Status, TicketFailed)
+	}
+	if result.Phase != PhaseCommit {
+		t.Errorf("Phase = %q, want %q", result.Phase, PhaseCommit)
 	}
 	if len(result.PRURLs) != 0 {
 		t.Errorf("expected no PRURLs when no changes, got %v", result.PRURLs)
+	}
+}
+
+// TestProcessTicket_CommitPhase_AgentSelfCommitted covers the case where the agent
+// committed changes locally but did not push. The orchestrator must detect the local
+// commit via fnLocalBranchAheadOfBase and push it via fnPushBranch.
+func TestProcessTicket_CommitPhase_AgentSelfCommitted(t *testing.T) {
+	sc := &stubJiraClient{}
+	o, ws := makeOrchestratorWithRepo(sc)
+
+	pushed := false
+	prCreated := false
+
+	o.fnHasChanges = func(_ context.Context, _ string) (bool, error) { return false, nil }
+	o.fnLocalBranchAheadOfBase = func(_ context.Context, _, _ string) (bool, error) { return true, nil }
+	o.fnPushBranch = func(_ context.Context, _ string) error { pushed = true; return nil }
+	o.fnCommitAndPush = func(_ context.Context, _, _ string) error {
+		t.Error("CommitAndPush should not be called when agent self-committed")
+		return nil
+	}
+	o.fnBranchAheadOfBase = func(_ context.Context, _, _, _ string) (bool, error) { return true, nil }
+	o.fnFindPR = func(_ context.Context, _, _ string) (*PRInfo, error) { return nil, nil }
+	o.fnCreatePR = func(_ context.Context, _ RepoWorkspace, _ Ticket, _ string) (*PRInfo, error) {
+		prCreated = true
+		return &PRInfo{URL: "https://github.com/org/repo/pull/99"}, nil
+	}
+
+	result, err := o.ProcessTicket(context.Background(), Ticket{Key: "T-1", Summary: "Test"}, ws)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Status != TicketCompleted {
+		t.Errorf("Status = %q, want %q", result.Status, TicketCompleted)
+	}
+	if !pushed {
+		t.Error("expected PushBranch to be called for local commit")
+	}
+	if !prCreated {
+		t.Error("expected PR to be created after push")
+	}
+	if len(result.PRURLs) == 0 {
+		t.Error("expected PRURLs to be populated")
 	}
 }
 
@@ -844,6 +890,7 @@ func TestProcessTicket_ResumeAtPhaseCommit_BranchAhead_PRCreated(t *testing.T) {
 	o, ws, ticket := makeResumeAtCommitOrchestrator(sc)
 
 	o.fnHasChanges = func(_ context.Context, _ string) (bool, error) { return false, nil }
+	o.fnLocalBranchAheadOfBase = func(_ context.Context, _, _ string) (bool, error) { return false, nil }
 	o.fnBranchAheadOfBase = func(_ context.Context, _, _, _ string) (bool, error) { return true, nil }
 	o.fnFindPR = func(_ context.Context, _, _ string) (*PRInfo, error) { return nil, nil }
 	createPRCalls := 0
@@ -887,6 +934,7 @@ func TestProcessTicket_ResumeAtPhaseCommit_BranchAhead_ExistingPR(t *testing.T) 
 	o, ws, ticket := makeResumeAtCommitOrchestrator(sc)
 
 	o.fnHasChanges = func(_ context.Context, _ string) (bool, error) { return false, nil }
+	o.fnLocalBranchAheadOfBase = func(_ context.Context, _, _ string) (bool, error) { return false, nil }
 	o.fnBranchAheadOfBase = func(_ context.Context, _, _, _ string) (bool, error) { return true, nil }
 	o.fnFindPR = func(_ context.Context, _, _ string) (*PRInfo, error) {
 		return &PRInfo{URL: "https://github.com/org/repo/pull/42", Number: 42}, nil
@@ -921,13 +969,15 @@ func TestProcessTicket_ResumeAtPhaseCommit_BranchAhead_ExistingPR(t *testing.T) 
 	}
 }
 
-// TestProcessTicket_ResumeAtPhaseCommit_BranchNotAhead_NoPR verifies the genuine no-op case:
-// when HasChanges=false and the branch is not ahead of base, no PR is created.
+// TestProcessTicket_ResumeAtPhaseCommit_BranchNotAhead_NoPR verifies that when resuming
+// at PhaseCommit with no uncommitted changes and no pushed commits, the ticket fails
+// because the implementation produced no actual output.
 func TestProcessTicket_ResumeAtPhaseCommit_BranchNotAhead_NoPR(t *testing.T) {
 	sc := &stubJiraClient{}
 	o, ws, ticket := makeResumeAtCommitOrchestrator(sc)
 
 	o.fnHasChanges = func(_ context.Context, _ string) (bool, error) { return false, nil }
+	o.fnLocalBranchAheadOfBase = func(_ context.Context, _, _ string) (bool, error) { return false, nil }
 	o.fnBranchAheadOfBase = func(_ context.Context, _, _, _ string) (bool, error) { return false, nil }
 	o.fnFindPR = func(_ context.Context, _, _ string) (*PRInfo, error) {
 		t.Error("fnFindPR must not be called when branch is not ahead")
@@ -946,16 +996,14 @@ func TestProcessTicket_ResumeAtPhaseCommit_BranchNotAhead_NoPR(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if result.Status != TicketCompleted {
-		t.Errorf("Status = %q, want %q", result.Status, TicketCompleted)
+	if result.Status != TicketFailed {
+		t.Errorf("Status = %q, want %q", result.Status, TicketFailed)
+	}
+	if result.Phase != PhaseCommit {
+		t.Errorf("Phase = %q, want %q", result.Phase, PhaseCommit)
 	}
 	if len(result.PRURLs) != 0 {
-		t.Errorf("PRURLs = %v, want empty (genuine no-op)", result.PRURLs)
-	}
-	for _, c := range sc.postCommentCalls {
-		if c.Type == CommentPR {
-			t.Error("CommentPR should not be posted when no PRs were created")
-		}
+		t.Errorf("PRURLs = %v, want empty", result.PRURLs)
 	}
 }
 
