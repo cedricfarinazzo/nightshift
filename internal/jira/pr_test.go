@@ -392,13 +392,13 @@ func TestFetchPRReviewComments_ReviewThreadsError(t *testing.T) {
 
 	rs, fetchErr := FetchPRReviewComments(context.Background(), "/repo", "https://github.com/org/repo/pull/7")
 
-	w.Close()
+	_ = w.Close()
 	os.Stderr = origStderr
 	var logBuf bytes.Buffer
 	if _, err := io.Copy(&logBuf, r); err != nil {
 		t.Fatal(err)
 	}
-	r.Close()
+	_ = r.Close()
 
 	if fetchErr != nil {
 		t.Fatalf("FetchPRReviewComments should not return error on graphql failure, got: %v", fetchErr)
