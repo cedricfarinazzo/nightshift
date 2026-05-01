@@ -6,7 +6,7 @@
 
 ![Nightshift logo](logo.png)
 
-Your tokens get reset every week, you might as well use them. Nightshift runs overnight to find dead code, doc drift, test gaps, security issues, and 20+ other things silently accumulating while you ship features. Like a Roomba for your codebase — runs overnight, worst case you close the PR.
+Your tokens get reset every week, you might as well use them. Nightshift runs overnight to find dead code, doc drift, test gaps, security issues, and 59 built-in tasks silently accumulating while you ship features. Like a Roomba for your codebase — runs overnight, worst case you close the PR.
 
 Everything lands as a branch or PR. It never writes directly to your primary branch. Don't like something? Close it. That's the whole rollback plan.
 
@@ -16,6 +16,8 @@ Everything lands as a branch or PR. It never writes directly to your primary bra
 - **Multi-project**: Point it at your repos, it already knows what to look for
 - **Zero risk**: Everything is a PR — merge what surprises you, close the rest
 - **Great DX**: Thoughtful CLI defaults with clear output and reports
+- **Jira pipeline**: Autonomously implements Jira tickets — validates, plans, codes, commits, opens PRs, and transitions status overnight
+- **Bus-factor analysis**: Measures code ownership concentration and flags single-contributor risk
 
 ## Installation
 
@@ -95,6 +97,17 @@ nightshift task show lint-fix --prompt-only
 nightshift task run lint-fix --provider claude
 nightshift task run skill-groom --provider codex --dry-run
 nightshift task run lint-fix --provider codex --dry-run
+
+# Jira pipeline
+nightshift jira preview                    # dry-run: show tickets, phases, budget
+nightshift jira run                        # process all labeled tickets
+nightshift jira run --ticket PROJ-42       # single ticket
+nightshift jira run --skip-validation      # skip LLM validation phase
+nightshift jira run --review-only          # only process review feedback
+
+# Bus-factor analysis
+nightshift busfactor
+nightshift busfactor --project ~/code/repo
 ```
 
 If `gum` is available, preview output is shown through the gum pager. Use `--plain` to disable.
@@ -183,13 +196,13 @@ npm install -g @github/copilot
 curl -fsSL https://gh.io/copilot-install | bash
 ```
 
-Requires GitHub Copilot subscription. See [docs/COPILOT_INTEGRATION.md](docs/COPILOT_INTEGRATION.md) for details.
+Requires GitHub Copilot subscription.
 
 If you prefer API-based usage, you can authenticate Claude and Codex CLIs with API keys instead.
 
 ## Configuration
 
-Full guide: [Configuration docs](https://nightshift.haplab.com/docs/configuration) · [Budget docs](https://nightshift.haplab.com/docs/budget) · [Scheduling docs](https://nightshift.haplab.com/docs/scheduling) · [Tasks docs](https://nightshift.haplab.com/docs/tasks)
+Full guide: [Configuration docs](https://nightshift.haplab.com/docs/configuration) · [Budget docs](https://nightshift.haplab.com/docs/budget) · [Scheduling docs](https://nightshift.haplab.com/docs/scheduling) · [Tasks docs](https://nightshift.haplab.com/docs/tasks) · [Jira Pipeline](https://nightshift.haplab.com/docs/jira)
 
 Nightshift uses YAML config files to define:
 
@@ -200,7 +213,7 @@ Nightshift uses YAML config files to define:
 
 Run `nightshift setup` to create/update the global config at `~/.config/nightshift/config.yaml`.
 
-See the [full configuration docs](https://nightshift.haplab.com/docs/configuration) or [SPEC.md](docs/SPEC.md) for detailed options.
+See the [full configuration docs](https://nightshift.haplab.com/docs/configuration) for detailed options.
 
 Minimal example:
 
