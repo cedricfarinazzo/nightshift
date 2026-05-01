@@ -127,6 +127,12 @@ func runJiraPreview(cmd *cobra.Command, _ []string) error {
 		projects = filtered
 	}
 
+	// Validate the (potentially filtered) config.
+	cfg.Jira.Projects = projects
+	if err := cfg.Jira.Validate(); err != nil {
+		return fmt.Errorf("invalid config: %w", err)
+	}
+
 	// Build comma-joined project keys for display/JSON.
 	keys := make([]string, len(projects))
 	for i, p := range projects {
@@ -136,29 +142,27 @@ func runJiraPreview(cmd *cobra.Command, _ []string) error {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
+	// Build phases using effective configs. When multiple projects are configured
+	// each may have different overrides; we show the first project's effective
+	// values as a representative (or global defaults when projects is empty).
+	buildPhases := func() []jiraPreviewPhase {
+		if len(projects) == 0 {
+			return nil
+		}
+		p := projects[0]
+		jc := cfg.Jira
+		return []jiraPreviewPhase{
+			{Name: "validation", Provider: jc.EffectiveValidation(p).Provider, Model: jc.EffectiveValidation(p).Model, Timeout: jc.EffectiveValidation(p).Timeout},
+			{Name: "plan", Provider: jc.EffectivePlan(p).Provider, Model: jc.EffectivePlan(p).Model, Timeout: jc.EffectivePlan(p).Timeout},
+			{Name: "implement", Provider: jc.EffectiveImplement(p).Provider, Model: jc.EffectiveImplement(p).Model, Timeout: jc.EffectiveImplement(p).Timeout},
+			{Name: "review_fix", Provider: jc.EffectiveReviewFix(p).Provider, Model: jc.EffectiveReviewFix(p).Model, Timeout: jc.EffectiveReviewFix(p).Timeout},
+		}
+	}
+
 	result := &jiraPreviewResult{
 		GeneratedAt: time.Now(),
 		JiraProject: strings.Join(keys, ", "),
-		Phases: []jiraPreviewPhase{
-			{Name: "validation", Provider: cfg.Jira.Validation.Provider, Model: cfg.Jira.Validation.Model, Timeout: cfg.Jira.Validation.Timeout},
-			{Name: "plan", Provider: cfg.Jira.Plan.Provider, Model: cfg.Jira.Plan.Model, Timeout: cfg.Jira.Plan.Timeout},
-			{Name: "implement", Provider: cfg.Jira.Implement.Provider, Model: cfg.Jira.Implement.Model, Timeout: cfg.Jira.Implement.Timeout},
-			{Name: "review_fix", Provider: cfg.Jira.ReviewFix.Provider, Model: cfg.Jira.ReviewFix.Model, Timeout: cfg.Jira.ReviewFix.Timeout},
-		},
-	}
-
-	// Optionally prepare the validation agent up front (uses global validation config).
-	var valAgent agents.Agent
-	if runValidate {
-		a, agentErr := createJiraAgent(cfg, cfg.Jira.Validation)
-		if agentErr != nil {
-			result.SkippedTickets = append(result.SkippedTickets, jiraPreviewSkipped{
-				Key:    "*",
-				Reason: fmt.Sprintf("create validation agent: %v", agentErr),
-			})
-		} else {
-			valAgent = a
-		}
+		Phases:      buildPhases(),
 	}
 
 	// Connect to Jira.
@@ -182,6 +186,20 @@ func runJiraPreview(cmd *cobra.Command, _ []string) error {
 			})
 		} else {
 			for _, proj := range projects {
+				// Optionally build a per-project validation agent using effective config.
+				var valAgent agents.Agent
+				if runValidate {
+					a, agentErr := createJiraAgent(cfg, cfg.Jira.EffectiveValidation(proj))
+					if agentErr != nil {
+						result.SkippedTickets = append(result.SkippedTickets, jiraPreviewSkipped{
+							Key:    proj.Key + ":*",
+							Reason: fmt.Sprintf("create validation agent: %v", agentErr),
+						})
+					} else {
+						valAgent = a
+					}
+				}
+
 				todoTickets, err := client.FetchTodoTickets(ctx, proj)
 				if err != nil {
 					result.SkippedTickets = append(result.SkippedTickets, jiraPreviewSkipped{

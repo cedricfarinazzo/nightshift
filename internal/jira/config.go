@@ -76,10 +76,13 @@ type PhaseConfig struct {
 
 // mergePhaseConfig returns the project-level override merged over the global default.
 // A non-empty field in override takes precedence over the corresponding global field.
+// When Provider is overridden, the inherited Model is cleared — a model name from a
+// different provider would be invalid. An explicit Model override can still set one.
 func mergePhaseConfig(global, override PhaseConfig) PhaseConfig {
 	result := global
 	if override.Provider != "" {
 		result.Provider = override.Provider
+		result.Model = "" // clear inherited model when switching provider
 	}
 	if override.Model != "" {
 		result.Model = override.Model

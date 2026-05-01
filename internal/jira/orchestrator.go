@@ -60,6 +60,7 @@ type Orchestrator struct {
 	cfg             JiraConfig
 	proj            ProjectConfig // the specific project this orchestrator serves
 	validationAgent agents.Agent
+	planAgent       agents.Agent // nil falls back to implAgent at runtime
 	implAgent       agents.Agent
 	reviewFixAgent  agents.Agent
 	skipValidation  bool
@@ -88,8 +89,15 @@ func WithValidationAgent(a agents.Agent) OrchestratorOption {
 }
 
 // WithImplAgent sets the agent used for planning and implementation.
+// When no WithPlanAgent option is provided, this agent is also used for planning.
 func WithImplAgent(a agents.Agent) OrchestratorOption {
 	return func(o *Orchestrator) { o.implAgent = a }
+}
+
+// WithPlanAgent sets the agent used for generating the implementation plan.
+// When not set, the impl agent is used as fallback.
+func WithPlanAgent(a agents.Agent) OrchestratorOption {
+	return func(o *Orchestrator) { o.planAgent = a }
 }
 
 // WithReviewFixAgent sets the agent used for addressing PR review feedback.
@@ -365,7 +373,11 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 		planCfg := o.cfg.EffectivePlan(o.proj)
 		o.emit("🤖 %s running: plan  (%s)", planCfg.Provider, planCfg.Model)
 		planStart := time.Now()
-		planResult, err := o.implAgent.Execute(ctx, agents.ExecuteOptions{
+		planAgent := o.planAgent
+		if planAgent == nil {
+			planAgent = o.implAgent
+		}
+		planResult, err := planAgent.Execute(ctx, agents.ExecuteOptions{
 			Prompt:  o.buildPlanPrompt(ticket),
 			Timeout: parseTimeout(planCfg.Timeout, 5*time.Minute),
 			Model:   planCfg.Model,

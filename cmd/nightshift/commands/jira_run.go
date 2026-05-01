@@ -139,6 +139,10 @@ func buildOrchestrator(client *jira.Client, cfg *config.Config, proj jira.Projec
 			return nil, fmt.Errorf("validation agent: %w", err)
 		}
 	}
+	planAgent, err := createJiraAgent(cfg, jiracfg.EffectivePlan(proj))
+	if err != nil {
+		return nil, fmt.Errorf("plan agent: %w", err)
+	}
 	implAgent, err := createJiraAgent(cfg, jiracfg.EffectiveImplement(proj))
 	if err != nil {
 		return nil, fmt.Errorf("implement agent: %w", err)
@@ -149,6 +153,7 @@ func buildOrchestrator(client *jira.Client, cfg *config.Config, proj jira.Projec
 	}
 
 	orchOpts := []jira.OrchestratorOption{
+		jira.WithPlanAgent(planAgent),
 		jira.WithImplAgent(implAgent),
 		jira.WithReviewFixAgent(reviewFixAgent),
 		jira.WithPhaseCallback(func(ticketKey string, phase jira.Phase, done bool) {
@@ -199,7 +204,19 @@ func runSingleTicket(
 	feedbackResults *[]jira.FeedbackResult,
 ) (found bool, err error) {
 	jiracfg := cfg.Jira
+
+	// Parse the project key prefix (e.g. "VC" from "VC-123") to avoid fetching
+	// tickets from unrelated projects that may fail due to permissions or outages.
+	keyPrefix, _, validKey := strings.Cut(key, "-")
+	if !validKey {
+		return false, fmt.Errorf("invalid ticket key %q: expected format PROJECT-NUMBER", key)
+	}
+	keyPrefix = strings.ToUpper(keyPrefix)
+
 	for _, proj := range jiracfg.Projects {
+		if !strings.EqualFold(proj.Key, keyPrefix) {
+			continue
+		}
 		orch, err := buildOrchestrator(client, cfg, proj, skipValidation)
 		if err != nil {
 			return false, err
@@ -431,17 +448,21 @@ func printJiraPreflightSummary(cfg jira.JiraConfig, skipValidation bool, _ *jira
 	fmt.Println("🌙 Nightshift Jira Run")
 	fmt.Println("──────────────────────────────")
 	fmt.Printf("  Site:         %s.atlassian.net\n", cfg.Site)
-	if skipValidation {
-		fmt.Printf("  Validation:   skipped\n")
-	} else {
-		fmt.Printf("  Validation:   %s/%s\n", cfg.Validation.Provider, cfg.Validation.Model)
-	}
-	fmt.Printf("  Implement:    %s/%s\n", cfg.Implement.Provider, cfg.Implement.Model)
-	fmt.Printf("  ReviewFix:    %s/%s\n", cfg.ReviewFix.Provider, cfg.ReviewFix.Model)
 	fmt.Printf("  Max tickets:  %d\n", cfg.MaxTickets)
-	fmt.Printf("  Projects (%d):\n", len(cfg.Projects))
 	for _, p := range cfg.Projects {
-		fmt.Printf("    • %s  [label: %s]  %d repo(s)\n", p.Key, p.Label, len(p.Repos))
+		fmt.Printf("  Project: %s  [label: %s]\n", p.Key, p.Label)
+		if skipValidation {
+			fmt.Printf("    Validation:   skipped\n")
+		} else {
+			v := cfg.EffectiveValidation(p)
+			fmt.Printf("    Validation:   %s/%s\n", v.Provider, v.Model)
+		}
+		pl := cfg.EffectivePlan(p)
+		im := cfg.EffectiveImplement(p)
+		rv := cfg.EffectiveReviewFix(p)
+		fmt.Printf("    Plan:         %s/%s\n", pl.Provider, pl.Model)
+		fmt.Printf("    Implement:    %s/%s\n", im.Provider, im.Model)
+		fmt.Printf("    ReviewFix:    %s/%s\n", rv.Provider, rv.Model)
 	}
 }
 
