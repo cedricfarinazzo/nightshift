@@ -84,19 +84,36 @@ func buildStatusMap(statuses []*model.ProjectStatusDetailsScheme) *StatusMap {
 	return sm
 }
 
-// DiscoverStatuses fetches all statuses for the configured project and classifies them.
+// DiscoverStatuses fetches and classifies statuses across all configured projects.
 // The result is cached on the client for the lifetime of the client instance.
 func (c *Client) DiscoverStatuses(ctx context.Context) (*StatusMap, error) {
 	if c.statusMap != nil {
 		return c.statusMap, nil
 	}
-	pages, _, err := c.jira.Project.Statuses(ctx, c.cfg.Project)
-	if err != nil {
-		return nil, fmt.Errorf("jira: discovering statuses: %w", err)
+
+	// Collect all project keys: prefer Projects list, fall back to deprecated flat field.
+	keys := make([]string, 0, len(c.cfg.Projects)+1)
+	for _, p := range c.cfg.Projects {
+		if p.Key != "" {
+			keys = append(keys, p.Key)
+		}
 	}
+	if len(keys) == 0 && c.cfg.Project != "" {
+		keys = append(keys, c.cfg.Project)
+	}
+	if len(keys) == 0 {
+		return nil, fmt.Errorf("jira: no project id or key set")
+	}
+
 	var all []*model.ProjectStatusDetailsScheme
-	for _, page := range pages {
-		all = append(all, page.Statuses...)
+	for _, key := range keys {
+		pages, _, err := c.jira.Project.Statuses(ctx, key)
+		if err != nil {
+			return nil, fmt.Errorf("jira: discovering statuses for %s: %w", key, err)
+		}
+		for _, page := range pages {
+			all = append(all, page.Statuses...)
+		}
 	}
 	c.statusMap = buildStatusMap(all)
 	return c.statusMap, nil
