@@ -21,6 +21,7 @@ import (
 
 	"github.com/marcus/nightshift/internal/config"
 	"github.com/marcus/nightshift/internal/db"
+	jiraconfig "github.com/marcus/nightshift/internal/jira"
 	"github.com/marcus/nightshift/internal/providers"
 	"github.com/marcus/nightshift/internal/reporting"
 	"github.com/marcus/nightshift/internal/scheduler"
@@ -62,6 +63,7 @@ const (
 	stepTaskPreset
 	stepTaskSelect
 	stepSchedule
+	stepJira
 	stepSnapshot
 	stepPreview
 	stepPath
@@ -82,6 +84,26 @@ type modelOption struct {
 // modelProviderLists holds the model option slice for each provider in cursor order
 // (claude=0, codex=1, copilot=2). Used to bound modelCursor in handleModelInput.
 var modelProviderLists = []*[]modelOption{&claudeModels, &codexModels, &copilotModels}
+
+// jiraPhaseModels lists Claude model options used for Jira phase configuration.
+// Kept as a named slice so jiraModelIndex() and its tests remain stable.
+var jiraPhaseModels = []string{
+	"claude-haiku-4.5",
+	"claude-sonnet-4.5",
+	"claude-sonnet-4.6",
+	"claude-opus-4.5",
+	"claude-opus-4.6",
+}
+
+// jiraProviders lists providers selectable for Jira phase configuration.
+var jiraProviders = []string{"claude", "codex", "copilot"}
+
+// jiraPhaseModelsByProvider maps each provider to its model list for Jira phases.
+var jiraPhaseModelsByProvider = map[string][]string{
+	"claude":  jiraPhaseModels,
+	"codex":   {"gpt-5.2-codex", "gpt-5.3-codex", "gpt-5.2"},
+	"copilot": {"claude-haiku-4.5", "claude-sonnet-4.5", "claude-sonnet-4.6", "claude-opus-4.5"},
+}
 
 // claudeModels lists available Claude models.
 // Source: https://platform.claude.com/docs/en/about-claude/models/overview (Claude API aliases)
@@ -154,10 +176,10 @@ type setupModel struct {
 
 	safetyCursor int
 
-	modelCursor      int
-	claudeModelIdx   int
-	codexModelIdx    int
-	copilotModelIdx  int
+	modelCursor     int
+	claudeModelIdx  int
+	codexModelIdx   int
+	copilotModelIdx int
 
 	taskPresetCursor int
 	taskCursor       int
@@ -199,6 +221,30 @@ type setupModel struct {
 	serviceState serviceState
 	daemonAction string
 
+	// Jira step state
+	jiraSubStep       int
+	jiraInput         textinput.Model
+	jiraEnableCursor  int
+	jiraEnabled       bool
+	jiraSite          string
+	jiraEmail         string
+	jiraTokenEnv      string
+	jiraProjectKey    string
+	jiraLabel         string
+	jiraMaxTickets    int
+	jiraRepos         []jiraRepoEntry
+	jiraRepoCursor    int
+	jiraRepoEditing   bool
+	jiraRepoField     int
+	jiraRepoEditURL   string
+	jiraPhaseCursor   int
+	jiraPhaseModelIdx [4]int
+	jiraPhaseProvider [4]string // provider per phase: claude, codex, or copilot
+	jiraPinging       bool
+	jiraPingOK        bool
+	jiraPingErr       string
+	jiraErr           string
+
 	spinner spinner.Model
 }
 
@@ -221,6 +267,16 @@ type snapshotMsg struct {
 type previewMsg struct {
 	output string
 	err    error
+}
+
+type jiraPingMsg struct {
+	ok  bool
+	err string
+}
+
+type jiraRepoEntry struct {
+	URL        string
+	BaseBranch string
 }
 
 type pathOption struct {
@@ -270,6 +326,9 @@ func newSetupModel() (*setupModel, error) {
 	scheduleInput := textinput.New()
 	scheduleInput.Prompt = "> "
 
+	jiraInput := textinput.New()
+	jiraInput.Prompt = "> "
+
 	spin := spinner.New()
 	spin.Spinner = spinner.MiniDot
 
@@ -290,27 +349,75 @@ func newSetupModel() (*setupModel, error) {
 	includePathStep := !nightshiftInPath
 
 	model := &setupModel{
-		step:             stepWelcome,
-		cfg:              cfg,
-		configPath:       configPath,
-		configExist:      configExist,
-		includePathStep:  includePathStep,
-		projects:         projects,
-		projectInput:     projectInput,
-		budgetInput:      budgetInput,
-		taskItems:        taskItems,
-		preset:           preset,
-		scheduleMode:     "interval",
-		scheduleStart:    "22:00",
-		scheduleCycles:   3,
-		scheduleInterval: "30m",
-		scheduleCron:     "0 2 * * *",
-		scheduleInput:    scheduleInput,
-		spinner:          spin,
-		nightshiftInPath: nightshiftInPath,
-		claudeModelIdx:   modelIndex(claudeModels, cfg.Providers.Claude.Model),
-		codexModelIdx:    modelIndex(codexModels, cfg.Providers.Codex.Model),
-		copilotModelIdx:  modelIndex(copilotModels, cfg.Providers.Copilot.Model),
+		step:              stepWelcome,
+		cfg:               cfg,
+		configPath:        configPath,
+		configExist:       configExist,
+		includePathStep:   includePathStep,
+		projects:          projects,
+		projectInput:      projectInput,
+		budgetInput:       budgetInput,
+		taskItems:         taskItems,
+		preset:            preset,
+		scheduleMode:      "interval",
+		scheduleStart:     "22:00",
+		scheduleCycles:    3,
+		scheduleInterval:  "30m",
+		scheduleCron:      "0 2 * * *",
+		scheduleInput:     scheduleInput,
+		spinner:           spin,
+		nightshiftInPath:  nightshiftInPath,
+		claudeModelIdx:    modelIndex(claudeModels, cfg.Providers.Claude.Model),
+		codexModelIdx:     modelIndex(codexModels, cfg.Providers.Codex.Model),
+		copilotModelIdx:   modelIndex(copilotModels, cfg.Providers.Copilot.Model),
+		jiraInput:         jiraInput,
+		jiraTokenEnv:      "JIRA_API_TOKEN",
+		jiraLabel:         "nightshift",
+		jiraMaxTickets:    10,
+		jiraPhaseProvider: defaultJiraPhaseProviders(cfg.Providers.Preference),
+		jiraPhaseModelIdx: defaultJiraPhaseModelIdxs(cfg.Providers.Preference),
+	}
+
+	// Pre-populate from existing Jira config when re-running wizard.
+	if cfg.Jira.Site != "" {
+		model.jiraEnabled = true
+		model.jiraSite = cfg.Jira.Site
+		model.jiraEmail = cfg.Jira.Email
+		if cfg.Jira.TokenEnv != "" {
+			model.jiraTokenEnv = cfg.Jira.TokenEnv
+		}
+		if cfg.Jira.Label != "" {
+			model.jiraLabel = cfg.Jira.Label
+		}
+		if cfg.Jira.MaxTickets > 0 {
+			model.jiraMaxTickets = cfg.Jira.MaxTickets
+		}
+		if len(cfg.Jira.Projects) > 0 {
+			model.jiraProjectKey = cfg.Jira.Projects[0].Key
+			for _, r := range cfg.Jira.Projects[0].Repos {
+				model.jiraRepos = append(model.jiraRepos, jiraRepoEntry{
+					URL:        r.URL,
+					BaseBranch: r.BaseBranch,
+				})
+			}
+		}
+		model.jiraPhaseModelIdx = [4]int{
+			jiraModelIndexForProvider(model.jiraPhaseProvider[0], cfg.Jira.Validation.Model),
+			jiraModelIndexForProvider(model.jiraPhaseProvider[1], cfg.Jira.Plan.Model),
+			jiraModelIndexForProvider(model.jiraPhaseProvider[2], cfg.Jira.Implement.Model),
+			jiraModelIndexForProvider(model.jiraPhaseProvider[3], cfg.Jira.ReviewFix.Model),
+		}
+		// Populate per-phase providers from existing config (fall back to claude for old configs).
+		for i, phase := range []jiraconfig.PhaseConfig{
+			cfg.Jira.Validation, cfg.Jira.Plan, cfg.Jira.Implement, cfg.Jira.ReviewFix,
+		} {
+			p := phase.Provider
+			if p == "" {
+				p = "claude"
+			}
+			model.jiraPhaseProvider[i] = p
+			model.jiraPhaseModelIdx[i] = jiraModelIndexForProvider(p, phase.Model)
+		}
 	}
 
 	return model, nil
@@ -356,6 +463,8 @@ func (m *setupModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.handleTaskInput(msg)
 		case stepSchedule:
 			return m.handleScheduleInput(msg)
+		case stepJira:
+			return m.handleJiraInput(msg)
 		case stepSnapshot:
 			if !m.snapshotRunning && msg.String() == "enter" {
 				return m, m.setStep(stepPreview)
@@ -384,6 +493,10 @@ func (m *setupModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.previewRunning = false
 		m.previewOutput = msg.output
 		m.previewErr = msg.err
+	case jiraPingMsg:
+		m.jiraPinging = false
+		m.jiraPingOK = msg.ok
+		m.jiraPingErr = msg.err
 	}
 
 	return m, cmd
@@ -541,6 +654,10 @@ func (m *setupModel) View() string {
 			b.WriteString("\nError: " + m.scheduleErr + "\n")
 		}
 		b.WriteString("\nPress Enter to continue.\n")
+	case stepJira:
+		b.WriteString(styleAccent.Render("Jira integration"))
+		b.WriteString("\n")
+		renderJiraStep(&b, m)
 	case stepSnapshot:
 		b.WriteString(styleAccent.Render("Snapshot step"))
 		b.WriteString("\n")
@@ -652,6 +769,11 @@ func (m *setupModel) View() string {
 func (m *setupModel) setStep(step setupStep) tea.Cmd {
 	m.step = step
 	switch step {
+	case stepJira:
+		m.jiraSubStep = 0
+		m.jiraErr = ""
+		m.jiraInput.SetValue("")
+		m.jiraInput.Blur()
 	case stepSnapshot:
 		m.snapshotRunning = true
 		m.snapshotOutput = ""
@@ -963,7 +1085,7 @@ func (m *setupModel) handleScheduleInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.scheduleErr = err.Error()
 			return m, nil
 		}
-		return m, m.setStep(stepSnapshot)
+		return m, m.setStep(stepJira)
 	}
 	return m, nil
 }
@@ -1946,6 +2068,7 @@ func setupSteps(includePathStep bool) []setupStepInfo {
 		{step: stepTaskPreset, label: "Task presets"},
 		{step: stepTaskSelect, label: "Task selection"},
 		{step: stepSchedule, label: "Schedule"},
+		{step: stepJira, label: "Jira"},
 		{step: stepSnapshot, label: "Snapshot"},
 		{step: stepPreview, label: "Preview"},
 	}
@@ -2126,6 +2249,40 @@ func writeGlobalConfigToPath(cfg *config.Config, configPath string) error {
 	v.Set("projects", cfg.Projects)
 	v.Set("tasks.enabled", cfg.Tasks.Enabled)
 
+	// Jira integration — written unconditionally to prevent stale keys.
+	// When Jira is disabled (Site is empty), all jira.* keys are zeroed out.
+	if cfg.Jira.Site != "" {
+		v.Set("jira.site", cfg.Jira.Site)
+		v.Set("jira.email", cfg.Jira.Email)
+		v.Set("jira.token_env", cfg.Jira.TokenEnv)
+		v.Set("jira.label", cfg.Jira.Label)
+		v.Set("jira.max_tickets", cfg.Jira.MaxTickets)
+		v.Set("jira.workspace_root", cfg.Jira.WorkspaceRoot)
+		v.Set("jira.cleanup_after_days", cfg.Jira.CleanupAfterDays)
+		v.Set("jira.budget_enabled", cfg.Jira.BudgetEnabled)
+		v.Set("jira.projects", cfg.Jira.Projects)
+		v.Set("jira.validation", cfg.Jira.Validation)
+		v.Set("jira.plan", cfg.Jira.Plan)
+		v.Set("jira.implement", cfg.Jira.Implement)
+		v.Set("jira.review_fix", cfg.Jira.ReviewFix)
+	} else {
+		// Explicitly zero out every jira leaf key so a previously enabled Jira config
+		// does not survive a disable-and-save round-trip.
+		v.Set("jira.site", "")
+		v.Set("jira.email", "")
+		v.Set("jira.token_env", "")
+		v.Set("jira.label", "")
+		v.Set("jira.max_tickets", 0)
+		v.Set("jira.workspace_root", "")
+		v.Set("jira.cleanup_after_days", 0)
+		v.Set("jira.budget_enabled", false)
+		v.Set("jira.projects", []interface{}{})
+		v.Set("jira.validation", map[string]interface{}{})
+		v.Set("jira.plan", map[string]interface{}{})
+		v.Set("jira.implement", map[string]interface{}{})
+		v.Set("jira.review_fix", map[string]interface{}{})
+	}
+
 	if err := v.WriteConfig(); err != nil {
 		if os.IsNotExist(err) {
 			return v.SafeWriteConfig()
@@ -2206,4 +2363,627 @@ func gitignoreHasEntry(content, entry string) bool {
 		}
 	}
 	return false
+}
+
+// jiraSubStep constants for the Jira wizard step.
+const (
+	jiraSubStepEnable     = 0
+	jiraSubStepSite       = 1
+	jiraSubStepEmail      = 2
+	jiraSubStepTokenEnv   = 3
+	jiraSubStepProject    = 4
+	jiraSubStepLabel      = 5
+	jiraSubStepRepos      = 6
+	jiraSubStepPhases     = 7
+	jiraSubStepMaxTickets = 8
+	jiraSubStepPing       = 9
+)
+
+// jiraModelIndex returns the index of model in jiraPhaseModels, defaulting to 0.
+func jiraModelIndex(model string) int {
+	for i, m := range jiraPhaseModels {
+		if m == model {
+			return i
+		}
+	}
+	return 0
+}
+
+// jiraPhaseModelsForProvider returns the model list for provider, falling back to claude.
+func jiraPhaseModelsForProvider(provider string) []string {
+	if models, ok := jiraPhaseModelsByProvider[provider]; ok {
+		return models
+	}
+	return jiraPhaseModelsByProvider["claude"]
+}
+
+// jiraProviderIndex returns the index of provider in jiraProviders, defaulting to 0.
+func jiraProviderIndex(provider string) int {
+	for i, p := range jiraProviders {
+		if p == provider {
+			return i
+		}
+	}
+	return 0
+}
+
+// jiraModelIndexForProvider returns the index of model within the provider's model list.
+func jiraModelIndexForProvider(provider, model string) int {
+	models := jiraPhaseModelsForProvider(provider)
+	for i, m := range models {
+		if m == model {
+			return i
+		}
+	}
+	return 0
+}
+
+// defaultJiraPhaseProviders returns the initial provider array for Jira phases,
+// using the first entry of preference (or claude as the fallback).
+func defaultJiraPhaseProviders(preference []string) [4]string {
+	p := "claude"
+	if len(preference) > 0 && preference[0] != "" {
+		p = preference[0]
+	}
+	return [4]string{p, p, p, p}
+}
+
+// defaultJiraPhaseModelIdxs returns initial model indexes for Jira phases.
+// validation defaults to index 0 (cheapest); the other phases default to index 1 (balanced).
+func defaultJiraPhaseModelIdxs(preference []string) [4]int {
+	p := "claude"
+	if len(preference) > 0 && preference[0] != "" {
+		p = preference[0]
+	}
+	models := jiraPhaseModelsForProvider(p)
+	implIdx := 0
+	if len(models) > 1 {
+		implIdx = 1
+	}
+	return [4]int{0, implIdx, implIdx, implIdx}
+}
+
+// handleJiraInput dispatches to the appropriate Jira sub-step handler.
+func (m *setupModel) handleJiraInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch m.jiraSubStep {
+	case jiraSubStepEnable:
+		return m.handleJiraEnableInput(msg)
+	case jiraSubStepSite, jiraSubStepEmail, jiraSubStepTokenEnv,
+		jiraSubStepProject, jiraSubStepLabel, jiraSubStepMaxTickets:
+		return m.handleJiraTextInput(msg)
+	case jiraSubStepRepos:
+		return m.handleJiraRepoInput(msg)
+	case jiraSubStepPhases:
+		return m.handleJiraPhaseInput(msg)
+	case jiraSubStepPing:
+		return m.handleJiraPingInput(msg)
+	}
+	return m, nil
+}
+
+func (m *setupModel) handleJiraEnableInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "up", "k":
+		if m.jiraEnableCursor > 0 {
+			m.jiraEnableCursor--
+		}
+	case "down", "j":
+		if m.jiraEnableCursor < 1 {
+			m.jiraEnableCursor++
+		}
+	case "y", "Y":
+		m.jiraEnabled = true
+		m.jiraSubStep = jiraSubStepSite
+		m.jiraInput.SetValue(m.jiraSite)
+		m.jiraInput.Focus()
+	case "n", "N":
+		m.jiraEnabled = false
+		m.cfg.Jira = jiraconfig.JiraConfig{}
+		if err := writeGlobalConfig(m.cfg); err != nil {
+			m.jiraErr = err.Error()
+			return m, nil
+		}
+		return m, m.setStep(stepSnapshot)
+	case "enter":
+		if m.jiraEnableCursor == 0 {
+			m.jiraEnabled = true
+			m.jiraSubStep = jiraSubStepSite
+			m.jiraInput.SetValue(m.jiraSite)
+			m.jiraInput.Focus()
+		} else {
+			m.jiraEnabled = false
+			m.cfg.Jira = jiraconfig.JiraConfig{}
+			if err := writeGlobalConfig(m.cfg); err != nil {
+				m.jiraErr = err.Error()
+				return m, nil
+			}
+			return m, m.setStep(stepSnapshot)
+		}
+	}
+	return m, nil
+}
+
+func (m *setupModel) handleJiraTextInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		m.jiraErr = ""
+		m.jiraInput.Blur()
+		return m, nil
+	case "enter":
+		value := strings.TrimSpace(m.jiraInput.Value())
+		switch m.jiraSubStep {
+		case jiraSubStepSite:
+			if value == "" {
+				m.jiraErr = "site is required"
+				return m, nil
+			}
+			// Strip https:// prefix if user pastes full URL
+			value = strings.TrimPrefix(value, "https://")
+			value = strings.TrimSuffix(value, ".atlassian.net")
+			value = strings.TrimSuffix(value, "/")
+			m.jiraSite = value
+			m.jiraErr = ""
+			m.jiraSubStep = jiraSubStepEmail
+			m.jiraInput.SetValue(m.jiraEmail)
+			m.jiraInput.Focus()
+		case jiraSubStepEmail:
+			if value == "" {
+				m.jiraErr = "email is required"
+				return m, nil
+			}
+			m.jiraEmail = value
+			m.jiraErr = ""
+			m.jiraSubStep = jiraSubStepTokenEnv
+			m.jiraInput.SetValue(m.jiraTokenEnv)
+			m.jiraInput.Focus()
+		case jiraSubStepTokenEnv:
+			if value == "" {
+				value = "JIRA_API_TOKEN"
+			}
+			m.jiraTokenEnv = value
+			m.jiraErr = ""
+			m.jiraSubStep = jiraSubStepProject
+			m.jiraInput.SetValue(m.jiraProjectKey)
+			m.jiraInput.Focus()
+		case jiraSubStepProject:
+			if value == "" {
+				m.jiraErr = "project key is required"
+				return m, nil
+			}
+			m.jiraProjectKey = strings.ToUpper(value)
+			m.jiraErr = ""
+			m.jiraSubStep = jiraSubStepLabel
+			m.jiraInput.SetValue(m.jiraLabel)
+			m.jiraInput.Focus()
+		case jiraSubStepLabel:
+			if value == "" {
+				value = "nightshift"
+			}
+			m.jiraLabel = value
+			m.jiraErr = ""
+			m.jiraSubStep = jiraSubStepRepos
+			m.jiraInput.Blur()
+		case jiraSubStepMaxTickets:
+			if value == "" {
+				value = "10"
+			}
+			n, err := strconv.Atoi(value)
+			if err != nil || n <= 0 {
+				m.jiraErr = "max tickets must be a positive integer"
+				return m, nil
+			}
+			m.jiraMaxTickets = n
+			m.jiraErr = ""
+			m.jiraSubStep = jiraSubStepPing
+			m.jiraInput.Blur()
+			m.jiraPinging = true
+			m.jiraPingOK = false
+			m.jiraPingErr = ""
+			return m, runJiraPingCmd(m)
+		}
+		return m, nil
+	}
+	var cmd tea.Cmd
+	m.jiraInput, cmd = m.jiraInput.Update(msg)
+	return m, cmd
+}
+
+func (m *setupModel) handleJiraRepoInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.jiraRepoEditing {
+		switch msg.String() {
+		case "esc":
+			m.jiraRepoEditing = false
+			m.jiraRepoField = 0
+			m.jiraRepoEditURL = ""
+			m.jiraErr = ""
+			m.jiraInput.Blur()
+			return m, nil
+		case "enter":
+			value := strings.TrimSpace(m.jiraInput.Value())
+			if m.jiraRepoField == 0 {
+				// Collecting URL
+				if value == "" {
+					m.jiraErr = "URL is required"
+					return m, nil
+				}
+				m.jiraRepoEditURL = value
+				m.jiraRepoField = 1
+				m.jiraInput.SetValue("main")
+				m.jiraInput.Focus()
+				m.jiraErr = ""
+				return m, nil
+			}
+			// Collecting base branch
+			branch := value
+			if branch == "" {
+				branch = "main"
+			}
+			m.jiraRepos = append(m.jiraRepos, jiraRepoEntry{
+				URL:        m.jiraRepoEditURL,
+				BaseBranch: branch,
+			})
+			m.jiraRepoCursor = len(m.jiraRepos) - 1
+			m.jiraRepoEditing = false
+			m.jiraRepoField = 0
+			m.jiraRepoEditURL = ""
+			m.jiraErr = ""
+			m.jiraInput.Blur()
+			return m, nil
+		}
+		var cmd tea.Cmd
+		m.jiraInput, cmd = m.jiraInput.Update(msg)
+		return m, cmd
+	}
+
+	switch msg.String() {
+	case "up", "k":
+		if m.jiraRepoCursor > 0 {
+			m.jiraRepoCursor--
+		}
+	case "down", "j":
+		if m.jiraRepoCursor < len(m.jiraRepos)-1 {
+			m.jiraRepoCursor++
+		}
+	case "a":
+		m.jiraRepoEditing = true
+		m.jiraRepoField = 0
+		m.jiraRepoEditURL = ""
+		m.jiraErr = ""
+		m.jiraInput.SetValue("")
+		m.jiraInput.Placeholder = "git@github.com:org/repo.git"
+		m.jiraInput.Focus()
+	case "d":
+		if len(m.jiraRepos) > 0 {
+			m.jiraRepos = append(m.jiraRepos[:m.jiraRepoCursor], m.jiraRepos[m.jiraRepoCursor+1:]...)
+			if m.jiraRepoCursor >= len(m.jiraRepos) && m.jiraRepoCursor > 0 {
+				m.jiraRepoCursor--
+			}
+		}
+	case "enter":
+		if len(m.jiraRepos) == 0 {
+			m.jiraErr = "add at least one repository"
+			return m, nil
+		}
+		m.jiraErr = ""
+		m.jiraSubStep = jiraSubStepPhases
+	}
+	return m, nil
+}
+
+func (m *setupModel) handleJiraPhaseInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "up", "k":
+		if m.jiraPhaseCursor > 0 {
+			m.jiraPhaseCursor--
+		}
+	case "down", "j":
+		if m.jiraPhaseCursor < 3 {
+			m.jiraPhaseCursor++
+		}
+	case "left", "h":
+		if m.jiraPhaseModelIdx[m.jiraPhaseCursor] > 0 {
+			m.jiraPhaseModelIdx[m.jiraPhaseCursor]--
+		}
+	case "right", "l":
+		provider := m.jiraPhaseProvider[m.jiraPhaseCursor]
+		models := jiraPhaseModelsForProvider(provider)
+		if m.jiraPhaseModelIdx[m.jiraPhaseCursor] < len(models)-1 {
+			m.jiraPhaseModelIdx[m.jiraPhaseCursor]++
+		}
+	case "tab":
+		// Cycle provider for the selected phase; reset model index to avoid out-of-bounds.
+		idx := jiraProviderIndex(m.jiraPhaseProvider[m.jiraPhaseCursor])
+		idx = (idx + 1) % len(jiraProviders)
+		m.jiraPhaseProvider[m.jiraPhaseCursor] = jiraProviders[idx]
+		m.jiraPhaseModelIdx[m.jiraPhaseCursor] = 0
+	case "enter":
+		m.jiraSubStep = jiraSubStepMaxTickets
+		m.jiraInput.SetValue(strconv.Itoa(m.jiraMaxTickets))
+		m.jiraInput.Placeholder = "10"
+		m.jiraInput.Focus()
+	}
+	return m, nil
+}
+
+func (m *setupModel) handleJiraPingInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.jiraPinging {
+		// Still waiting for ping — ignore keystrokes
+		return m, nil
+	}
+	if msg.String() == "enter" {
+		m.applyJiraConfig()
+		if err := writeGlobalConfig(m.cfg); err != nil {
+			m.jiraErr = err.Error()
+			return m, nil
+		}
+		return m, m.setStep(stepSnapshot)
+	}
+	return m, nil
+}
+
+// applyJiraConfig populates cfg.Jira from wizard state.
+func (m *setupModel) applyJiraConfig() {
+	if !m.jiraEnabled {
+		m.cfg.Jira = jiraconfig.JiraConfig{}
+		return
+	}
+
+	repos := make([]jiraconfig.RepoConfig, 0, len(m.jiraRepos))
+	for _, r := range m.jiraRepos {
+		branch := r.BaseBranch
+		if branch == "" {
+			branch = "main"
+		}
+		repos = append(repos, jiraconfig.RepoConfig{
+			Name:       repoNameFromURL(r.URL),
+			URL:        r.URL,
+			BaseBranch: branch,
+		})
+	}
+
+	phases := [4]jiraconfig.PhaseConfig{}
+	for i := range phases {
+		provider := m.jiraPhaseProvider[i]
+		if provider == "" {
+			provider = "claude"
+		}
+		models := jiraPhaseModelsForProvider(provider)
+		model := ""
+		if m.jiraPhaseModelIdx[i] < len(models) {
+			model = models[m.jiraPhaseModelIdx[i]]
+		}
+		phases[i] = jiraconfig.PhaseConfig{
+			Provider: provider,
+			Model:    model,
+		}
+	}
+
+	m.cfg.Jira = jiraconfig.JiraConfig{
+		Site:             m.jiraSite,
+		Email:            m.jiraEmail,
+		TokenEnv:         m.jiraTokenEnv,
+		Label:            m.jiraLabel,
+		MaxTickets:       m.jiraMaxTickets,
+		BudgetEnabled:    true,
+		CleanupAfterDays: 30,
+		Projects: []jiraconfig.ProjectConfig{{
+			Key:   m.jiraProjectKey,
+			Label: m.jiraLabel,
+			Repos: repos,
+		}},
+		Validation: phases[0],
+		Plan:       phases[1],
+		Implement:  phases[2],
+		ReviewFix:  phases[3],
+	}
+}
+
+// repoNameFromURL derives a short repo name from a git SSH or HTTPS URL.
+func repoNameFromURL(url string) string {
+	base := filepath.Base(url)
+	return strings.TrimSuffix(base, ".git")
+}
+
+// runJiraPingCmd returns a tea.Cmd that pings the Jira API asynchronously.
+func runJiraPingCmd(m *setupModel) tea.Cmd {
+	cfg := jiraconfig.JiraConfig{
+		Site:     m.jiraSite,
+		Email:    m.jiraEmail,
+		TokenEnv: m.jiraTokenEnv,
+	}
+	return func() tea.Msg {
+		client, err := jiraconfig.NewClient(cfg)
+		if err != nil {
+			return jiraPingMsg{ok: false, err: err.Error()}
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := client.Ping(ctx); err != nil {
+			return jiraPingMsg{ok: false, err: err.Error()}
+		}
+		return jiraPingMsg{ok: true}
+	}
+}
+
+// renderJiraStep renders the Jira wizard step based on the current sub-step.
+func renderJiraStep(b *strings.Builder, m *setupModel) {
+	switch m.jiraSubStep {
+	case jiraSubStepEnable:
+		b.WriteString("Connect Nightshift to Jira for autonomous ticket processing?\n\n")
+		options := []string{"Yes, enable Jira integration", "No, skip"}
+		for i, opt := range options {
+			cursor := " "
+			if i == m.jiraEnableCursor {
+				cursor = ">"
+			}
+			fmt.Fprintf(b, " %s %s\n", cursor, opt)
+		}
+		b.WriteString("\nUse ↑/↓ to select, y/n or Enter to choose.\n")
+
+	case jiraSubStepSite:
+		b.WriteString("Jira instance URL\n")
+		b.WriteString(styleNote.Render("Enter your subdomain (e.g. mysite) or full URL (https://mysite.atlassian.net)"))
+		b.WriteString("\n\n")
+		b.WriteString(m.jiraInput.View() + "\n")
+		if m.jiraErr != "" {
+			b.WriteString(styleWarn.Render("Error: "+m.jiraErr) + "\n")
+		}
+		b.WriteString("\nPress Enter to continue.\n")
+
+	case jiraSubStepEmail:
+		b.WriteString("Jira account email\n\n")
+		b.WriteString(m.jiraInput.View() + "\n")
+		if m.jiraErr != "" {
+			b.WriteString(styleWarn.Render("Error: "+m.jiraErr) + "\n")
+		}
+		b.WriteString("\nPress Enter to continue.\n")
+
+	case jiraSubStepTokenEnv:
+		b.WriteString("API token environment variable\n")
+		b.WriteString(styleNote.Render("Name of the env var holding your Jira API token (default: JIRA_API_TOKEN)"))
+		b.WriteString("\n\n")
+		b.WriteString(m.jiraInput.View() + "\n")
+		envName := strings.TrimSpace(m.jiraInput.Value())
+		if envName == "" {
+			envName = m.jiraTokenEnv
+		}
+		if os.Getenv(envName) != "" {
+			b.WriteString(styleOk.Render("✓ env var is set") + "\n")
+		} else {
+			b.WriteString(styleWarn.Render("✗ env var not set — set it before running nightshift jira run") + "\n")
+		}
+		if m.jiraErr != "" {
+			b.WriteString(styleWarn.Render("Error: "+m.jiraErr) + "\n")
+		}
+		b.WriteString("\nPress Enter to continue.\n")
+
+	case jiraSubStepProject:
+		b.WriteString("Jira project key\n")
+		b.WriteString(styleNote.Render("e.g. PROJ or VC"))
+		b.WriteString("\n\n")
+		b.WriteString(m.jiraInput.View() + "\n")
+		if m.jiraErr != "" {
+			b.WriteString(styleWarn.Render("Error: "+m.jiraErr) + "\n")
+		}
+		b.WriteString("\nPress Enter to continue.\n")
+
+	case jiraSubStepLabel:
+		b.WriteString("Ticket label filter\n")
+		b.WriteString(styleNote.Render("Only tickets with this label will be processed (default: nightshift)"))
+		b.WriteString("\n\n")
+		b.WriteString(m.jiraInput.View() + "\n")
+		if m.jiraErr != "" {
+			b.WriteString(styleWarn.Render("Error: "+m.jiraErr) + "\n")
+		}
+		b.WriteString("\nPress Enter to continue.\n")
+
+	case jiraSubStepRepos:
+		renderJiraReposStep(b, m)
+
+	case jiraSubStepPhases:
+		renderJiraPhasesStep(b, m)
+
+	case jiraSubStepMaxTickets:
+		b.WriteString("Max tickets per run\n")
+		b.WriteString(styleNote.Render("Maximum number of tickets to process in a single run (default: 10)"))
+		b.WriteString("\n\n")
+		b.WriteString(m.jiraInput.View() + "\n")
+		if m.jiraErr != "" {
+			b.WriteString(styleWarn.Render("Error: "+m.jiraErr) + "\n")
+		}
+		b.WriteString("\nPress Enter to continue (will test connection).\n")
+
+	case jiraSubStepPing:
+		b.WriteString("Testing Jira connection...\n\n")
+		if m.jiraPinging {
+			b.WriteString(styleNote.Render("Connecting to Jira...") + "\n")
+		} else if m.jiraPingOK {
+			b.WriteString(styleOk.Render("✓ Connected to Jira successfully") + "\n")
+		} else {
+			b.WriteString(styleWarn.Render("✗ Connection failed: "+m.jiraPingErr) + "\n")
+			b.WriteString(styleNote.Render("You can still continue — verify credentials before running nightshift jira run.") + "\n")
+		}
+		if m.jiraErr != "" {
+			b.WriteString(styleWarn.Render("Error: "+m.jiraErr) + "\n")
+		}
+		if !m.jiraPinging {
+			b.WriteString("\nPress Enter to save and continue.\n")
+		}
+	}
+}
+
+func renderJiraReposStep(b *strings.Builder, m *setupModel) {
+	if m.jiraRepoEditing {
+		if m.jiraRepoField == 0 {
+			b.WriteString("Repository SSH URL\n")
+			b.WriteString(styleNote.Render("e.g. git@github.com:org/repo.git — SSH required for non-interactive git"))
+			b.WriteString("\n\n")
+			b.WriteString(m.jiraInput.View() + "\n")
+			url := strings.TrimSpace(m.jiraInput.Value())
+			if strings.HasPrefix(url, "https://") {
+				b.WriteString(styleWarn.Render("⚠ HTTPS URL detected — SSH is required (use git@github.com:...)") + "\n")
+			}
+		} else {
+			b.WriteString(fmt.Sprintf("Base branch for %s\n", repoNameFromURL(m.jiraRepoEditURL)))
+			b.WriteString(styleNote.Render("Default branch for new feature branches (default: main)"))
+			b.WriteString("\n\n")
+			b.WriteString(m.jiraInput.View() + "\n")
+		}
+		if m.jiraErr != "" {
+			b.WriteString(styleWarn.Render("Error: "+m.jiraErr) + "\n")
+		}
+		b.WriteString("\nPress Enter to confirm, Esc to cancel.\n")
+		return
+	}
+
+	b.WriteString("Repositories\n")
+	b.WriteString("Use ↑/↓ to navigate, 'a' to add, 'd' to delete.\n\n")
+	if len(m.jiraRepos) == 0 {
+		b.WriteString(styleDim.Render("  (no repositories configured)") + "\n")
+	}
+	for i, repo := range m.jiraRepos {
+		cursor := " "
+		if i == m.jiraRepoCursor {
+			cursor = ">"
+		}
+		name := repoNameFromURL(repo.URL)
+		fmt.Fprintf(b, " %s %s  [%s]\n", cursor, name, repo.URL)
+		warn := ""
+		if strings.HasPrefix(repo.URL, "https://") {
+			warn = "  " + styleWarn.Render("⚠ HTTPS URL — SSH recommended")
+		}
+		if warn != "" {
+			b.WriteString(warn + "\n")
+		}
+	}
+	if m.jiraErr != "" {
+		b.WriteString("\n" + styleWarn.Render("Error: "+m.jiraErr) + "\n")
+	}
+	b.WriteString("\nPress Enter to continue.\n")
+}
+
+func renderJiraPhasesStep(b *strings.Builder, m *setupModel) {
+	b.WriteString("Phase models\n")
+	b.WriteString("Use ↑/↓ to select phase, ←/→ to change model, Tab to change provider.\n\n")
+
+	phaseLabels := [4]string{"Validation ", "Plan       ", "Implement  ", "Review-fix "}
+	for i, label := range phaseLabels {
+		cursor := " "
+		if i == m.jiraPhaseCursor {
+			cursor = ">"
+		}
+		provider := m.jiraPhaseProvider[i]
+		if provider == "" {
+			provider = "claude"
+		}
+		models := jiraPhaseModelsForProvider(provider)
+		modelName := ""
+		if m.jiraPhaseModelIdx[i] < len(models) {
+			modelName = models[m.jiraPhaseModelIdx[i]]
+		}
+		fmt.Fprintf(b, " %s %-11s  %-8s  ← %s →\n", cursor, label, provider, modelName)
+	}
+	b.WriteString("\n")
+	b.WriteString(styleNote.Render("Tip: haiku is cheaper/faster for validation; sonnet for implementation."))
+	b.WriteString("\n\nPress Enter to continue.\n")
 }
