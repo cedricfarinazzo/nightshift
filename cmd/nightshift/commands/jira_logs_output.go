@@ -114,14 +114,15 @@ func renderJiraRunSummaryTable(run *db.JiraRun, results []db.JiraTicketResult) e
 			}
 		}
 		statusStyle := statusStyle(styles, r.Status)
+		// Apply status style to the status field
+		styledStatus := statusStyle.Render(r.Status)
 		line := fmt.Sprintf("  %-*s  %-*s  %-*s  %-*s  %s",
 			wTicket, r.TicketKey,
-			wStatus, r.Status,
+			wStatus, styledStatus,
 			wDur, dur,
 			wPhase, r.PhaseReached,
 			prCell,
 		)
-		_ = statusStyle
 		fmt.Println(line)
 	}
 
@@ -221,9 +222,25 @@ func truncateOutput(s string) string {
 	if utf8.RuneCountInString(s) <= maxOutputRunes {
 		return s
 	}
-	runes := []rune(s)
-	truncated := runes[len(runes)-maxOutputRunes:]
-	return "[... truncated ...]\n" + string(truncated)
+	// Efficiently truncate by byte boundary to avoid converting entire string to []rune
+	// This is O(n) in worst case but typically O(maxOutputRunes) in practice
+	startIdx := len(s) - maxOutputRunes*4 // estimate bytes needed (4 bytes per rune max in UTF-8)
+	if startIdx < 0 {
+		startIdx = 0
+	}
+	// Walk backwards from estimated position to find safe UTF-8 boundary
+	for startIdx < len(s) {
+		r, size := utf8.DecodeRuneInString(s[startIdx:])
+		if r == utf8.RuneError {
+			startIdx++ // skip invalid byte
+			continue
+		}
+		if utf8.RuneCountInString(s[startIdx:]) <= maxOutputRunes {
+			break
+		}
+		startIdx += size
+	}
+	return "[... truncated ...]\n" + s[startIdx:]
 }
 
 func formatDurationMs(ms int64) string {

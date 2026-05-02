@@ -79,7 +79,13 @@ func runJira(cmd *cobra.Command, _ []string) error {
 		runDB = nil
 	}
 	if runDB != nil {
-		if err := runDB.SaveJiraRun(ctx, runID, firstProjectKey(cfg.Jira), time.Now()); err != nil {
+		defer func() { _ = runDB.Close() }()
+		projectKey := firstProjectKey(cfg.Jira)
+		// When multiple projects run, use "multi" to avoid misleading metadata.
+		if len(cfg.Jira.Projects) > 1 {
+			projectKey = "multi"
+		}
+		if err := runDB.SaveJiraRun(ctx, runID, projectKey, time.Now()); err != nil {
 			log.Errorf("save jira run: %v", err)
 		}
 	}

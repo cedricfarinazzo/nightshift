@@ -84,6 +84,14 @@ func runJiraLogs(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("--follow cannot be combined with --summary, --agent-output, --raw, --export, or --run")
 	}
 
+	// --status and --phase only work with DB-backed modes.
+	if statusFlag != "" && !summary && !agentOutput && runFlag == "" {
+		return fmt.Errorf("--status requires --summary, --agent-output, or --run")
+	}
+	if phaseFlag != "" && !summary && !agentOutput && runFlag == "" {
+		return fmt.Errorf("--phase requires --summary, --agent-output, or --run")
+	}
+
 	// DB-backed modes need the database.
 	needsDB := summary || agentOutput || runFlag != ""
 
@@ -95,6 +103,11 @@ func runJiraLogs(cmd *cobra.Command, _ []string) error {
 			return fmt.Errorf("cannot open database (required for --summary/--run/--agent-output): %w", err)
 		}
 		defer func() { _ = database.Close() }()
+	}
+
+	// --run requires --summary or --agent-output.
+	if runFlag != "" && !summary && !agentOutput {
+		return fmt.Errorf("--run requires --summary or --agent-output")
 	}
 
 	ctx := context.Background()

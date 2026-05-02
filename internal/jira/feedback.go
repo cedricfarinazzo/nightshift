@@ -55,6 +55,22 @@ func (o *Orchestrator) ProcessFeedback(ctx context.Context, ticket Ticket, ws *W
 	result := &FeedbackResult{TicketKey: ticket.Key}
 	start := time.Now()
 
+	// Persist ticket result when ProcessFeedback returns; non-fatal.
+	defer func() {
+		if result != nil {
+			prURL := ""
+			if len(result.PRURLs) > 0 {
+				prURL = result.PRURLs[0]
+			}
+			// For feedback runs, the phase is review_fix and phase_reached is also review_fix.
+			status := "completed"
+			if result.Error != "" {
+				status = "failed"
+			}
+			o.saveTicketResult(ctx, ticket.Key, status, string(PhaseReviewFix), prURL, result.Error, result.Duration.Milliseconds())
+		}
+	}()
+
 	agent := o.reviewFixAgent
 	if agent == nil {
 		agent = o.implAgent
