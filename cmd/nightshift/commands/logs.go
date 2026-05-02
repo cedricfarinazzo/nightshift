@@ -125,6 +125,7 @@ type logEntry struct {
 	Message   string    `json:"message"`
 	Component string    `json:"component,omitempty"`
 	Error     string    `json:"error,omitempty"`
+	TicketKey string    `json:"ticket_key,omitempty"`
 }
 
 type logFilter struct {
@@ -133,6 +134,7 @@ type logFilter struct {
 	level     string
 	component string
 	match     string
+	ticketKey string
 }
 
 type logRecord struct {
@@ -442,6 +444,18 @@ func matchesFilter(record logRecord, filter logFilter) bool {
 			return false
 		}
 		if !strings.Contains(strings.ToLower(record.entry.Component), filter.component) {
+			return false
+		}
+	}
+	if filter.ticketKey != "" {
+		if record.parsed {
+			key := strings.ToUpper(filter.ticketKey)
+			if !strings.Contains(strings.ToUpper(record.entry.TicketKey), key) &&
+				!strings.Contains(strings.ToUpper(record.entry.Message), key) &&
+				!strings.Contains(strings.ToUpper(record.entry.Error), key) {
+				return false
+			}
+		} else if !strings.Contains(strings.ToUpper(record.raw), strings.ToUpper(filter.ticketKey)) {
 			return false
 		}
 	}

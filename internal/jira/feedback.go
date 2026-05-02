@@ -154,6 +154,7 @@ func (o *Orchestrator) ProcessFeedback(ctx context.Context, ticket Ticket, ws *W
 			rfCfg := o.cfg.EffectiveReviewFix(o.proj)
 			timeout := parseTimeout(rfCfg.Timeout, 20*time.Minute)
 			o.emit("🤖 %s running: review-fix  (%s, timeout %s)", rfCfg.Provider, rfCfg.Model, timeout.Round(time.Minute))
+			rfStart := time.Now()
 			agentResult, err := agent.Execute(ctx, agents.ExecuteOptions{
 				Prompt:  prompt,
 				WorkDir: repo.Path,
@@ -161,8 +162,10 @@ func (o *Orchestrator) ProcessFeedback(ctx context.Context, ticket Ticket, ws *W
 				Model:   rfCfg.Model,
 			})
 			if err != nil {
+				o.savePhaseLog(ctx, ticket.Key, PhaseReviewFix, rfCfg.Provider, rfCfg.Model, rfStart, false, "", err.Error())
 				return nil, fmt.Errorf("jira: feedback: rework agent %s: %w", repo.Name, err)
 			}
+			o.savePhaseLog(ctx, ticket.Key, PhaseReviewFix, rfCfg.Provider, rfCfg.Model, rfStart, true, agentResult.Output, "")
 
 			// Only commit and report when the agent produced file changes.
 			changed, err := o.fnHasChanges(ctx, repo.Path)
