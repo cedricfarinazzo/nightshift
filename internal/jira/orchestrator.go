@@ -7,8 +7,15 @@ import (
 	"time"
 
 	"github.com/marcus/nightshift/internal/agents"
+	"github.com/marcus/nightshift/internal/db"
 	"github.com/marcus/nightshift/internal/logging"
 )
+
+// jiraDB is a local interface satisfied by *db.DB.
+type jiraDB interface {
+	SaveJiraPhaseLog(ctx context.Context, l db.JiraPhaseLog) error
+	SaveJiraTicketResult(ctx context.Context, r db.JiraTicketResult) error
+}
 
 // Phase represents a stage in the Jira ticket processing lifecycle.
 type Phase string
@@ -20,7 +27,19 @@ const (
 	PhaseCommit    Phase = "commit"
 	PhasePR        Phase = "pr"
 	PhaseStatus    Phase = "status"
+	PhaseReviewFix Phase = "review_fix"
 )
+
+// AllPhases lists every valid phase value accepted by --phase filters.
+var AllPhases = []Phase{
+	PhaseValidate,
+	PhasePlan,
+	PhaseImplement,
+	PhaseCommit,
+	PhasePR,
+	PhaseStatus,
+	PhaseReviewFix,
+}
 
 // TicketStatus represents the outcome of processing a ticket.
 type TicketStatus string
@@ -67,6 +86,10 @@ type Orchestrator struct {
 	onPhase         func(ticketKey string, phase Phase, done bool) // optional progress callback
 	progressf       func(format string, args ...any)               // optional human-readable progress printer
 	log             *logging.Logger
+
+	// db and runID are optional; when set, phase logs and ticket results are persisted.
+	db    jiraDB
+	runID string
 
 	// ops are injectable for testing; set to real functions by NewOrchestrator.
 	fnHasChanges        func(ctx context.Context, repoPath string) (bool, error)
@@ -122,6 +145,15 @@ func WithPhaseCallback(fn func(ticketKey string, phase Phase, done bool)) Orches
 // progress events (agent start, PR creation, Jira transitions, etc.).
 func WithProgressPrinter(fn func(format string, args ...any)) OrchestratorOption {
 	return func(o *Orchestrator) { o.progressf = fn }
+}
+
+// WithDB attaches a database and run ID for persisting phase logs and ticket results.
+// When not set, persistence is skipped and the orchestrator operates as before.
+func WithDB(d jiraDB, runID string) OrchestratorOption {
+	return func(o *Orchestrator) {
+		o.db = d
+		o.runID = runID
+	}
 }
 
 // NewOrchestrator creates an Orchestrator with the given client, config, project, and options.
@@ -278,15 +310,26 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 		o.fnPushBranch = PushBranch
 	}
 
-	start := time.Now()
-	result := &TicketResult{TicketKey: ticket.Key}
-
 	if o.implAgent == nil {
 		return nil, fmt.Errorf("jira: orchestrator: impl agent is required")
 	}
 	if !o.skipValidation && o.validationAgent == nil {
 		return nil, fmt.Errorf("jira: orchestrator: validation agent is required when not skipping validation")
 	}
+
+	start := time.Now()
+	result := &TicketResult{TicketKey: ticket.Key}
+
+	// Persist ticket result when ProcessTicket returns; non-fatal.
+	defer func() {
+		if result != nil {
+			prURL := ""
+			if len(result.PRURLs) > 0 {
+				prURL = result.PRURLs[0]
+			}
+			o.saveTicketResult(ctx, ticket.Key, string(result.Status), string(result.Phase), prURL, result.Error, result.Duration.Milliseconds())
+		}
+	}()
 
 	rs := detectResumeState(ticket)
 	if rs.alreadyDone {
@@ -326,8 +369,11 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 		result.Phase = PhaseValidate
 		o.notifyPhase(ticket.Key, PhaseValidate, false)
 		if !o.skipValidation {
+			validateStart := time.Now()
+			valCfg := o.cfg.EffectiveValidation(o.proj)
 			vr, err := ValidateTicket(ctx, o.validationAgent, ticket)
 			if err != nil {
+				o.savePhaseLog(ctx, ticket.Key, PhaseValidate, valCfg.Provider, valCfg.Model, validateStart, false, "", err.Error())
 				o.postErrorComment(ctx, ticket.Key, PhaseValidate, err)
 				result.Status = TicketFailed
 				result.Error = err.Error()
@@ -337,6 +383,8 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 				return result, nil
 			}
 			if !vr.Valid {
+				issues := strings.Join(vr.Issues, "; ")
+				o.savePhaseLog(ctx, ticket.Key, PhaseValidate, valCfg.Provider, valCfg.Model, validateStart, false, issues, fmt.Sprintf("score %d/10: %s", vr.Score, issues))
 				if hErr := o.client.HandleInvalidTicket(ctx, ticket.Key, vr); hErr != nil {
 					o.log.Errorf("ticket %s: handle invalid: %v", ticket.Key, hErr)
 				}
@@ -347,6 +395,7 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 				o.notifyPhase(ticket.Key, PhaseValidate, true)
 				return result, nil
 			}
+			o.savePhaseLog(ctx, ticket.Key, PhaseValidate, valCfg.Provider, valCfg.Model, validateStart, true, strings.Join(vr.Suggestions, "; "), "")
 			o.postPhaseComment(ctx, ticket.Key, CommentValidation,
 				fmt.Sprintf("Ticket validated (score %d/10).", vr.Score), time.Since(start))
 			o.log.Infof("ticket %s validated (score %d/10)", ticket.Key, vr.Score)
@@ -383,6 +432,7 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 			Model:   planCfg.Model,
 		})
 		if err != nil {
+			o.savePhaseLog(ctx, ticket.Key, PhasePlan, planCfg.Provider, planCfg.Model, planStart, false, "", err.Error())
 			o.postErrorComment(ctx, ticket.Key, PhasePlan, err)
 			result.Status = TicketFailed
 			result.Error = err.Error()
@@ -391,6 +441,7 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 			o.notifyPhase(ticket.Key, PhasePlan, true)
 			return result, nil
 		}
+		o.savePhaseLog(ctx, ticket.Key, PhasePlan, planCfg.Provider, planCfg.Model, planStart, true, planResult.Output, "")
 		result.Plan = planResult.Output
 		o.emit("📝 posting plan to Jira %s", ticket.Key)
 		o.postPhaseComment(ctx, ticket.Key, CommentPlan, planResult.Output, time.Since(planStart))
@@ -417,6 +468,7 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 			Model:   implCfg.Model,
 		})
 		if err != nil {
+			o.savePhaseLog(ctx, ticket.Key, PhaseImplement, implCfg.Provider, implCfg.Model, implStart, false, "", err.Error())
 			o.postErrorComment(ctx, ticket.Key, PhaseImplement, err)
 			result.Status = TicketFailed
 			result.Error = err.Error()
@@ -425,6 +477,7 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 			o.notifyPhase(ticket.Key, PhaseImplement, true)
 			return result, nil
 		}
+		o.savePhaseLog(ctx, ticket.Key, PhaseImplement, implCfg.Provider, implCfg.Model, implStart, true, implResult.Output, "")
 		result.ImplementationSummary = implResult.Output
 		o.emit("📝 posting implementation summary to Jira %s", ticket.Key)
 		o.postPhaseComment(ctx, ticket.Key, CommentImplement, implResult.Output, time.Since(implStart))
@@ -436,6 +489,7 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 	if !skip(PhaseCommit) {
 		result.Phase = PhaseCommit
 		o.notifyPhase(ticket.Key, PhaseCommit, false)
+		commitStart := time.Now()
 		var changedRepos []RepoWorkspace
 		var skippedRepos []RepoWorkspace // repos with no uncommitted changes
 		if ws != nil {
@@ -447,6 +501,7 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 					result.Error = err.Error()
 					result.Duration = time.Since(start)
 					o.notifyPhase(ticket.Key, PhaseCommit, true)
+					o.savePhaseLog(ctx, ticket.Key, PhaseCommit, "", "", commitStart, false, "", err.Error())
 					return result, nil
 				}
 				if !changed {
@@ -458,6 +513,7 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 						result.Error = err.Error()
 						result.Duration = time.Since(start)
 						o.notifyPhase(ticket.Key, PhaseCommit, true)
+						o.savePhaseLog(ctx, ticket.Key, PhaseCommit, "", "", commitStart, false, "", err.Error())
 						return result, nil
 					}
 					if localAhead {
@@ -468,6 +524,7 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 							result.Error = err.Error()
 							result.Duration = time.Since(start)
 							o.notifyPhase(ticket.Key, PhaseCommit, true)
+							o.savePhaseLog(ctx, ticket.Key, PhaseCommit, "", "", commitStart, false, "", err.Error())
 							return result, nil
 						}
 						changedRepos = append(changedRepos, repo)
@@ -489,12 +546,15 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 					result.Error = err.Error()
 					result.Duration = time.Since(start)
 					o.notifyPhase(ticket.Key, PhaseCommit, true)
+					o.savePhaseLog(ctx, ticket.Key, PhaseCommit, "", "", commitStart, false, "", err.Error())
 					return result, nil
 				}
 				changedRepos = append(changedRepos, repo)
 			}
 		}
 		o.notifyPhase(ticket.Key, PhaseCommit, true)
+		// Persist commit phase log (non-agent phase: no provider/model/output).
+		o.savePhaseLog(ctx, ticket.Key, PhaseCommit, "", "", commitStart, true, "", "")
 
 		// Recovery pass: a repo with no uncommitted changes may have been committed and pushed
 		// in a prior run that crashed before the CommentPR was posted. If the branch is ahead
@@ -607,6 +667,8 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 			}
 		}
 		o.notifyPhase(ticket.Key, PhasePR, true)
+		// Persist PR phase log (non-agent phase: no provider/model/output).
+		o.savePhaseLog(ctx, ticket.Key, PhasePR, "", "", prStart, true, "", "")
 	} else if skip(PhaseCommit) && !skip(PhaseStatus) {
 		// Resuming at PhaseStatus: scan workspace repos for open PRs and merge with
 		// any URLs recovered from comments, deduplicating to avoid duplicates when
@@ -633,6 +695,7 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 	if !skip(PhaseStatus) {
 		result.Phase = PhaseStatus
 		o.notifyPhase(ticket.Key, PhaseStatus, false)
+		statusStart := time.Now()
 		o.emit("🔄 transitioning %s → review (Jira)", ticket.Key)
 		if err := o.client.TransitionToReview(ctx, ticket.Key); err != nil {
 			o.postErrorComment(ctx, ticket.Key, PhaseStatus, err)
@@ -640,9 +703,12 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 			result.Error = err.Error()
 			result.Duration = time.Since(start)
 			o.notifyPhase(ticket.Key, PhaseStatus, true)
+			o.savePhaseLog(ctx, ticket.Key, PhaseStatus, "", "", statusStart, false, "", err.Error())
 			return result, nil
 		}
 		o.notifyPhase(ticket.Key, PhaseStatus, true)
+		// Persist status phase log (non-agent phase: no provider/model/output).
+		o.savePhaseLog(ctx, ticket.Key, PhaseStatus, "", "", statusStart, true, "", "")
 	}
 
 	result.Status = TicketCompleted
@@ -850,5 +916,46 @@ func (o *Orchestrator) notifyPhase(ticketKey string, phase Phase, done bool) {
 func (o *Orchestrator) emit(format string, args ...any) {
 	if o.progressf != nil {
 		o.progressf(format, args...)
+	}
+}
+
+// savePhaseLog persists a phase execution record to the DB. Non-fatal: logs WARN on error.
+func (o *Orchestrator) savePhaseLog(ctx context.Context, ticketKey string, phase Phase, provider, model string, startedAt time.Time, exitOk bool, output, errMsg string) {
+	if o.db == nil || o.runID == "" {
+		return
+	}
+	l := db.JiraPhaseLog{
+		RunID:      o.runID,
+		TicketKey:  ticketKey,
+		Phase:      string(phase),
+		Provider:   provider,
+		Model:      model,
+		StartedAt:  startedAt,
+		DurationMs: time.Since(startedAt).Milliseconds(),
+		ExitOk:     exitOk,
+		Output:     output,
+		Error:      errMsg,
+	}
+	if err := o.db.SaveJiraPhaseLog(ctx, l); err != nil {
+		o.log.Errorf("save phase log %s/%s: %v", ticketKey, phase, err)
+	}
+}
+
+// saveTicketResult persists the final ticket outcome to the DB. Non-fatal: logs error on failure.
+func (o *Orchestrator) saveTicketResult(ctx context.Context, ticketKey, status, phaseReached, prURL, errMsg string, durationMs int64) {
+	if o.db == nil || o.runID == "" {
+		return
+	}
+	r := db.JiraTicketResult{
+		RunID:        o.runID,
+		TicketKey:    ticketKey,
+		Status:       status,
+		DurationMs:   durationMs,
+		PhaseReached: phaseReached,
+		PRURL:        prURL,
+		ErrorMsg:     errMsg,
+	}
+	if err := o.db.SaveJiraTicketResult(ctx, r); err != nil {
+		o.log.Errorf("save ticket result %s: %v", ticketKey, err)
 	}
 }

@@ -40,6 +40,11 @@ var migrations = []Migration{
 		Description: "add branch column to run_history",
 		SQL:         migration005SQL,
 	},
+	{
+		Version:     6,
+		Description: "add jira run history tables: jira_runs, jira_ticket_results, jira_phase_logs",
+		SQL:         migration006SQL,
+	},
 }
 
 const migration002SQL = `
@@ -119,6 +124,46 @@ CREATE INDEX idx_run_history_time ON run_history(start_time DESC);
 
 const migration005SQL = `
 ALTER TABLE run_history ADD COLUMN branch TEXT NOT NULL DEFAULT '';
+`
+
+const migration006SQL = `
+CREATE TABLE IF NOT EXISTS jira_runs (
+    run_id            TEXT     PRIMARY KEY,
+    started_at        DATETIME NOT NULL,
+    ended_at          DATETIME,
+    project_key       TEXT     NOT NULL,
+    tickets_processed INTEGER  NOT NULL DEFAULT 0,
+    tickets_completed INTEGER  NOT NULL DEFAULT 0,
+    tickets_failed    INTEGER  NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS jira_ticket_results (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id        TEXT    NOT NULL REFERENCES jira_runs(run_id),
+    ticket_key    TEXT    NOT NULL,
+    status        TEXT    NOT NULL,
+    duration_ms   INTEGER NOT NULL,
+    phase_reached TEXT    NOT NULL,
+    pr_url        TEXT,
+    error_msg     TEXT
+);
+
+CREATE TABLE IF NOT EXISTS jira_phase_logs (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id      TEXT    NOT NULL REFERENCES jira_runs(run_id),
+    ticket_key  TEXT    NOT NULL,
+    phase       TEXT    NOT NULL,
+    provider    TEXT,
+    model       TEXT,
+    started_at  DATETIME NOT NULL,
+    duration_ms INTEGER  NOT NULL,
+    exit_ok     INTEGER  NOT NULL,
+    output      TEXT,
+    error       TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_jira_phase_logs_run_ticket ON jira_phase_logs(run_id, ticket_key);
+CREATE INDEX IF NOT EXISTS idx_jira_ticket_results_run ON jira_ticket_results(run_id);
 `
 
 // Migrate runs all pending migrations inside transactions.

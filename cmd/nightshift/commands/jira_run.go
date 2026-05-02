@@ -8,8 +8,10 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/marcus/nightshift/internal/agents"
 	"github.com/marcus/nightshift/internal/config"
+	"github.com/marcus/nightshift/internal/db"
 	"github.com/marcus/nightshift/internal/jira"
 	"github.com/marcus/nightshift/internal/logging"
 	"github.com/spf13/cobra"
@@ -70,6 +72,24 @@ func runJira(cmd *cobra.Command, _ []string) error {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
+	runID := uuid.New().String()
+	runDB, dbErr := openDB()
+	if dbErr != nil {
+		log.Errorf("open db (run history disabled): %v", dbErr)
+		runDB = nil
+	}
+	if runDB != nil {
+		defer func() { _ = runDB.Close() }()
+		projectKey := firstProjectKey(cfg.Jira)
+		// When multiple projects run, use "multi" to avoid misleading metadata.
+		if len(cfg.Jira.Projects) > 1 {
+			projectKey = "multi"
+		}
+		if err := runDB.SaveJiraRun(ctx, runID, projectKey, time.Now()); err != nil {
+			log.Errorf("save jira run: %v", err)
+		}
+	}
+
 	client, err := jira.NewClient(cfg.Jira)
 	if err != nil {
 		return fmt.Errorf("jira client: %w", err)
@@ -90,7 +110,7 @@ func runJira(cmd *cobra.Command, _ []string) error {
 	start := time.Now()
 
 	if singleTicket != "" {
-		found, err := runSingleTicket(ctx, log, client, cfg, statusMap, singleTicket, skipValidation, &results, &feedbackResults)
+		found, err := runSingleTicket(ctx, log, client, cfg, statusMap, singleTicket, skipValidation, runDB, runID, &results, &feedbackResults)
 		if err != nil {
 			return err
 		}
@@ -99,7 +119,7 @@ func runJira(cmd *cobra.Command, _ []string) error {
 		}
 	} else {
 		for _, proj := range cfg.Jira.Projects {
-			orch, err := buildOrchestrator(client, cfg, proj, skipValidation)
+			orch, err := buildOrchestrator(client, cfg, proj, skipValidation, runDB, runID)
 			if err != nil {
 				return err
 			}
@@ -116,6 +136,13 @@ func runJira(cmd *cobra.Command, _ []string) error {
 		}
 	}
 
+	if runDB != nil {
+		completed, failed := countResults(results)
+		if err := runDB.UpdateJiraRun(ctx, runID, time.Now(), len(results), completed, failed); err != nil {
+			log.Errorf("update jira run: %v", err)
+		}
+	}
+
 	if n, err := jira.CleanupStaleWorkspaces(cfg.Jira); err != nil {
 		log.Errorf("workspace cleanup: %v", err)
 	} else if n > 0 {
@@ -128,7 +155,7 @@ func runJira(cmd *cobra.Command, _ []string) error {
 
 // buildOrchestrator creates an Orchestrator for the given project,
 // constructing agents from the project's effective phase configs.
-func buildOrchestrator(client *jira.Client, cfg *config.Config, proj jira.ProjectConfig, skipValidation bool) (*jira.Orchestrator, error) {
+func buildOrchestrator(client *jira.Client, cfg *config.Config, proj jira.ProjectConfig, skipValidation bool, runDB *db.DB, runID string) (*jira.Orchestrator, error) {
 	jiracfg := cfg.Jira
 
 	var validationAgent agents.Agent
@@ -189,6 +216,9 @@ func buildOrchestrator(client *jira.Client, cfg *config.Config, proj jira.Projec
 	} else {
 		orchOpts = append(orchOpts, jira.WithValidationAgent(validationAgent))
 	}
+	if runDB != nil && runID != "" {
+		orchOpts = append(orchOpts, jira.WithDB(runDB, runID))
+	}
 	return jira.NewOrchestrator(client, jiracfg, proj, orchOpts...), nil
 }
 
@@ -200,6 +230,8 @@ func runSingleTicket(
 	statusMap *jira.StatusMap,
 	key string,
 	skipValidation bool,
+	runDB *db.DB,
+	runID string,
 	results *[]jira.TicketResult,
 	feedbackResults *[]jira.FeedbackResult,
 ) (found bool, err error) {
@@ -217,7 +249,7 @@ func runSingleTicket(
 		if !strings.EqualFold(proj.Key, keyPrefix) {
 			continue
 		}
-		orch, err := buildOrchestrator(client, cfg, proj, skipValidation)
+		orch, err := buildOrchestrator(client, cfg, proj, skipValidation, runDB, runID)
 		if err != nil {
 			return false, err
 		}
@@ -496,17 +528,14 @@ func printFeedbackResult(r *jira.FeedbackResult) {
 }
 
 func printJiraRunSummary(results []jira.TicketResult, feedback []jira.FeedbackResult, d time.Duration) {
-	completed, rejected, skipped, failed := 0, 0, 0, 0
+	completed, failed := countResults(results)
+	rejected, skipped := 0, 0
 	for _, r := range results {
 		switch r.Status {
-		case jira.TicketCompleted:
-			completed++
 		case jira.TicketRejected:
 			rejected++
 		case jira.TicketSkipped:
 			skipped++
-		default:
-			failed++
 		}
 	}
 
@@ -531,4 +560,30 @@ func printJiraRunSummary(results []jira.TicketResult, feedback []jira.FeedbackRe
 		}
 		fmt.Printf("  🔄 Reworked: %d\n", reworked)
 	}
+}
+
+func countResults(results []jira.TicketResult) (completed, failed int) {
+	for _, r := range results {
+		switch r.Status {
+		case jira.TicketCompleted:
+			completed++
+		default:
+			if r.Status != jira.TicketSkipped && r.Status != jira.TicketRejected {
+				failed++
+			}
+		}
+	}
+	return
+}
+
+func firstProjectKey(cfg jira.JiraConfig) string {
+	if len(cfg.Projects) > 0 {
+		return cfg.Projects[0].Key
+	}
+	return ""
+}
+
+// openDB opens the nightshift database; returns nil,err if it cannot be opened.
+func openDB() (*db.DB, error) {
+	return db.Open(db.DefaultPath())
 }

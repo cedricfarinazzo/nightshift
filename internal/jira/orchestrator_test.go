@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/marcus/nightshift/internal/agents"
+	"github.com/marcus/nightshift/internal/db"
 )
 
 // stubJiraClient implements the jiraClient interface for testing.
@@ -1776,4 +1777,129 @@ func (s *stubJiraClientSelectiveErr) TransitionToInProgress(_ context.Context, i
 func (s *stubJiraClientSelectiveErr) TransitionToReview(_ context.Context, issueKey string) error {
 	s.transitionCalls = append(s.transitionCalls, "review:"+issueKey)
 	return s.reviewErr
+}
+
+// stubDB implements the jiraDB interface for testing.
+type stubDB struct {
+phaseLogs     []db.JiraPhaseLog
+ticketResults []db.JiraTicketResult
+err           error
+}
+
+func (s *stubDB) SaveJiraPhaseLog(_ context.Context, l db.JiraPhaseLog) error {
+if s.err != nil {
+return s.err
+}
+s.phaseLogs = append(s.phaseLogs, l)
+return nil
+}
+
+func (s *stubDB) SaveJiraTicketResult(_ context.Context, r db.JiraTicketResult) error {
+if s.err != nil {
+return s.err
+}
+s.ticketResults = append(s.ticketResults, r)
+return nil
+}
+
+func TestWithDB_OptionsSet(t *testing.T) {
+db := &stubDB{}
+runID := "test-run-123"
+
+o := &Orchestrator{}
+WithDB(db, runID)(o)
+
+if o.db != db {
+t.Error("WithDB did not set db")
+}
+if o.runID != runID {
+t.Error("WithDB did not set runID")
+}
+}
+
+func TestProcessTicket_DBPersistence_PhaseLogsRecorded(t *testing.T) {
+sc := &stubJiraClient{}
+ia := &stubAgent{name: "impl", output: "implementation done"}
+db := &stubDB{}
+runID := "run-phase-test"
+
+o := &Orchestrator{
+client:          sc,
+cfg:             JiraConfig{},
+skipValidation:  true,
+implAgent:       ia,
+db:              db,
+runID:           runID,
+}
+
+ticket := Ticket{Key: "DB-1", Summary: "DB test", Description: "Do the thing."}
+ws := &Workspace{TicketKey: "DB-1"}
+
+_, err := o.ProcessTicket(context.Background(), ticket, ws)
+if err != nil {
+t.Fatalf("ProcessTicket failed: %v", err)
+}
+
+// Verify phase logs were recorded (at least for implement phase).
+if len(db.phaseLogs) == 0 {
+t.Error("no phase logs recorded")
+}
+
+// Verify ticket result was recorded.
+if len(db.ticketResults) == 0 {
+t.Error("no ticket results recorded")
+}
+}
+
+func TestProcessTicket_DBPersistence_NonFatalOnError(t *testing.T) {
+sc := &stubJiraClient{}
+ia := &stubAgent{name: "impl", output: "implementation done"}
+db := &stubDB{err: errors.New("db write failed")}
+runID := "run-nonfatal-test"
+
+o := &Orchestrator{
+client:          sc,
+cfg:             JiraConfig{},
+skipValidation:  true,
+implAgent:       ia,
+db:              db,
+runID:           runID,
+}
+
+ticket := Ticket{Key: "NF-1", Summary: "Non-fatal test", Description: "Do the thing."}
+ws := &Workspace{TicketKey: "NF-1"}
+
+result, err := o.ProcessTicket(context.Background(), ticket, ws)
+// ProcessTicket should NOT error; DB errors are non-fatal
+if err != nil {
+t.Fatalf("ProcessTicket failed with DB error (should be non-fatal): %v", err)
+}
+if result == nil || result.Status != TicketCompleted {
+t.Error("ProcessTicket should have completed despite DB error")
+}
+}
+
+func TestProcessTicket_DBPersistence_NoDBIsNoop(t *testing.T) {
+sc := &stubJiraClient{}
+ia := &stubAgent{name: "impl", output: "implementation done"}
+
+o := &Orchestrator{
+client:          sc,
+cfg:             JiraConfig{},
+skipValidation:  true,
+implAgent:       ia,
+db:              nil, // no DB
+runID:           "",
+}
+
+ticket := Ticket{Key: "NODB-1", Summary: "No DB test", Description: "Do the thing."}
+ws := &Workspace{TicketKey: "NODB-1"}
+
+result, err := o.ProcessTicket(context.Background(), ticket, ws)
+if err != nil {
+t.Fatalf("ProcessTicket failed: %v", err)
+}
+if result == nil || result.Status != TicketCompleted {
+t.Error("ProcessTicket should complete when DB is nil")
+}
 }
