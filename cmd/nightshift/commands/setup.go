@@ -86,12 +86,23 @@ type modelOption struct {
 var modelProviderLists = []*[]modelOption{&claudeModels, &codexModels, &copilotModels}
 
 // jiraPhaseModels lists Claude model options used for Jira phase configuration.
+// Kept as a named slice so jiraModelIndex() and its tests remain stable.
 var jiraPhaseModels = []string{
 	"claude-haiku-4.5",
 	"claude-sonnet-4.5",
 	"claude-sonnet-4.6",
 	"claude-opus-4.5",
 	"claude-opus-4.6",
+}
+
+// jiraProviders lists providers selectable for Jira phase configuration.
+var jiraProviders = []string{"claude", "codex", "copilot"}
+
+// jiraPhaseModelsByProvider maps each provider to its model list for Jira phases.
+var jiraPhaseModelsByProvider = map[string][]string{
+	"claude":  jiraPhaseModels,
+	"codex":   {"gpt-5.2-codex", "gpt-5.3-codex", "gpt-5.2"},
+	"copilot": {"claude-haiku-4.5", "claude-sonnet-4.5", "claude-sonnet-4.6", "claude-opus-4.5"},
 }
 
 // claudeModels lists available Claude models.
@@ -165,10 +176,10 @@ type setupModel struct {
 
 	safetyCursor int
 
-	modelCursor      int
-	claudeModelIdx   int
-	codexModelIdx    int
-	copilotModelIdx  int
+	modelCursor     int
+	claudeModelIdx  int
+	codexModelIdx   int
+	copilotModelIdx int
 
 	taskPresetCursor int
 	taskCursor       int
@@ -211,27 +222,28 @@ type setupModel struct {
 	daemonAction string
 
 	// Jira step state
-	jiraSubStep        int
-	jiraInput          textinput.Model
-	jiraEnableCursor   int
-	jiraEnabled        bool
-	jiraSite           string
-	jiraEmail          string
-	jiraTokenEnv       string
-	jiraProjectKey     string
-	jiraLabel          string
-	jiraMaxTickets     int
-	jiraRepos          []jiraRepoEntry
-	jiraRepoCursor     int
-	jiraRepoEditing    bool
-	jiraRepoField      int
-	jiraRepoEditURL    string
-	jiraPhaseCursor    int
-	jiraPhaseModelIdx  [4]int
-	jiraPinging        bool
-	jiraPingOK         bool
-	jiraPingErr        string
-	jiraErr            string
+	jiraSubStep       int
+	jiraInput         textinput.Model
+	jiraEnableCursor  int
+	jiraEnabled       bool
+	jiraSite          string
+	jiraEmail         string
+	jiraTokenEnv      string
+	jiraProjectKey    string
+	jiraLabel         string
+	jiraMaxTickets    int
+	jiraRepos         []jiraRepoEntry
+	jiraRepoCursor    int
+	jiraRepoEditing   bool
+	jiraRepoField     int
+	jiraRepoEditURL   string
+	jiraPhaseCursor   int
+	jiraPhaseModelIdx [4]int
+	jiraPhaseProvider [4]string // provider per phase: claude, codex, or copilot
+	jiraPinging       bool
+	jiraPingOK        bool
+	jiraPingErr       string
+	jiraErr           string
 
 	spinner spinner.Model
 }
@@ -337,37 +349,33 @@ func newSetupModel() (*setupModel, error) {
 	includePathStep := !nightshiftInPath
 
 	model := &setupModel{
-		step:             stepWelcome,
-		cfg:              cfg,
-		configPath:       configPath,
-		configExist:      configExist,
-		includePathStep:  includePathStep,
-		projects:         projects,
-		projectInput:     projectInput,
-		budgetInput:      budgetInput,
-		taskItems:        taskItems,
-		preset:           preset,
-		scheduleMode:     "interval",
-		scheduleStart:    "22:00",
-		scheduleCycles:   3,
-		scheduleInterval: "30m",
-		scheduleCron:     "0 2 * * *",
-		scheduleInput:    scheduleInput,
-		spinner:          spin,
-		nightshiftInPath: nightshiftInPath,
-		claudeModelIdx:   modelIndex(claudeModels, cfg.Providers.Claude.Model),
-		codexModelIdx:    modelIndex(codexModels, cfg.Providers.Codex.Model),
-		copilotModelIdx:  modelIndex(copilotModels, cfg.Providers.Copilot.Model),
-		jiraInput:        jiraInput,
-		jiraTokenEnv:     "JIRA_API_TOKEN",
-		jiraLabel:        "nightshift",
-		jiraMaxTickets:   10,
-		jiraPhaseModelIdx: [4]int{
-			jiraModelIndex("claude-haiku-4.5"),
-			jiraModelIndex("claude-sonnet-4.5"),
-			jiraModelIndex("claude-sonnet-4.5"),
-			jiraModelIndex("claude-sonnet-4.5"),
-		},
+		step:              stepWelcome,
+		cfg:               cfg,
+		configPath:        configPath,
+		configExist:       configExist,
+		includePathStep:   includePathStep,
+		projects:          projects,
+		projectInput:      projectInput,
+		budgetInput:       budgetInput,
+		taskItems:         taskItems,
+		preset:            preset,
+		scheduleMode:      "interval",
+		scheduleStart:     "22:00",
+		scheduleCycles:    3,
+		scheduleInterval:  "30m",
+		scheduleCron:      "0 2 * * *",
+		scheduleInput:     scheduleInput,
+		spinner:           spin,
+		nightshiftInPath:  nightshiftInPath,
+		claudeModelIdx:    modelIndex(claudeModels, cfg.Providers.Claude.Model),
+		codexModelIdx:     modelIndex(codexModels, cfg.Providers.Codex.Model),
+		copilotModelIdx:   modelIndex(copilotModels, cfg.Providers.Copilot.Model),
+		jiraInput:         jiraInput,
+		jiraTokenEnv:      "JIRA_API_TOKEN",
+		jiraLabel:         "nightshift",
+		jiraMaxTickets:    10,
+		jiraPhaseProvider: defaultJiraPhaseProviders(cfg.Providers.Preference),
+		jiraPhaseModelIdx: defaultJiraPhaseModelIdxs(cfg.Providers.Preference),
 	}
 
 	// Pre-populate from existing Jira config when re-running wizard.
@@ -394,10 +402,21 @@ func newSetupModel() (*setupModel, error) {
 			}
 		}
 		model.jiraPhaseModelIdx = [4]int{
-			jiraModelIndex(cfg.Jira.Validation.Model),
-			jiraModelIndex(cfg.Jira.Plan.Model),
-			jiraModelIndex(cfg.Jira.Implement.Model),
-			jiraModelIndex(cfg.Jira.ReviewFix.Model),
+			jiraModelIndexForProvider(model.jiraPhaseProvider[0], cfg.Jira.Validation.Model),
+			jiraModelIndexForProvider(model.jiraPhaseProvider[1], cfg.Jira.Plan.Model),
+			jiraModelIndexForProvider(model.jiraPhaseProvider[2], cfg.Jira.Implement.Model),
+			jiraModelIndexForProvider(model.jiraPhaseProvider[3], cfg.Jira.ReviewFix.Model),
+		}
+		// Populate per-phase providers from existing config (fall back to claude for old configs).
+		for i, phase := range []jiraconfig.PhaseConfig{
+			cfg.Jira.Validation, cfg.Jira.Plan, cfg.Jira.Implement, cfg.Jira.ReviewFix,
+		} {
+			p := phase.Provider
+			if p == "" {
+				p = "claude"
+			}
+			model.jiraPhaseProvider[i] = p
+			model.jiraPhaseModelIdx[i] = jiraModelIndexForProvider(p, phase.Model)
 		}
 	}
 
@@ -2230,7 +2249,8 @@ func writeGlobalConfigToPath(cfg *config.Config, configPath string) error {
 	v.Set("projects", cfg.Projects)
 	v.Set("tasks.enabled", cfg.Tasks.Enabled)
 
-	// Jira integration — only written when enabled (site is non-empty).
+	// Jira integration — written unconditionally to prevent stale keys.
+	// When Jira is disabled (Site is empty), all jira.* keys are zeroed out.
 	if cfg.Jira.Site != "" {
 		v.Set("jira.site", cfg.Jira.Site)
 		v.Set("jira.email", cfg.Jira.Email)
@@ -2245,6 +2265,22 @@ func writeGlobalConfigToPath(cfg *config.Config, configPath string) error {
 		v.Set("jira.plan", cfg.Jira.Plan)
 		v.Set("jira.implement", cfg.Jira.Implement)
 		v.Set("jira.review_fix", cfg.Jira.ReviewFix)
+	} else {
+		// Explicitly zero out every jira leaf key so a previously enabled Jira config
+		// does not survive a disable-and-save round-trip.
+		v.Set("jira.site", "")
+		v.Set("jira.email", "")
+		v.Set("jira.token_env", "")
+		v.Set("jira.label", "")
+		v.Set("jira.max_tickets", 0)
+		v.Set("jira.workspace_root", "")
+		v.Set("jira.cleanup_after_days", 0)
+		v.Set("jira.budget_enabled", false)
+		v.Set("jira.projects", []interface{}{})
+		v.Set("jira.validation", map[string]interface{}{})
+		v.Set("jira.plan", map[string]interface{}{})
+		v.Set("jira.implement", map[string]interface{}{})
+		v.Set("jira.review_fix", map[string]interface{}{})
 	}
 
 	if err := v.WriteConfig(); err != nil {
@@ -2353,6 +2389,60 @@ func jiraModelIndex(model string) int {
 	return 0
 }
 
+// jiraPhaseModelsForProvider returns the model list for provider, falling back to claude.
+func jiraPhaseModelsForProvider(provider string) []string {
+	if models, ok := jiraPhaseModelsByProvider[provider]; ok {
+		return models
+	}
+	return jiraPhaseModelsByProvider["claude"]
+}
+
+// jiraProviderIndex returns the index of provider in jiraProviders, defaulting to 0.
+func jiraProviderIndex(provider string) int {
+	for i, p := range jiraProviders {
+		if p == provider {
+			return i
+		}
+	}
+	return 0
+}
+
+// jiraModelIndexForProvider returns the index of model within the provider's model list.
+func jiraModelIndexForProvider(provider, model string) int {
+	models := jiraPhaseModelsForProvider(provider)
+	for i, m := range models {
+		if m == model {
+			return i
+		}
+	}
+	return 0
+}
+
+// defaultJiraPhaseProviders returns the initial provider array for Jira phases,
+// using the first entry of preference (or claude as the fallback).
+func defaultJiraPhaseProviders(preference []string) [4]string {
+	p := "claude"
+	if len(preference) > 0 && preference[0] != "" {
+		p = preference[0]
+	}
+	return [4]string{p, p, p, p}
+}
+
+// defaultJiraPhaseModelIdxs returns initial model indexes for Jira phases.
+// validation defaults to index 0 (cheapest); the other phases default to index 1 (balanced).
+func defaultJiraPhaseModelIdxs(preference []string) [4]int {
+	p := "claude"
+	if len(preference) > 0 && preference[0] != "" {
+		p = preference[0]
+	}
+	models := jiraPhaseModelsForProvider(p)
+	implIdx := 0
+	if len(models) > 1 {
+		implIdx = 1
+	}
+	return [4]int{0, implIdx, implIdx, implIdx}
+}
+
 // handleJiraInput dispatches to the appropriate Jira sub-step handler.
 func (m *setupModel) handleJiraInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch m.jiraSubStep {
@@ -2389,6 +2479,10 @@ func (m *setupModel) handleJiraEnableInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) 
 	case "n", "N":
 		m.jiraEnabled = false
 		m.cfg.Jira = jiraconfig.JiraConfig{}
+		if err := writeGlobalConfig(m.cfg); err != nil {
+			m.jiraErr = err.Error()
+			return m, nil
+		}
 		return m, m.setStep(stepSnapshot)
 	case "enter":
 		if m.jiraEnableCursor == 0 {
@@ -2399,6 +2493,10 @@ func (m *setupModel) handleJiraEnableInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) 
 		} else {
 			m.jiraEnabled = false
 			m.cfg.Jira = jiraconfig.JiraConfig{}
+			if err := writeGlobalConfig(m.cfg); err != nil {
+				m.jiraErr = err.Error()
+				return m, nil
+			}
 			return m, m.setStep(stepSnapshot)
 		}
 	}
@@ -2587,9 +2685,17 @@ func (m *setupModel) handleJiraPhaseInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.jiraPhaseModelIdx[m.jiraPhaseCursor]--
 		}
 	case "right", "l":
-		if m.jiraPhaseModelIdx[m.jiraPhaseCursor] < len(jiraPhaseModels)-1 {
+		provider := m.jiraPhaseProvider[m.jiraPhaseCursor]
+		models := jiraPhaseModelsForProvider(provider)
+		if m.jiraPhaseModelIdx[m.jiraPhaseCursor] < len(models)-1 {
 			m.jiraPhaseModelIdx[m.jiraPhaseCursor]++
 		}
+	case "tab":
+		// Cycle provider for the selected phase; reset model index to avoid out-of-bounds.
+		idx := jiraProviderIndex(m.jiraPhaseProvider[m.jiraPhaseCursor])
+		idx = (idx + 1) % len(jiraProviders)
+		m.jiraPhaseProvider[m.jiraPhaseCursor] = jiraProviders[idx]
+		m.jiraPhaseModelIdx[m.jiraPhaseCursor] = 0
 	case "enter":
 		m.jiraSubStep = jiraSubStepMaxTickets
 		m.jiraInput.SetValue(strconv.Itoa(m.jiraMaxTickets))
@@ -2635,13 +2741,20 @@ func (m *setupModel) applyJiraConfig() {
 		})
 	}
 
-	phaseNames := [4]string{"validation", "plan", "implement", "review_fix"}
-	_ = phaseNames
 	phases := [4]jiraconfig.PhaseConfig{}
 	for i := range phases {
+		provider := m.jiraPhaseProvider[i]
+		if provider == "" {
+			provider = "claude"
+		}
+		models := jiraPhaseModelsForProvider(provider)
+		model := ""
+		if m.jiraPhaseModelIdx[i] < len(models) {
+			model = models[m.jiraPhaseModelIdx[i]]
+		}
 		phases[i] = jiraconfig.PhaseConfig{
-			Provider: "claude",
-			Model:    jiraPhaseModels[m.jiraPhaseModelIdx[i]],
+			Provider: provider,
+			Model:    model,
 		}
 	}
 
@@ -2851,7 +2964,7 @@ func renderJiraReposStep(b *strings.Builder, m *setupModel) {
 
 func renderJiraPhasesStep(b *strings.Builder, m *setupModel) {
 	b.WriteString("Phase models\n")
-	b.WriteString("Use ↑/↓ to select phase, ←/→ to change model.\n\n")
+	b.WriteString("Use ↑/↓ to select phase, ←/→ to change model, Tab to change provider.\n\n")
 
 	phaseLabels := [4]string{"Validation ", "Plan       ", "Implement  ", "Review-fix "}
 	for i, label := range phaseLabels {
@@ -2859,8 +2972,16 @@ func renderJiraPhasesStep(b *strings.Builder, m *setupModel) {
 		if i == m.jiraPhaseCursor {
 			cursor = ">"
 		}
-		model := jiraPhaseModels[m.jiraPhaseModelIdx[i]]
-		fmt.Fprintf(b, " %s %-11s  ← %s →\n", cursor, label, model)
+		provider := m.jiraPhaseProvider[i]
+		if provider == "" {
+			provider = "claude"
+		}
+		models := jiraPhaseModelsForProvider(provider)
+		modelName := ""
+		if m.jiraPhaseModelIdx[i] < len(models) {
+			modelName = models[m.jiraPhaseModelIdx[i]]
+		}
+		fmt.Fprintf(b, " %s %-11s  %-8s  ← %s →\n", cursor, label, provider, modelName)
 	}
 	b.WriteString("\n")
 	b.WriteString(styleNote.Render("Tip: haiku is cheaper/faster for validation; sonnet for implementation."))

@@ -4,9 +4,10 @@ import (
 	"os"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/bubbles/textinput"
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/marcus/nightshift/internal/config"
+	"github.com/spf13/viper"
 )
 
 // helpers
@@ -15,13 +16,14 @@ func newJiraModel() *setupModel {
 	ti := textinput.New()
 	ti.Prompt = "> "
 	return &setupModel{
-		cfg:             &config.Config{},
-		jiraInput:       ti,
-		jiraTokenEnv:    "JIRA_API_TOKEN",
-		jiraLabel:       "nightshift",
-		jiraMaxTickets:  10,
+		cfg:               &config.Config{},
+		jiraInput:         ti,
+		jiraTokenEnv:      "JIRA_API_TOKEN",
+		jiraLabel:         "nightshift",
+		jiraMaxTickets:    10,
 		jiraPhaseModelIdx: [4]int{0, 1, 1, 1},
-		jiraEnableCursor: 0,
+		jiraPhaseProvider: [4]string{"claude", "claude", "claude", "claude"},
+		jiraEnableCursor:  0,
 	}
 }
 
@@ -550,5 +552,109 @@ func TestTokenEnvVar_Check(t *testing.T) {
 
 	if os.Getenv(envKey) == "" {
 		t.Fatal("expected env var to be set")
+	}
+}
+
+// ── Provider cycling (Tab key) ────────────────────────────────────────────────
+
+func TestJiraPhaseInput_ProviderCycling(t *testing.T) {
+	m := newJiraModel()
+	m.jiraSubStep = jiraSubStepPhases
+	m.jiraPhaseCursor = 0
+	m.jiraPhaseProvider[0] = "claude"
+	m.jiraPhaseModelIdx[0] = 2 // non-zero to confirm reset
+
+	// Tab should cycle to codex and reset model index.
+	model, _ := m.handleJiraPhaseInput(tea.KeyMsg{Type: tea.KeyTab})
+	got := model.(*setupModel)
+	if got.jiraPhaseProvider[0] != "codex" {
+		t.Fatalf("expected provider=codex after Tab, got %q", got.jiraPhaseProvider[0])
+	}
+	if got.jiraPhaseModelIdx[0] != 0 {
+		t.Fatal("expected model index reset to 0 after provider change")
+	}
+
+	// Tab again: codex → copilot
+	model, _ = got.handleJiraPhaseInput(tea.KeyMsg{Type: tea.KeyTab})
+	got = model.(*setupModel)
+	if got.jiraPhaseProvider[0] != "copilot" {
+		t.Fatalf("expected provider=copilot, got %q", got.jiraPhaseProvider[0])
+	}
+
+	// Tab wraps: copilot → claude
+	model, _ = got.handleJiraPhaseInput(tea.KeyMsg{Type: tea.KeyTab})
+	got = model.(*setupModel)
+	if got.jiraPhaseProvider[0] != "claude" {
+		t.Fatalf("expected provider=claude after wrap, got %q", got.jiraPhaseProvider[0])
+	}
+}
+
+func TestJiraPhaseInput_ModelBoundsPerProvider(t *testing.T) {
+	m := newJiraModel()
+	m.jiraSubStep = jiraSubStepPhases
+	m.jiraPhaseCursor = 0
+	m.jiraPhaseProvider[0] = "codex"
+	maxIdx := len(jiraPhaseModelsByProvider["codex"]) - 1
+	m.jiraPhaseModelIdx[0] = maxIdx
+
+	// Right at max should not exceed bounds.
+	model, _ := m.handleJiraPhaseInput(tea.KeyMsg{Type: tea.KeyRight})
+	got := model.(*setupModel)
+	if got.jiraPhaseModelIdx[0] != maxIdx {
+		t.Fatalf("expected index capped at %d, got %d", maxIdx, got.jiraPhaseModelIdx[0])
+	}
+}
+
+// ── defaultJiraPhaseProviders ─────────────────────────────────────────────────
+
+func TestDefaultJiraPhaseProviders_Empty(t *testing.T) {
+	p := defaultJiraPhaseProviders(nil)
+	for i, v := range p {
+		if v != "claude" {
+			t.Errorf("index %d: expected claude, got %q", i, v)
+		}
+	}
+}
+
+func TestDefaultJiraPhaseProviders_FromPreference(t *testing.T) {
+	p := defaultJiraPhaseProviders([]string{"codex"})
+	for i, v := range p {
+		if v != "codex" {
+			t.Errorf("index %d: expected codex, got %q", i, v)
+		}
+	}
+}
+
+// ── writeGlobalConfigToPath clears jira when disabled ────────────────────────
+
+func TestWriteGlobalConfigToPath_ClearsJiraWhenDisabled(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/config.yaml"
+
+	// Write a config with jira enabled first.
+	cfgEnabled := &config.Config{}
+	cfgEnabled.Jira.Site = "mysite"
+	cfgEnabled.Jira.Email = "user@example.com"
+	if err := writeGlobalConfigToPath(cfgEnabled, path); err != nil {
+		t.Fatalf("write enabled: %v", err)
+	}
+
+	// Now write with jira disabled (Site is empty).
+	cfgDisabled := &config.Config{}
+	if err := writeGlobalConfigToPath(cfgDisabled, path); err != nil {
+		t.Fatalf("write disabled: %v", err)
+	}
+
+	// Re-read via viper and verify jira site is cleared.
+	v := viper.New()
+	v.SetConfigFile(path)
+	if err := v.ReadInConfig(); err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	if site := v.GetString("jira.site"); site != "" {
+		t.Errorf("expected jira.site cleared, got %q", site)
+	}
+	if email := v.GetString("jira.email"); email != "" {
+		t.Errorf("expected jira.email cleared, got %q", email)
 	}
 }
