@@ -154,10 +154,10 @@ type setupModel struct {
 
 	safetyCursor int
 
-	modelCursor      int
-	claudeModelIdx   int
-	codexModelIdx    int
-	copilotModelIdx  int
+	modelCursor     int
+	claudeModelIdx  int
+	codexModelIdx   int
+	copilotModelIdx int
 
 	taskPresetCursor int
 	taskCursor       int
