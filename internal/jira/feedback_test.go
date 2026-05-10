@@ -70,19 +70,19 @@ func TestBuildReworkPrompt(t *testing.T) {
 	mustContain := []string{
 		// Ticket context
 		"VC-10",
-		"feedback loop",                           // Summary
-		"Implement the PR feedback loop",          // Description
-		"Agent addresses all reviewer comments",   // AcceptanceCriteria
-		"please also check edge cases",            // Comment body
-		"alice",                                   // Comment author
+		"feedback loop",                         // Summary
+		"Implement the PR feedback loop",        // Description
+		"Agent addresses all reviewer comments", // AcceptanceCriteria
+		"please also check edge cases",          // Comment body
+		"alice",                                 // Comment author
 		// PR review context
 		"https://github.com/org/repo/pull/42",
 		"nightshift",
 		"feature/VC-10",
-		"fix the nil check",          // CHANGES_REQUESTED review included
-		"consider renaming",          // COMMENTED review included
-		"main.go:42",                 // inline comment path:line
-		"add error handling here",    // inline comment body
+		"fix the nil check",       // CHANGES_REQUESTED review included
+		"consider renaming",       // COMMENTED review included
+		"main.go:42",              // inline comment path:line
+		"add error handling here", // inline comment body
 		"Address ALL reviewer feedback",
 	}
 	for _, want := range mustContain {

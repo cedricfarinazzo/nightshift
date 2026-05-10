@@ -77,9 +77,9 @@ func TestRenderJiraPreviewText_TodoTickets(t *testing.T) {
 
 func TestRenderJiraPreviewText_BlockedTickets(t *testing.T) {
 	result := &jiraPreviewResult{
-		GeneratedAt:  time.Now(),
-		JiraProject:  "PROJ",
-		ConnectionOK: true,
+		GeneratedAt:    time.Now(),
+		JiraProject:    "PROJ",
+		ConnectionOK:   true,
 		ExecutionOrder: []string{"PROJ-1"},
 		FullOrder: []jiraPreviewOrderEntry{
 			{Key: "PROJ-1", Ready: true},
@@ -201,7 +201,7 @@ func TestRenderJiraPreviewText_NoTodoTickets(t *testing.T) {
 		GeneratedAt:  time.Now(),
 		JiraProject:  "PROJ",
 		ConnectionOK: true,
-		Phases: []jiraPreviewPhase{},
+		Phases:       []jiraPreviewPhase{},
 	}
 	out := renderJiraPreviewText(result, jiraPreviewTextOptions{})
 	if !strings.Contains(out, "none") {

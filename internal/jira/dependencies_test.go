@@ -139,10 +139,10 @@ func TestBuildDependencyGraph_DoneBlockerIgnored(t *testing.T) {
 	// A-1 is blocked by DONE-99 which has statusCategory="done" — should be treated as resolved.
 	tickets := []Ticket{
 		makeTicket("A-1", []IssueLink{{
-			Type:                 "Blocks",
-			InwardKey:            "DONE-99",
-			OutwardKey:           "A-1",
-			Direction:            "inward",
+			Type:                  "Blocks",
+			InwardKey:             "DONE-99",
+			OutwardKey:            "A-1",
+			Direction:             "inward",
 			BlockerStatusCategory: "done",
 		}}),
 		makeTicket("A-2", nil),

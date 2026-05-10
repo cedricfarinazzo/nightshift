@@ -39,13 +39,13 @@ type Scheduler struct {
 	location *time.Location
 
 	// Runtime state
-	cron        *cron.Cron
-	jobs        []Job
-	running     bool
-	stopCh      chan struct{}
-	doneCh      chan struct{}
-	nextRun     time.Time
-	entryID     cron.EntryID
+	cron         *cron.Cron
+	jobs         []Job
+	running      bool
+	stopCh       chan struct{}
+	doneCh       chan struct{}
+	nextRun      time.Time
+	entryID      cron.EntryID
 	stopTimeoutD time.Duration // overridable in tests; 0 means use default (30s)
 }
 

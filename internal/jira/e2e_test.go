@@ -573,7 +573,7 @@ func (n *noMutationJiraClient) HandleInvalidTicket(_ context.Context, _ string, 
 	return nil
 }
 func (n *noMutationJiraClient) TransitionToInProgress(_ context.Context, _ string) error { return nil }
-func (n *noMutationJiraClient) TransitionToReview(_ context.Context, _ string) error    { return nil }
+func (n *noMutationJiraClient) TransitionToReview(_ context.Context, _ string) error     { return nil }
 
 func TestE2E_VC8_ProcessTicket_WithStubAgents(t *testing.T) {
 	client := e2eClient(t)

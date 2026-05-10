@@ -50,7 +50,7 @@ type JiraConfig struct {
 	CleanupAfterDays int    `mapstructure:"cleanup_after_days"` // default: 30
 
 	// Budget
-	BudgetEnabled bool    `mapstructure:"budget_enabled"`  // default: true
+	BudgetEnabled bool    `mapstructure:"budget_enabled"`   // default: true
 	MaxCostPerRun float64 `mapstructure:"max_cost_per_run"` // optional cap per run (USD)
 
 	// Behavior
