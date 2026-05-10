@@ -267,6 +267,12 @@ func followLogs(logDir string, initialLines int, filter logFilter, raw bool) err
 		}
 	}
 
+	defer func() {
+		if file != nil {
+			_ = file.Close()
+		}
+	}()
+
 	if !raw {
 		fmt.Println("--- Following logs (Ctrl+C to exit) ---")
 	}
