@@ -471,7 +471,7 @@ func TestFetchTodoTickets_SprintFilterSentInJQL(t *testing.T) {
 	proj := mockProject()
 	proj.RequireActiveSprint = true
 
-	_, err := client.FetchTodoTickets(testCtx(t), proj)
+	_, err := client.FetchTodoTickets(testCtx(t), proj, "")
 	if err != nil {
 		t.Fatalf("FetchTodoTickets() error = %v", err)
 	}
@@ -487,7 +487,7 @@ func TestFetchTodoTickets_NoSprintFilterWhenFlagOff(t *testing.T) {
 	client, srv := newMockJiraClient(t, cfg)
 	defer srv.Close()
 
-	_, err := client.FetchTodoTickets(testCtx(t), mockProject())
+	_, err := client.FetchTodoTickets(testCtx(t), mockProject(), "")
 	if err != nil {
 		t.Fatalf("FetchTodoTickets() error = %v", err)
 	}
