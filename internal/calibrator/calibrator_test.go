@@ -102,8 +102,8 @@ func TestCalibrateMADOutlier(t *testing.T) {
 
 	now := time.Now()
 	insertSnapshot(t, database, "claude", 100000, 10, now)
-	insertSnapshot(t, database, "claude", 100000, 10, now.Add(1*time.Hour))
-	insertSnapshot(t, database, "claude", 1000000, 10, now.Add(2*time.Hour))
+	insertSnapshot(t, database, "claude", 100000, 10, now.Add(1*time.Minute))
+	insertSnapshot(t, database, "claude", 1000000, 10, now.Add(2*time.Minute))
 
 	result, err := cal.Calibrate("claude")
 	if err != nil {
@@ -218,7 +218,7 @@ func TestCalibrateCodexNoLocalTokensFallsBack(t *testing.T) {
 	// Legacy snapshots with local_tokens=0 (before token parsing was added).
 	// No samples will match local_tokens > 0, so calibrator falls back to config.
 	insertSnapshot(t, database, "codex", 0, 50, now)
-	insertSnapshot(t, database, "codex", 0, 50, now.Add(1*time.Hour))
+	insertSnapshot(t, database, "codex", 0, 50, now.Add(1*time.Minute))
 
 	result, err := cal.Calibrate("codex")
 	if err != nil {
@@ -303,7 +303,7 @@ func TestCalibrateSkipsOutOfRange(t *testing.T) {
 
 	now := time.Now()
 	insertSnapshot(t, database, "claude", 100000, 5, now)
-	insertSnapshot(t, database, "claude", 100000, 50, now.Add(1*time.Hour))
+	insertSnapshot(t, database, "claude", 100000, 50, now.Add(1*time.Minute))
 
 	result, err := cal.Calibrate("claude")
 	if err != nil {

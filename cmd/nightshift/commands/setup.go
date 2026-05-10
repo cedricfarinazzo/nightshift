@@ -2249,14 +2249,30 @@ func writeGlobalConfigToPath(cfg *config.Config, configPath string) error {
 		v.Set("jira.token_env", cfg.Jira.TokenEnv)
 		v.Set("jira.label", cfg.Jira.Label)
 		v.Set("jira.max_tickets", cfg.Jira.MaxTickets)
-		v.Set("jira.workspace_root", cfg.Jira.WorkspaceRoot)
-		v.Set("jira.cleanup_after_days", cfg.Jira.CleanupAfterDays)
 		v.Set("jira.budget_enabled", cfg.Jira.BudgetEnabled)
-		v.Set("jira.projects", cfg.Jira.Projects)
-		v.Set("jira.validation", cfg.Jira.Validation)
-		v.Set("jira.plan", cfg.Jira.Plan)
-		v.Set("jira.implement", cfg.Jira.Implement)
-		v.Set("jira.review_fix", cfg.Jira.ReviewFix)
+		if cfg.Jira.WorkspaceRoot != "" {
+			v.Set("jira.workspace_root", cfg.Jira.WorkspaceRoot)
+		}
+		if cfg.Jira.CleanupAfterDays != 0 {
+			v.Set("jira.cleanup_after_days", cfg.Jira.CleanupAfterDays)
+		}
+		// Build projects as explicit maps so mapstructure tags are honoured and empty
+		// optional fields (lint_command, test_command, per-project phase overrides) are omitted.
+		v.Set("jira.projects", jiraProjectsToMaps(cfg.Jira.Projects))
+		// Write each phase field individually so viper uses the dot-key path instead of
+		// reflecting over a struct (which would lose mapstructure tag key names).
+		v.Set("jira.validation.provider", cfg.Jira.Validation.Provider)
+		v.Set("jira.validation.model", cfg.Jira.Validation.Model)
+		v.Set("jira.validation.timeout", cfg.Jira.Validation.Timeout)
+		v.Set("jira.plan.provider", cfg.Jira.Plan.Provider)
+		v.Set("jira.plan.model", cfg.Jira.Plan.Model)
+		v.Set("jira.plan.timeout", cfg.Jira.Plan.Timeout)
+		v.Set("jira.implement.provider", cfg.Jira.Implement.Provider)
+		v.Set("jira.implement.model", cfg.Jira.Implement.Model)
+		v.Set("jira.implement.timeout", cfg.Jira.Implement.Timeout)
+		v.Set("jira.review_fix.provider", cfg.Jira.ReviewFix.Provider)
+		v.Set("jira.review_fix.model", cfg.Jira.ReviewFix.Model)
+		v.Set("jira.review_fix.timeout", cfg.Jira.ReviewFix.Timeout)
 	} else {
 		// Explicitly zero out every jira leaf key so a previously enabled Jira config
 		// does not survive a disable-and-save round-trip.
@@ -2265,14 +2281,20 @@ func writeGlobalConfigToPath(cfg *config.Config, configPath string) error {
 		v.Set("jira.token_env", "")
 		v.Set("jira.label", "")
 		v.Set("jira.max_tickets", 0)
-		v.Set("jira.workspace_root", "")
-		v.Set("jira.cleanup_after_days", 0)
 		v.Set("jira.budget_enabled", false)
 		v.Set("jira.projects", []interface{}{})
-		v.Set("jira.validation", map[string]interface{}{})
-		v.Set("jira.plan", map[string]interface{}{})
-		v.Set("jira.implement", map[string]interface{}{})
-		v.Set("jira.review_fix", map[string]interface{}{})
+		v.Set("jira.validation.provider", "")
+		v.Set("jira.validation.model", "")
+		v.Set("jira.validation.timeout", "")
+		v.Set("jira.plan.provider", "")
+		v.Set("jira.plan.model", "")
+		v.Set("jira.plan.timeout", "")
+		v.Set("jira.implement.provider", "")
+		v.Set("jira.implement.model", "")
+		v.Set("jira.implement.timeout", "")
+		v.Set("jira.review_fix.provider", "")
+		v.Set("jira.review_fix.model", "")
+		v.Set("jira.review_fix.timeout", "")
 	}
 
 	if err := v.WriteConfig(); err != nil {
@@ -2410,26 +2432,43 @@ func jiraModelIndexForProvider(provider, model string) int {
 	return 0
 }
 
-// defaultJiraPhaseProviders returns the initial provider array for Jira phases,
-// using the first entry of preference (or claude as the fallback).
+// defaultJiraPhaseProviders returns the initial provider array for Jira phases.
+// Copilot is preferred when present in preference (it is non-interactive by design);
+// otherwise falls back to the first preference entry, then "claude".
 func defaultJiraPhaseProviders(preference []string) [4]string {
 	p := "claude"
-	if len(preference) > 0 && preference[0] != "" {
+	for _, pref := range preference {
+		if pref == "copilot" {
+			p = "copilot"
+			break
+		}
+	}
+	if p == "claude" && len(preference) > 0 && preference[0] != "" {
 		p = preference[0]
 	}
 	return [4]string{p, p, p, p}
 }
 
 // defaultJiraPhaseModelIdxs returns initial model indexes for Jira phases.
-// validation defaults to index 0 (cheapest); the other phases default to index 1 (balanced).
+// All phases default to index 0 (first model in the provider list). For copilot
+// this is claude-sonnet-4.6 which is a good default for plan/implement.
+// For claude this is claude-opus-4-6; index 1 (sonnet) would be more balanced but
+// the copilot path (which is preferred when copilot is in preference) maps index 0
+// to the right model, so we keep it consistent.
 func defaultJiraPhaseModelIdxs(preference []string) [4]int {
 	p := "claude"
-	if len(preference) > 0 && preference[0] != "" {
+	for _, pref := range preference {
+		if pref == "copilot" {
+			p = "copilot"
+			break
+		}
+	}
+	if p == "claude" && len(preference) > 0 && preference[0] != "" {
 		p = preference[0]
 	}
 	models := jiraPhaseModelsForProvider(p)
 	implIdx := 0
-	if len(models) > 1 {
+	if p != "copilot" && len(models) > 1 {
 		implIdx = 1
 	}
 	return [4]int{0, implIdx, implIdx, implIdx}
@@ -2753,16 +2792,14 @@ func (m *setupModel) applyJiraConfig() {
 	}
 
 	m.cfg.Jira = jiraconfig.JiraConfig{
-		Site:             m.jiraSite,
-		Email:            m.jiraEmail,
-		TokenEnv:         m.jiraTokenEnv,
-		Label:            m.jiraLabel,
-		MaxTickets:       m.jiraMaxTickets,
-		BudgetEnabled:    true,
-		CleanupAfterDays: 30,
+		Site:          m.jiraSite,
+		Email:         m.jiraEmail,
+		TokenEnv:      m.jiraTokenEnv,
+		Label:         m.jiraLabel,
+		MaxTickets:    m.jiraMaxTickets,
+		BudgetEnabled: true,
 		Projects: []jiraconfig.ProjectConfig{{
 			Key:   m.jiraProjectKey,
-			Label: m.jiraLabel,
 			Repos: repos,
 		}},
 		Validation: phases[0],
@@ -2770,6 +2807,39 @@ func (m *setupModel) applyJiraConfig() {
 		Implement:  phases[2],
 		ReviewFix:  phases[3],
 	}
+}
+
+// jiraProjectsToMaps serialises Jira project configs into plain maps so viper
+// writes mapstructure-tagged key names (e.g. "base_branch") and omits empty
+// optional fields (lint_command, test_command, per-project phase overrides).
+func jiraProjectsToMaps(projects []jiraconfig.ProjectConfig) []map[string]interface{} {
+	result := make([]map[string]interface{}, 0, len(projects))
+	for _, proj := range projects {
+		repoMaps := make([]map[string]interface{}, 0, len(proj.Repos))
+		for _, r := range proj.Repos {
+			repo := map[string]interface{}{
+				"name":        r.Name,
+				"url":         r.URL,
+				"base_branch": r.BaseBranch,
+			}
+			if r.LintCommand != "" {
+				repo["lint_command"] = r.LintCommand
+			}
+			if r.TestCommand != "" {
+				repo["test_command"] = r.TestCommand
+			}
+			repoMaps = append(repoMaps, repo)
+		}
+		p := map[string]interface{}{
+			"key":   proj.Key,
+			"repos": repoMaps,
+		}
+		if proj.Label != "" {
+			p["label"] = proj.Label
+		}
+		result = append(result, p)
+	}
+	return result
 }
 
 // repoNameFromURL derives a short repo name from a git SSH or HTTPS URL.
