@@ -425,7 +425,7 @@ func TestIssueLinkToLink_BothKeys(t *testing.T) {
 
 func TestBuildTodoJQL_NoSprintFilter(t *testing.T) {
 	proj := ProjectConfig{Key: "PROJ", Label: "auto", RequireActiveSprint: false}
-	jql := buildTodoJQL(proj)
+	jql := buildTodoJQL(proj, "")
 	if strings.Contains(jql, "sprint") {
 		t.Errorf("JQL should not contain sprint filter when RequireActiveSprint=false, got: %s", jql)
 	}
@@ -442,7 +442,7 @@ func TestBuildTodoJQL_NoSprintFilter(t *testing.T) {
 
 func TestBuildTodoJQL_WithSprintFilter(t *testing.T) {
 	proj := ProjectConfig{Key: "PROJ", Label: "auto", RequireActiveSprint: true}
-	jql := buildTodoJQL(proj)
+	jql := buildTodoJQL(proj, "")
 	if !strings.Contains(jql, "sprint in openSprints()") {
 		t.Errorf("JQL should contain sprint filter when RequireActiveSprint=true, got: %s", jql)
 	}
@@ -450,7 +450,7 @@ func TestBuildTodoJQL_WithSprintFilter(t *testing.T) {
 
 func TestBuildTodoJQL_SprintFilterBeforeOrderBy(t *testing.T) {
 	proj := ProjectConfig{Key: "PROJ", Label: "auto", RequireActiveSprint: true}
-	jql := buildTodoJQL(proj)
+	jql := buildTodoJQL(proj, "")
 	sprintIdx := strings.Index(jql, "sprint in openSprints()")
 	orderIdx := strings.Index(jql, "ORDER BY created ASC")
 	if sprintIdx < 0 || orderIdx < 0 {
