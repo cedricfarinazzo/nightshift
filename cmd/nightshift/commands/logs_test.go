@@ -76,13 +76,6 @@ func TestFollowLogs_WithContext_Opens_And_Closes_File(t *testing.T) {
 	// Run followLogsWithContext in a goroutine so we can cancel it from the test.
 	errCh := make(chan error, 1)
 	go func() {
-		// Redirect stdout to avoid printing during tests.
-		oldStdout := os.Stdout
-		defer func() { os.Stdout = oldStdout }()
-		devNull, _ := os.Open(os.DevNull)
-		defer func() { _ = devNull.Close() }()
-		os.Stdout = devNull
-
 		errCh <- followLogsWithContext(ctx, dir, 0, logFilter{}, false)
 	}()
 
@@ -152,12 +145,6 @@ func TestFollowLogs_WithContext_Rollover_Closes_Old_And_New_File(t *testing.T) {
 	// For simplicity, we'll just verify that after cancellation, all files are closed.
 	errCh := make(chan error, 1)
 	go func() {
-		oldStdout := os.Stdout
-		defer func() { os.Stdout = oldStdout }()
-		devNull, _ := os.Open(os.DevNull)
-		defer func() { _ = devNull.Close() }()
-		os.Stdout = devNull
-
 		errCh <- followLogsWithContext(ctx, dir, 0, logFilter{}, false)
 	}()
 
