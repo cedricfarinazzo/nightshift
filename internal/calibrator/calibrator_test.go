@@ -71,8 +71,8 @@ func TestCalibrateWithSamples(t *testing.T) {
 
 	now := time.Now()
 	insertSnapshot(t, database, "claude", 300000, 30, now)
-	insertSnapshot(t, database, "claude", 310000, 30, now.Add(1*time.Hour))
-	insertSnapshot(t, database, "claude", 290000, 30, now.Add(2*time.Hour))
+	insertSnapshot(t, database, "claude", 310000, 30, now.Add(1*time.Minute))
+	insertSnapshot(t, database, "claude", 290000, 30, now.Add(2*time.Minute))
 
 	result, err := cal.Calibrate("claude")
 	if err != nil {
@@ -183,8 +183,8 @@ func TestCalibrateCodexWithLocalTokens(t *testing.T) {
 	// Codex snapshots with real local token data and scraped percentage.
 	// Inferred budget = local_tokens / (scraped_pct / 100)
 	insertSnapshot(t, database, "codex", 500000, 50, now)
-	insertSnapshot(t, database, "codex", 500000, 50, now.Add(1*time.Hour))
-	insertSnapshot(t, database, "codex", 500000, 50, now.Add(2*time.Hour))
+	insertSnapshot(t, database, "codex", 500000, 50, now.Add(1*time.Minute))
+	insertSnapshot(t, database, "codex", 500000, 50, now.Add(2*time.Minute))
 
 	result, err := cal.Calibrate("codex")
 	if err != nil {
@@ -273,9 +273,9 @@ func TestCalibrateCodexFiltersOutOfRange(t *testing.T) {
 	// scraped_pct=5 should be filtered (BETWEEN 10 AND 95)
 	insertSnapshot(t, database, "codex", 50000, 5, now)
 	// scraped_pct=100 should be filtered
-	insertSnapshot(t, database, "codex", 1000000, 100, now.Add(1*time.Hour))
+	insertSnapshot(t, database, "codex", 1000000, 100, now.Add(1*time.Minute))
 	// scraped_pct=40, local_tokens=400000 should be included
-	insertSnapshot(t, database, "codex", 400000, 40, now.Add(2*time.Hour))
+	insertSnapshot(t, database, "codex", 400000, 40, now.Add(2*time.Minute))
 
 	result, err := cal.Calibrate("codex")
 	if err != nil {
