@@ -24,6 +24,7 @@ type mockServerConfig struct {
 	transitionsPost int    // HTTP status for POST transitions (move)
 	searchPayload   string // JSON for POST /rest/api/3/search
 	failTransitions bool   // force GET transitions to return error
+	capturedJQL     *string // if non-nil, last JQL from search body is written here
 }
 
 func defaultMockConfig() mockServerConfig {
@@ -117,6 +118,14 @@ func newMockJiraClient(t *testing.T, cfg mockServerConfig) (*Client, *httptest.S
 
 	// POST /rest/api/3/search/jql  (fetchTickets via SearchJQL)
 	mux.HandleFunc("/rest/api/3/search/jql", func(w http.ResponseWriter, r *http.Request) {
+		if cfg.capturedJQL != nil {
+			var body struct {
+				JQL string `json:"jql"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err == nil {
+				*cfg.capturedJQL = body.JQL
+			}
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(cfg.searchPayload))
 	})

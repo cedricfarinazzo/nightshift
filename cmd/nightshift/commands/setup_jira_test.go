@@ -540,7 +540,9 @@ func TestApplyJiraConfig_PopulatesFields(t *testing.T) {
 
 func TestTokenEnvVar_Check(t *testing.T) {
 	const envKey = "NIGHTSHIFT_TEST_JIRA_TOKEN_CHECK"
-	os.Unsetenv(envKey)
+	if err := os.Unsetenv(envKey); err != nil {
+		t.Fatalf("Unsetenv: %v", err)
+	}
 
 	// Should be unset
 	if os.Getenv(envKey) != "" {
@@ -548,8 +550,10 @@ func TestTokenEnvVar_Check(t *testing.T) {
 	}
 
 	// Set it
-	os.Setenv(envKey, "test-token")
-	defer os.Unsetenv(envKey)
+	if err := os.Setenv(envKey, "test-token"); err != nil {
+		t.Fatalf("Setenv: %v", err)
+	}
+	defer func() { _ = os.Unsetenv(envKey) }()
 
 	if os.Getenv(envKey) == "" {
 		t.Fatal("expected env var to be set")

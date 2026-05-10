@@ -15,6 +15,11 @@ type ProjectConfig struct {
 	Label string       `mapstructure:"label"` // label filter (e.g., "nightshift")
 	Repos []RepoConfig `mapstructure:"repos"`
 
+	// When true, FetchTodoTickets injects "AND sprint in openSprints()" into the JQL
+	// so only tickets in an active sprint are processed. Leave false for Kanban/non-sprint
+	// projects to preserve existing behaviour.
+	RequireActiveSprint bool `mapstructure:"require_active_sprint"`
+
 	// Optional per-project phase overrides; zero-value means inherit global.
 	Validation PhaseConfig `mapstructure:"validation"`
 	Plan       PhaseConfig `mapstructure:"plan"`

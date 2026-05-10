@@ -420,3 +420,78 @@ func TestIssueLinkToLink_BothKeys(t *testing.T) {
 		t.Errorf("Direction = %q, want empty when both keys set", got.Direction)
 	}
 }
+
+// ── buildTodoJQL ──────────────────────────────────────────────────────────────
+
+func TestBuildTodoJQL_NoSprintFilter(t *testing.T) {
+	proj := ProjectConfig{Key: "PROJ", Label: "auto", RequireActiveSprint: false}
+	jql := buildTodoJQL(proj)
+	if strings.Contains(jql, "sprint") {
+		t.Errorf("JQL should not contain sprint filter when RequireActiveSprint=false, got: %s", jql)
+	}
+	if !strings.Contains(jql, `project = "PROJ"`) {
+		t.Errorf("JQL missing project clause, got: %s", jql)
+	}
+	if !strings.Contains(jql, `labels = "auto"`) {
+		t.Errorf("JQL missing label clause, got: %s", jql)
+	}
+	if !strings.HasSuffix(strings.TrimSpace(jql), "ORDER BY created ASC") {
+		t.Errorf("JQL should end with ORDER BY created ASC, got: %s", jql)
+	}
+}
+
+func TestBuildTodoJQL_WithSprintFilter(t *testing.T) {
+	proj := ProjectConfig{Key: "PROJ", Label: "auto", RequireActiveSprint: true}
+	jql := buildTodoJQL(proj)
+	if !strings.Contains(jql, "sprint in openSprints()") {
+		t.Errorf("JQL should contain sprint filter when RequireActiveSprint=true, got: %s", jql)
+	}
+}
+
+func TestBuildTodoJQL_SprintFilterBeforeOrderBy(t *testing.T) {
+	proj := ProjectConfig{Key: "PROJ", Label: "auto", RequireActiveSprint: true}
+	jql := buildTodoJQL(proj)
+	sprintIdx := strings.Index(jql, "sprint in openSprints()")
+	orderIdx := strings.Index(jql, "ORDER BY created ASC")
+	if sprintIdx < 0 || orderIdx < 0 {
+		t.Fatalf("expected both sprint filter and ORDER BY in JQL, got: %s", jql)
+	}
+	if sprintIdx > orderIdx {
+		t.Errorf("sprint filter should appear before ORDER BY, got: %s", jql)
+	}
+}
+
+func TestFetchTodoTickets_SprintFilterSentInJQL(t *testing.T) {
+	var capturedJQL string
+	cfg := defaultMockConfig()
+	cfg.capturedJQL = &capturedJQL
+	client, srv := newMockJiraClient(t, cfg)
+	defer srv.Close()
+
+	proj := mockProject()
+	proj.RequireActiveSprint = true
+
+	_, err := client.FetchTodoTickets(testCtx(t), proj)
+	if err != nil {
+		t.Fatalf("FetchTodoTickets() error = %v", err)
+	}
+	if !strings.Contains(capturedJQL, "sprint in openSprints()") {
+		t.Errorf("expected sprint filter in wire JQL, got: %q", capturedJQL)
+	}
+}
+
+func TestFetchTodoTickets_NoSprintFilterWhenFlagOff(t *testing.T) {
+	var capturedJQL string
+	cfg := defaultMockConfig()
+	cfg.capturedJQL = &capturedJQL
+	client, srv := newMockJiraClient(t, cfg)
+	defer srv.Close()
+
+	_, err := client.FetchTodoTickets(testCtx(t), mockProject())
+	if err != nil {
+		t.Fatalf("FetchTodoTickets() error = %v", err)
+	}
+	if strings.Contains(capturedJQL, "sprint") {
+		t.Errorf("expected no sprint filter in wire JQL when RequireActiveSprint=false, got: %q", capturedJQL)
+	}
+}

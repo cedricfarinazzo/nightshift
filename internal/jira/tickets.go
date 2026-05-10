@@ -48,12 +48,22 @@ type IssueLink struct {
 const searchPageSize = 50
 const acKeyword = "acceptance criteria"
 
-// FetchTodoTickets fetches issues in the "To Do" status category filtered by the project's label.
-func (c *Client) FetchTodoTickets(ctx context.Context, proj ProjectConfig) ([]Ticket, error) {
+// buildTodoJQL constructs the JQL query for FetchTodoTickets.
+// When proj.RequireActiveSprint is true, only tickets in an active sprint are matched.
+func buildTodoJQL(proj ProjectConfig) string {
 	jql := fmt.Sprintf(
-		`project = "%s" AND statusCategory = "To Do" AND labels = "%s" ORDER BY created ASC`,
+		`project = "%s" AND statusCategory = "To Do" AND labels = "%s"`,
 		proj.Key, proj.Label,
 	)
+	if proj.RequireActiveSprint {
+		jql += ` AND sprint in openSprints()`
+	}
+	return jql + ` ORDER BY created ASC`
+}
+
+// FetchTodoTickets fetches issues in the "To Do" status category filtered by the project's label.
+func (c *Client) FetchTodoTickets(ctx context.Context, proj ProjectConfig) ([]Ticket, error) {
+	jql := buildTodoJQL(proj)
 	tickets, err := c.fetchTickets(ctx, jql)
 	if err != nil {
 		return nil, err

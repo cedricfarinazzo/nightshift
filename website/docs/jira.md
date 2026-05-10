@@ -133,6 +133,31 @@ jira:
 
 `nightshift jira run` iterates all projects, fetching and processing tickets from each independently.
 
+### Sprint filtering (opt-in)
+
+By default, Nightshift picks up **all** TODO tickets with the configured label, including those sitting in the backlog with no sprint assigned. If your project uses Jira sprints and you only want Nightshift to work on tickets in the **active sprint**, set `require_active_sprint: true` on the project:
+
+```yaml
+  projects:
+    - key: PROJ
+      label: nightshift
+      require_active_sprint: true   # only tickets in an active sprint
+      repos:
+        - name: myrepo
+          url: "git@github.com:org/myrepo.git"
+          base_branch: main
+```
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `require_active_sprint` | bool | `false` | When `true`, only fetch TODO tickets assigned to an active sprint. Backlog tickets are skipped. |
+
+**When to use this:**
+- **Sprint-based projects** — you want strict sprint boundaries and never want backlog tickets picked up automatically.
+- **Kanban / continuous-flow projects** — leave it `false` (the default). There are no sprints, so forcing the filter would return zero tickets.
+
+> **Note:** `require_active_sprint` only affects the initial TODO fetch. Tickets already in progress or under review are always resumed regardless of sprint assignment, so in-flight work is never orphaned when a sprint closes.
+
 ### 3. Label your tickets
 
 Add the `nightshift` label (or the label set in `jira.label`) to any ticket you want Nightshift to process.

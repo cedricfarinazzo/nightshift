@@ -2988,7 +2988,7 @@ func renderJiraReposStep(b *strings.Builder, m *setupModel) {
 				b.WriteString(styleWarn.Render("⚠ HTTPS URL detected — SSH is required (use git@github.com:...)") + "\n")
 			}
 		} else {
-			b.WriteString(fmt.Sprintf("Base branch for %s\n", repoNameFromURL(m.jiraRepoEditURL)))
+			fmt.Fprintf(b, "Base branch for %s\n", repoNameFromURL(m.jiraRepoEditURL))
 			b.WriteString(styleNote.Render("Default branch for new feature branches (default: main)"))
 			b.WriteString("\n\n")
 			b.WriteString(m.jiraInput.View() + "\n")
