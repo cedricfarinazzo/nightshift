@@ -463,10 +463,11 @@ func TestRepoNameFromURL_SSH(t *testing.T) {
 }
 
 func TestJiraModelIndex_Found(t *testing.T) {
-	if len(jiraPhaseModels) == 0 {
-		t.Skip("jiraPhaseModels is empty")
+	models := jiraPhaseModelsForProvider("claude")
+	if len(models) == 0 {
+		t.Skip("claude model list is empty")
 	}
-	idx := jiraModelIndex(jiraPhaseModels[0])
+	idx := jiraModelIndex(models[0])
 	if idx != 0 {
 		t.Fatalf("expected 0, got %d", idx)
 	}
@@ -594,7 +595,7 @@ func TestJiraPhaseInput_ModelBoundsPerProvider(t *testing.T) {
 	m.jiraSubStep = jiraSubStepPhases
 	m.jiraPhaseCursor = 0
 	m.jiraPhaseProvider[0] = "codex"
-	maxIdx := len(jiraPhaseModelsByProvider["codex"]) - 1
+	maxIdx := len(jiraPhaseModelsForProvider("codex")) - 1
 	m.jiraPhaseModelIdx[0] = maxIdx
 
 	// Right at max should not exceed bounds.

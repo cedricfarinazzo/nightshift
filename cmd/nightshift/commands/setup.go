@@ -85,24 +85,16 @@ type modelOption struct {
 // (claude=0, codex=1, copilot=2). Used to bound modelCursor in handleModelInput.
 var modelProviderLists = []*[]modelOption{&claudeModels, &codexModels, &copilotModels}
 
-// jiraPhaseModels lists Claude model options used for Jira phase configuration.
-// Kept as a named slice so jiraModelIndex() and its tests remain stable.
-var jiraPhaseModels = []string{
-	"claude-haiku-4.5",
-	"claude-sonnet-4.5",
-	"claude-sonnet-4.6",
-	"claude-opus-4.5",
-	"claude-opus-4.6",
-}
-
 // jiraProviders lists providers selectable for Jira phase configuration.
 var jiraProviders = []string{"claude", "codex", "copilot"}
 
-// jiraPhaseModelsByProvider maps each provider to its model list for Jira phases.
-var jiraPhaseModelsByProvider = map[string][]string{
-	"claude":  jiraPhaseModels,
-	"codex":   {"gpt-5.2-codex", "gpt-5.3-codex", "gpt-5.2"},
-	"copilot": {"claude-haiku-4.5", "claude-sonnet-4.5", "claude-sonnet-4.6", "claude-opus-4.5"},
+// modelOptionValues extracts the value field from a slice of modelOption.
+func modelOptionValues(opts []modelOption) []string {
+	vals := make([]string, len(opts))
+	for i, o := range opts {
+		vals[i] = o.value
+	}
+	return vals
 }
 
 // claudeModels lists available Claude models.
@@ -2379,22 +2371,22 @@ const (
 	jiraSubStepPing       = 9
 )
 
-// jiraModelIndex returns the index of model in jiraPhaseModels, defaulting to 0.
+// jiraModelIndex returns the index of model in the claude Jira model list, defaulting to 0.
 func jiraModelIndex(model string) int {
-	for i, m := range jiraPhaseModels {
-		if m == model {
-			return i
-		}
-	}
-	return 0
+	return jiraModelIndexForProvider("claude", model)
 }
 
-// jiraPhaseModelsForProvider returns the model list for provider, falling back to claude.
+// jiraPhaseModelsForProvider returns the model list for the given provider.
+// Derived from the global provider model lists so there is a single source of truth.
 func jiraPhaseModelsForProvider(provider string) []string {
-	if models, ok := jiraPhaseModelsByProvider[provider]; ok {
-		return models
+	switch provider {
+	case "codex":
+		return modelOptionValues(codexModels[1:]) // skip "default" entry
+	case "copilot":
+		return modelOptionValues(copilotModels[1:])
+	default:
+		return modelOptionValues(claudeModels[1:])
 	}
-	return jiraPhaseModelsByProvider["claude"]
 }
 
 // jiraProviderIndex returns the index of provider in jiraProviders, defaulting to 0.
@@ -2752,9 +2744,11 @@ func (m *setupModel) applyJiraConfig() {
 		if m.jiraPhaseModelIdx[i] < len(models) {
 			model = models[m.jiraPhaseModelIdx[i]]
 		}
+		timeouts := [4]string{"2m", "5m", "30m", "20m"}
 		phases[i] = jiraconfig.PhaseConfig{
 			Provider: provider,
 			Model:    model,
+			Timeout:  timeouts[i],
 		}
 	}
 
