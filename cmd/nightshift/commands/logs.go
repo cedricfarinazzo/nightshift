@@ -385,6 +385,26 @@ func currentLogFile(logDir string) string {
 	return ""
 }
 
+func processLogFile(path string, filter logFilter, tail int, entries *[]logRecord, stats *logStats) {
+	f, err := os.Open(path)
+	if err != nil {
+		return
+	}
+	defer func() { _ = f.Close() }()
+
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := scanner.Text()
+		record := parseLogLine(line)
+		if !matchesFilter(record, filter) {
+			continue
+		}
+		stats.matched++
+		updateLogStats(stats, record)
+		*entries = appendWithTail(*entries, record, tail)
+	}
+}
+
 func loadLogEntries(logDir string, filter logFilter, tail int) ([]logRecord, logStats, error) {
 	files, err := getLogFiles(logDir)
 	if err != nil {
@@ -399,22 +419,7 @@ func loadLogEntries(logDir string, filter logFilter, tail int) ([]logRecord, log
 
 	var entries []logRecord
 	for _, path := range files {
-		f, err := os.Open(path)
-		if err != nil {
-			continue
-		}
-		scanner := bufio.NewScanner(f)
-		for scanner.Scan() {
-			line := scanner.Text()
-			record := parseLogLine(line)
-			if !matchesFilter(record, filter) {
-				continue
-			}
-			stats.matched++
-			updateLogStats(&stats, record)
-			entries = appendWithTail(entries, record, tail)
-		}
-		_ = f.Close()
+		processLogFile(path, filter, tail, &entries, &stats)
 	}
 
 	return entries, stats, nil
