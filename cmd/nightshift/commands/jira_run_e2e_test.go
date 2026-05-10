@@ -67,7 +67,7 @@ func TestJiraRun_E2E_DiscoverStatuses(t *testing.T) {
 // TestJiraRun_E2E_FetchTickets verifies that ticket fetching works without mutations.
 // Read-only: no ticket mutations.
 func TestJiraRun_E2E_FetchTickets(t *testing.T) {
-	client, _ := e2eJiraClient(t)
+	client, cfg := e2eJiraClient(t)
 	ctx := context.Background()
 
 	statusMap, err := client.DiscoverStatuses(ctx)
@@ -75,13 +75,19 @@ func TestJiraRun_E2E_FetchTickets(t *testing.T) {
 		t.Fatalf("DiscoverStatuses: %v", err)
 	}
 
-	todoTickets, err := client.FetchTodoTickets(ctx)
+	cfg.Defaults()
+	if len(cfg.Projects) == 0 {
+		t.Fatal("no projects configured")
+	}
+	proj := cfg.Projects[0]
+
+	todoTickets, err := client.FetchTodoTickets(ctx, proj, "")
 	if err != nil {
 		t.Fatalf("FetchTodoTickets: %v", err)
 	}
 	t.Logf("todo tickets: %d", len(todoTickets))
 
-	reviewTickets, err := client.FetchReviewTickets(ctx, statusMap)
+	reviewTickets, err := client.FetchReviewTickets(ctx, proj, statusMap, "")
 	if err != nil {
 		t.Fatalf("FetchReviewTickets: %v", err)
 	}

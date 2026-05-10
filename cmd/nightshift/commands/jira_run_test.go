@@ -59,6 +59,25 @@ func TestPrintJiraPreflightSummary_SkippedValidation(t *testing.T) {
 	}
 }
 
+func TestPrintJiraPreflightSummary_TypeFilter(t *testing.T) {
+	cfg := jira.JiraConfig{
+		Site:       "testsite",
+		MaxTickets: 5,
+		Validation: jira.PhaseConfig{Provider: "claude", Model: "claude-haiku-4.5"},
+		Projects: []jira.ProjectConfig{
+			{Key: "PROJ", Label: "nightshift", Repos: []jira.RepoConfig{{Name: "repo", URL: "git@github.com:org/repo.git"}}},
+		},
+	}
+
+	out := captureStdout(t, func() {
+		printJiraPreflightSummary(cfg, false, "Bug", nil)
+	})
+
+	if !strings.Contains(out, "Type filter:  Bug") {
+		t.Errorf("preflight summary should show type filter\nfull output:\n%s", out)
+	}
+}
+
 func TestPrintJiraRunSummary(t *testing.T) {
 	results := []jira.TicketResult{
 		{TicketKey: "P-1", Status: jira.TicketCompleted},

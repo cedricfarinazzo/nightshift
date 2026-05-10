@@ -260,24 +260,22 @@ func runSingleTicket(
 			return false, err
 		}
 
-		todoTickets, err := client.FetchTodoTickets(ctx, proj)
+		todoTickets, err := client.FetchTodoTickets(ctx, proj, typeFilter)
 		if err != nil {
 			return false, fmt.Errorf("fetch tickets: %w", err)
 		}
-		inProgressTickets, err := client.FetchInProgressTickets(ctx, proj, statusMap)
+		inProgressTickets, err := client.FetchInProgressTickets(ctx, proj, statusMap, typeFilter)
 		if err != nil {
 			return false, fmt.Errorf("fetch in-progress tickets: %w", err)
 		}
-		reviewTickets, err := client.FetchReviewTickets(ctx, proj, statusMap)
+		reviewTickets, err := client.FetchReviewTickets(ctx, proj, statusMap, typeFilter)
 		if err != nil {
 			return false, fmt.Errorf("fetch review tickets: %w", err)
 		}
 
+		// Check for exact key match in TODO/in-progress tickets
 		for _, t := range append(todoTickets, inProgressTickets...) {
 			if t.Key != key {
-				continue
-			}
-			if typeFilter != "" && !strings.EqualFold(t.IssueType, typeFilter) {
 				continue
 			}
 			found = true
@@ -297,11 +295,9 @@ func runSingleTicket(
 			return found, nil
 		}
 
+		// Check for exact key match in review tickets
 		for _, t := range reviewTickets {
 			if t.Key != key {
-				continue
-			}
-			if typeFilter != "" && !strings.EqualFold(t.IssueType, typeFilter) {
 				continue
 			}
 			found = true
@@ -320,6 +316,34 @@ func runSingleTicket(
 			}
 			return found, nil
 		}
+
+		// If type filter is active, check if the ticket exists but doesn't match the type filter
+		if typeFilter != "" {
+			unfilteredTodo, err := client.FetchTodoTickets(ctx, proj, "")
+			if err == nil {
+				for _, t := range unfilteredTodo {
+					if t.Key == key {
+						return false, fmt.Errorf("ticket %s found but does not match type filter %q (actual type: %q)", key, typeFilter, t.IssueType)
+					}
+				}
+			}
+			unfilteredInProgress, err := client.FetchInProgressTickets(ctx, proj, statusMap, "")
+			if err == nil {
+				for _, t := range unfilteredInProgress {
+					if t.Key == key {
+						return false, fmt.Errorf("ticket %s found but does not match type filter %q (actual type: %q)", key, typeFilter, t.IssueType)
+					}
+				}
+			}
+			unfilteredReview, err := client.FetchReviewTickets(ctx, proj, statusMap, "")
+			if err == nil {
+				for _, t := range unfilteredReview {
+					if t.Key == key {
+						return false, fmt.Errorf("ticket %s found but does not match type filter %q (actual type: %q)", key, typeFilter, t.IssueType)
+					}
+				}
+			}
+		}
 	}
 	return false, nil
 }
@@ -335,24 +359,15 @@ func runTodoPhase(
 	typeFilter string,
 	results *[]jira.TicketResult,
 ) error {
-	todoTickets, err := client.FetchTodoTickets(ctx, proj)
+	todoTickets, err := client.FetchTodoTickets(ctx, proj, typeFilter)
 	if err != nil {
 		return fmt.Errorf("fetch todo tickets: %w", err)
 	}
-	inProgressTickets, err := client.FetchInProgressTickets(ctx, proj, statusMap)
+	inProgressTickets, err := client.FetchInProgressTickets(ctx, proj, statusMap, typeFilter)
 	if err != nil {
 		return fmt.Errorf("fetch in-progress tickets: %w", err)
 	}
 	allTickets := append(todoTickets, inProgressTickets...)
-	if typeFilter != "" {
-		filtered := allTickets[:0]
-		for _, t := range allTickets {
-			if strings.EqualFold(t.IssueType, typeFilter) {
-				filtered = append(filtered, t)
-			}
-		}
-		allTickets = filtered
-	}
 	log.Infof("todo tickets [%s]: %d found (%d in-progress)", proj.Key, len(allTickets), len(inProgressTickets))
 
 	graph := jira.BuildDependencyGraph(allTickets)
@@ -404,18 +419,9 @@ func runReviewPhase(
 	typeFilter string,
 	feedbackResults *[]jira.FeedbackResult,
 ) error {
-	reviewTickets, err := client.FetchReviewTickets(ctx, proj, statusMap)
+	reviewTickets, err := client.FetchReviewTickets(ctx, proj, statusMap, typeFilter)
 	if err != nil {
 		return fmt.Errorf("fetch review tickets: %w", err)
-	}
-	if typeFilter != "" {
-		filtered := reviewTickets[:0]
-		for _, t := range reviewTickets {
-			if strings.EqualFold(t.IssueType, typeFilter) {
-				filtered = append(filtered, t)
-			}
-		}
-		reviewTickets = filtered
 	}
 	log.Infof("review tickets [%s]: %d found", proj.Key, len(reviewTickets))
 

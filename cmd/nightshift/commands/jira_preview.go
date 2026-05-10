@@ -200,7 +200,7 @@ func runJiraPreview(cmd *cobra.Command, _ []string) error {
 					}
 				}
 
-				todoTickets, err := client.FetchTodoTickets(ctx, proj)
+				todoTickets, err := client.FetchTodoTickets(ctx, proj, "")
 				if err != nil {
 					result.SkippedTickets = append(result.SkippedTickets, jiraPreviewSkipped{
 						Key:    proj.Key + ":*",
@@ -208,7 +208,7 @@ func runJiraPreview(cmd *cobra.Command, _ []string) error {
 					})
 					continue
 				}
-				inProgressTickets, ipErr := client.FetchInProgressTickets(ctx, proj, statusMap)
+				inProgressTickets, ipErr := client.FetchInProgressTickets(ctx, proj, statusMap, "")
 				if ipErr != nil {
 					result.SkippedTickets = append(result.SkippedTickets, jiraPreviewSkipped{
 						Key:    proj.Key + ":*",
@@ -265,7 +265,7 @@ func runJiraPreview(cmd *cobra.Command, _ []string) error {
 					})
 				}
 
-				reviewTickets, err := client.FetchReviewTickets(ctx, proj, statusMap)
+				reviewTickets, err := client.FetchReviewTickets(ctx, proj, statusMap, "")
 				if err != nil {
 					result.SkippedTickets = append(result.SkippedTickets, jiraPreviewSkipped{
 						Key:    proj.Key + ":*review*",
