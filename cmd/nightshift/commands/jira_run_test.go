@@ -23,7 +23,7 @@ func TestPrintJiraPreflightSummary(t *testing.T) {
 	}
 
 	out := captureStdout(t, func() {
-		printJiraPreflightSummary(cfg, false, nil)
+		printJiraPreflightSummary(cfg, false, "", nil)
 	})
 
 	checks := []string{
@@ -51,11 +51,30 @@ func TestPrintJiraPreflightSummary_SkippedValidation(t *testing.T) {
 	}
 
 	out := captureStdout(t, func() {
-		printJiraPreflightSummary(cfg, true, nil)
+		printJiraPreflightSummary(cfg, true, "", nil)
 	})
 
 	if !strings.Contains(out, "Validation:   skipped") {
 		t.Errorf("preflight summary should show skipped validation\nfull output:\n%s", out)
+	}
+}
+
+func TestPrintJiraPreflightSummary_TypeFilter(t *testing.T) {
+	cfg := jira.JiraConfig{
+		Site:       "testsite",
+		MaxTickets: 5,
+		Validation: jira.PhaseConfig{Provider: "claude", Model: "claude-haiku-4.5"},
+		Projects: []jira.ProjectConfig{
+			{Key: "PROJ", Label: "nightshift", Repos: []jira.RepoConfig{{Name: "repo", URL: "git@github.com:org/repo.git"}}},
+		},
+	}
+
+	out := captureStdout(t, func() {
+		printJiraPreflightSummary(cfg, false, "Bug", nil)
+	})
+
+	if !strings.Contains(out, "Type filter:  Bug") {
+		t.Errorf("preflight summary should show type filter\nfull output:\n%s", out)
 	}
 }
 
@@ -97,7 +116,7 @@ func TestPrintJiraRunSummary_Skipped(t *testing.T) {
 }
 
 func TestRunJira_FlagParsing(t *testing.T) {
-	flags := []string{"max-tickets", "ticket", "skip-validation", "todo-only", "review-only"}
+	flags := []string{"max-tickets", "ticket", "skip-validation", "todo-only", "review-only", "type"}
 	for _, name := range flags {
 		if jiraRunCmd.Flags().Lookup(name) == nil {
 			t.Errorf("flag --%s not registered on jira run command", name)

@@ -453,7 +453,7 @@ func TestFetchTodoTickets_Empty(t *testing.T) {
 	client, srv := newMockJiraClient(t, defaultMockConfig())
 	defer srv.Close()
 
-	tickets, err := client.FetchTodoTickets(testCtx(t), mockProject())
+	tickets, err := client.FetchTodoTickets(testCtx(t), mockProject(), "")
 	if err != nil {
 		t.Fatalf("FetchTodoTickets() error = %v", err)
 	}
@@ -478,7 +478,7 @@ func TestFetchTodoTickets_WithResults(t *testing.T) {
 	client, srv := newMockJiraClient(t, cfg)
 	defer srv.Close()
 
-	tickets, err := client.FetchTodoTickets(testCtx(t), mockProject())
+	tickets, err := client.FetchTodoTickets(testCtx(t), mockProject(), "")
 	if err != nil {
 		t.Fatalf("FetchTodoTickets() error = %v", err)
 	}
@@ -497,7 +497,7 @@ func TestFetchReviewTickets_NilStatusMap(t *testing.T) {
 	client, srv := newMockJiraClient(t, defaultMockConfig())
 	defer srv.Close()
 
-	tickets, err := client.FetchReviewTickets(testCtx(t), mockProject(), nil)
+	tickets, err := client.FetchReviewTickets(testCtx(t), mockProject(), nil, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -518,7 +518,7 @@ func TestFetchReviewTickets_WithStatusMap(t *testing.T) {
 		t.Fatalf("DiscoverStatuses: %v", err)
 	}
 
-	tickets, err := client.FetchReviewTickets(testCtx(t), mockProject(), sm)
+	tickets, err := client.FetchReviewTickets(testCtx(t), mockProject(), sm, "")
 	if err != nil {
 		t.Fatalf("FetchReviewTickets() error = %v", err)
 	}

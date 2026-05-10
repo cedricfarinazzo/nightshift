@@ -49,11 +49,16 @@ const searchPageSize = 50
 const acKeyword = "acceptance criteria"
 
 // FetchTodoTickets fetches issues in the "To Do" status category filtered by the project's label.
-func (c *Client) FetchTodoTickets(ctx context.Context, proj ProjectConfig) ([]Ticket, error) {
+// If issueType is non-empty, further filters by issue type (case-insensitive).
+func (c *Client) FetchTodoTickets(ctx context.Context, proj ProjectConfig, issueType string) ([]Ticket, error) {
 	jql := fmt.Sprintf(
-		`project = "%s" AND statusCategory = "To Do" AND labels = "%s" ORDER BY created ASC`,
+		`project = "%s" AND statusCategory = "To Do" AND labels = "%s"`,
 		proj.Key, proj.Label,
 	)
+	if issueType != "" {
+		jql += fmt.Sprintf(` AND issuetype = "%s"`, issueType)
+	}
+	jql += " ORDER BY created ASC"
 	tickets, err := c.fetchTickets(ctx, jql)
 	if err != nil {
 		return nil, err
@@ -64,7 +69,8 @@ func (c *Client) FetchTodoTickets(ctx context.Context, proj ProjectConfig) ([]Ti
 // FetchInProgressTickets fetches issues that are in a non-review "indeterminate" status,
 // filtered by the project's label. These are tickets that were started by nightshift but
 // failed mid-run (e.g. during plan or implement) and need to be resumed.
-func (c *Client) FetchInProgressTickets(ctx context.Context, proj ProjectConfig, statusMap *StatusMap) ([]Ticket, error) {
+// If issueType is non-empty, further filters by issue type (case-insensitive).
+func (c *Client) FetchInProgressTickets(ctx context.Context, proj ProjectConfig, statusMap *StatusMap, issueType string) ([]Ticket, error) {
 	if statusMap == nil || len(statusMap.InProgressStatuses) == 0 {
 		return nil, nil
 	}
@@ -73,9 +79,13 @@ func (c *Client) FetchInProgressTickets(ctx context.Context, proj ProjectConfig,
 		names[i] = fmt.Sprintf(`"%s"`, s.Name)
 	}
 	jql := fmt.Sprintf(
-		`project = "%s" AND status in (%s) AND labels = "%s" ORDER BY created ASC`,
+		`project = "%s" AND status in (%s) AND labels = "%s"`,
 		proj.Key, strings.Join(names, ", "), proj.Label,
 	)
+	if issueType != "" {
+		jql += fmt.Sprintf(` AND issuetype = "%s"`, issueType)
+	}
+	jql += " ORDER BY created ASC"
 	tickets, err := c.fetchTickets(ctx, jql)
 	if err != nil {
 		return nil, err
@@ -84,7 +94,8 @@ func (c *Client) FetchInProgressTickets(ctx context.Context, proj ProjectConfig,
 }
 
 // FetchReviewTickets fetches issues that are in a review status, filtered by the project's label.
-func (c *Client) FetchReviewTickets(ctx context.Context, proj ProjectConfig, statusMap *StatusMap) ([]Ticket, error) {
+// If issueType is non-empty, further filters by issue type (case-insensitive).
+func (c *Client) FetchReviewTickets(ctx context.Context, proj ProjectConfig, statusMap *StatusMap, issueType string) ([]Ticket, error) {
 	if statusMap == nil || len(statusMap.ReviewStatuses) == 0 {
 		return nil, nil
 	}
@@ -93,9 +104,13 @@ func (c *Client) FetchReviewTickets(ctx context.Context, proj ProjectConfig, sta
 		names[i] = fmt.Sprintf(`"%s"`, s.Name)
 	}
 	jql := fmt.Sprintf(
-		`project = "%s" AND status in (%s) AND labels = "%s" ORDER BY created ASC`,
+		`project = "%s" AND status in (%s) AND labels = "%s"`,
 		proj.Key, strings.Join(names, ", "), proj.Label,
 	)
+	if issueType != "" {
+		jql += fmt.Sprintf(` AND issuetype = "%s"`, issueType)
+	}
+	jql += " ORDER BY created ASC"
 	tickets, err := c.fetchTickets(ctx, jql)
 	if err != nil {
 		return nil, err

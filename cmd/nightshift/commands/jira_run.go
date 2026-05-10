@@ -37,6 +37,7 @@ func init() {
 	jiraRunCmd.Flags().Bool("skip-validation", false, "Skip LLM ticket validation step")
 	jiraRunCmd.Flags().Bool("todo-only", false, "Only process TODO tickets (skip feedback loop)")
 	jiraRunCmd.Flags().Bool("review-only", false, "Only process ON REVIEW feedback (skip TODO)")
+	jiraRunCmd.Flags().String("type", "", "Filter tickets by issue type (e.g. Bug, Story)")
 }
 
 func runJira(cmd *cobra.Command, _ []string) error {
@@ -67,6 +68,7 @@ func runJira(cmd *cobra.Command, _ []string) error {
 	todoOnly, _ := cmd.Flags().GetBool("todo-only")
 	reviewOnly, _ := cmd.Flags().GetBool("review-only")
 	singleTicket, _ := cmd.Flags().GetString("ticket")
+	typeFilter, _ := cmd.Flags().GetString("type")
 
 	if todoOnly && reviewOnly {
 		return fmt.Errorf("--todo-only and --review-only are mutually exclusive")
@@ -106,14 +108,14 @@ func runJira(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("discover statuses: %w", err)
 	}
 
-	printJiraPreflightSummary(cfg.Jira, skipValidation, statusMap)
+	printJiraPreflightSummary(cfg.Jira, skipValidation, typeFilter, statusMap)
 
 	var results []jira.TicketResult
 	var feedbackResults []jira.FeedbackResult
 	start := time.Now()
 
 	if singleTicket != "" {
-		found, err := runSingleTicket(ctx, log, client, cfg, statusMap, singleTicket, skipValidation, runDB, runID, &results, &feedbackResults)
+		found, err := runSingleTicket(ctx, log, client, cfg, statusMap, singleTicket, typeFilter, skipValidation, runDB, runID, &results, &feedbackResults)
 		if err != nil {
 			return err
 		}
@@ -127,12 +129,12 @@ func runJira(cmd *cobra.Command, _ []string) error {
 				return err
 			}
 			if !reviewOnly {
-				if err := runTodoPhase(ctx, log, orch, client, cfg.Jira, proj, statusMap, &results); err != nil {
+				if err := runTodoPhase(ctx, log, orch, client, cfg.Jira, proj, statusMap, typeFilter, &results); err != nil {
 					return err
 				}
 			}
 			if !todoOnly {
-				if err := runReviewPhase(ctx, log, orch, client, cfg.Jira, proj, statusMap, &feedbackResults); err != nil {
+				if err := runReviewPhase(ctx, log, orch, client, cfg.Jira, proj, statusMap, typeFilter, &feedbackResults); err != nil {
 					return err
 				}
 			}
@@ -232,6 +234,7 @@ func runSingleTicket(
 	cfg *config.Config,
 	statusMap *jira.StatusMap,
 	key string,
+	typeFilter string,
 	skipValidation bool,
 	runDB *db.DB,
 	runID string,
@@ -257,19 +260,20 @@ func runSingleTicket(
 			return false, err
 		}
 
-		todoTickets, err := client.FetchTodoTickets(ctx, proj)
+		todoTickets, err := client.FetchTodoTickets(ctx, proj, typeFilter)
 		if err != nil {
 			return false, fmt.Errorf("fetch tickets: %w", err)
 		}
-		inProgressTickets, err := client.FetchInProgressTickets(ctx, proj, statusMap)
+		inProgressTickets, err := client.FetchInProgressTickets(ctx, proj, statusMap, typeFilter)
 		if err != nil {
 			return false, fmt.Errorf("fetch in-progress tickets: %w", err)
 		}
-		reviewTickets, err := client.FetchReviewTickets(ctx, proj, statusMap)
+		reviewTickets, err := client.FetchReviewTickets(ctx, proj, statusMap, typeFilter)
 		if err != nil {
 			return false, fmt.Errorf("fetch review tickets: %w", err)
 		}
 
+		// Check for exact key match in TODO/in-progress tickets
 		for _, t := range append(todoTickets, inProgressTickets...) {
 			if t.Key != key {
 				continue
@@ -291,6 +295,7 @@ func runSingleTicket(
 			return found, nil
 		}
 
+		// Check for exact key match in review tickets
 		for _, t := range reviewTickets {
 			if t.Key != key {
 				continue
@@ -311,6 +316,34 @@ func runSingleTicket(
 			}
 			return found, nil
 		}
+
+		// If type filter is active, check if the ticket exists but doesn't match the type filter
+		if typeFilter != "" {
+			unfilteredTodo, err := client.FetchTodoTickets(ctx, proj, "")
+			if err == nil {
+				for _, t := range unfilteredTodo {
+					if t.Key == key {
+						return false, fmt.Errorf("ticket %s found but does not match type filter %q (actual type: %q)", key, typeFilter, t.IssueType)
+					}
+				}
+			}
+			unfilteredInProgress, err := client.FetchInProgressTickets(ctx, proj, statusMap, "")
+			if err == nil {
+				for _, t := range unfilteredInProgress {
+					if t.Key == key {
+						return false, fmt.Errorf("ticket %s found but does not match type filter %q (actual type: %q)", key, typeFilter, t.IssueType)
+					}
+				}
+			}
+			unfilteredReview, err := client.FetchReviewTickets(ctx, proj, statusMap, "")
+			if err == nil {
+				for _, t := range unfilteredReview {
+					if t.Key == key {
+						return false, fmt.Errorf("ticket %s found but does not match type filter %q (actual type: %q)", key, typeFilter, t.IssueType)
+					}
+				}
+			}
+		}
 	}
 	return false, nil
 }
@@ -323,13 +356,14 @@ func runTodoPhase(
 	jiracfg jira.JiraConfig,
 	proj jira.ProjectConfig,
 	statusMap *jira.StatusMap,
+	typeFilter string,
 	results *[]jira.TicketResult,
 ) error {
-	todoTickets, err := client.FetchTodoTickets(ctx, proj)
+	todoTickets, err := client.FetchTodoTickets(ctx, proj, typeFilter)
 	if err != nil {
 		return fmt.Errorf("fetch todo tickets: %w", err)
 	}
-	inProgressTickets, err := client.FetchInProgressTickets(ctx, proj, statusMap)
+	inProgressTickets, err := client.FetchInProgressTickets(ctx, proj, statusMap, typeFilter)
 	if err != nil {
 		return fmt.Errorf("fetch in-progress tickets: %w", err)
 	}
@@ -382,9 +416,10 @@ func runReviewPhase(
 	jiracfg jira.JiraConfig,
 	proj jira.ProjectConfig,
 	statusMap *jira.StatusMap,
+	typeFilter string,
 	feedbackResults *[]jira.FeedbackResult,
 ) error {
-	reviewTickets, err := client.FetchReviewTickets(ctx, proj, statusMap)
+	reviewTickets, err := client.FetchReviewTickets(ctx, proj, statusMap, typeFilter)
 	if err != nil {
 		return fmt.Errorf("fetch review tickets: %w", err)
 	}
@@ -479,11 +514,14 @@ func createJiraAgent(cfg *config.Config, phase jira.PhaseConfig) (agents.Agent, 
 	}
 }
 
-func printJiraPreflightSummary(cfg jira.JiraConfig, skipValidation bool, _ *jira.StatusMap) {
+func printJiraPreflightSummary(cfg jira.JiraConfig, skipValidation bool, typeFilter string, _ *jira.StatusMap) {
 	fmt.Println("🌙 Nightshift Jira Run")
 	fmt.Println("──────────────────────────────")
 	fmt.Printf("  Site:         %s.atlassian.net\n", cfg.Site)
 	fmt.Printf("  Max tickets:  %d\n", cfg.MaxTickets)
+	if typeFilter != "" {
+		fmt.Printf("  Type filter:  %s\n", typeFilter)
+	}
 	for _, p := range cfg.Projects {
 		fmt.Printf("  Project: %s  [label: %s]\n", p.Key, p.Label)
 		if skipValidation {
