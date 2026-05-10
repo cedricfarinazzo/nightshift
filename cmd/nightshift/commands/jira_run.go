@@ -46,6 +46,9 @@ func runJira(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
+	if err := initLogging(cfg); err != nil {
+		return fmt.Errorf("init logging: %w", err)
+	}
 	cfg.Jira.Defaults()
 	if err := cfg.Jira.Validate(); err != nil {
 		return fmt.Errorf("jira config: %w", err)
