@@ -2,6 +2,7 @@ package commands
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -219,6 +220,10 @@ func showLogs(logDir string, tail int, filter logFilter, summary bool, raw bool)
 }
 
 func followLogs(logDir string, initialLines int, filter logFilter, raw bool) error {
+	return followLogsWithContext(context.Background(), logDir, initialLines, filter, raw)
+}
+
+func followLogsWithContext(ctx context.Context, logDir string, initialLines int, filter logFilter, raw bool) error {
 	entries, stats, err := loadLogEntries(logDir, filter, initialLines)
 	if err != nil {
 		return err
@@ -267,12 +272,21 @@ func followLogs(logDir string, initialLines int, filter logFilter, raw bool) err
 		}
 	}
 
+	defer func() {
+		if file != nil {
+			_ = file.Close()
+		}
+	}()
+
 	if !raw {
 		fmt.Println("--- Following logs (Ctrl+C to exit) ---")
 	}
 
 	for {
 		select {
+		case <-ctx.Done():
+			return nil
+
 		case event, ok := <-watcher.Events:
 			if !ok {
 				return nil
