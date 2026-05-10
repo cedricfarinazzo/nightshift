@@ -919,7 +919,7 @@ func (o *Orchestrator) emit(format string, args ...any) {
 	}
 }
 
-// savePhaseLog persists a phase execution record to the DB. Non-fatal: logs WARN on error.
+// savePhaseLog persists a phase execution record to the DB. Non-fatal: logs error on failure.
 func (o *Orchestrator) savePhaseLog(ctx context.Context, ticketKey string, phase Phase, provider, model string, startedAt time.Time, exitOk bool, output, errMsg string) {
 	if o.db == nil || o.runID == "" {
 		return
