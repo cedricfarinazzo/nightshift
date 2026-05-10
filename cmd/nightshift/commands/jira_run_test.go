@@ -23,7 +23,7 @@ func TestPrintJiraPreflightSummary(t *testing.T) {
 	}
 
 	out := captureStdout(t, func() {
-		printJiraPreflightSummary(cfg, false, nil)
+		printJiraPreflightSummary(cfg, false, "", nil)
 	})
 
 	checks := []string{
@@ -51,7 +51,7 @@ func TestPrintJiraPreflightSummary_SkippedValidation(t *testing.T) {
 	}
 
 	out := captureStdout(t, func() {
-		printJiraPreflightSummary(cfg, true, nil)
+		printJiraPreflightSummary(cfg, true, "", nil)
 	})
 
 	if !strings.Contains(out, "Validation:   skipped") {
@@ -97,7 +97,7 @@ func TestPrintJiraRunSummary_Skipped(t *testing.T) {
 }
 
 func TestRunJira_FlagParsing(t *testing.T) {
-	flags := []string{"max-tickets", "ticket", "skip-validation", "todo-only", "review-only"}
+	flags := []string{"max-tickets", "ticket", "skip-validation", "todo-only", "review-only", "type"}
 	for _, name := range flags {
 		if jiraRunCmd.Flags().Lookup(name) == nil {
 			t.Errorf("flag --%s not registered on jira run command", name)
