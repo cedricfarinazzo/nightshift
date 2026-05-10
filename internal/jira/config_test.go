@@ -198,30 +198,30 @@ func TestJiraConfig_MultiProject(t *testing.T) {
 }
 
 func TestProjectConfig_RequireActiveSprint_DefaultsFalse(t *testing.T) {
-// Zero-value ProjectConfig must have RequireActiveSprint = false.
-proj := ProjectConfig{Key: "P", Label: "nightshift", Repos: []RepoConfig{{Name: "r", URL: "u"}}}
-if proj.RequireActiveSprint {
-t.Error("RequireActiveSprint should default to false")
-}
+	// Zero-value ProjectConfig must have RequireActiveSprint = false.
+	proj := ProjectConfig{Key: "P", Label: "nightshift", Repos: []RepoConfig{{Name: "r", URL: "u"}}}
+	if proj.RequireActiveSprint {
+		t.Error("RequireActiveSprint should default to false")
+	}
 }
 
 func TestProjectConfig_RequireActiveSprint_RoundTrip(t *testing.T) {
-// When explicitly set to true on a project inside JiraConfig, Defaults() must not reset it.
-cfg := JiraConfig{
-Site:  "x",
-Email: "a@b",
-Projects: []ProjectConfig{
-{
-Key:                 "SPRINT",
-Label:               "nightshift",
-RequireActiveSprint: true,
-Repos:               []RepoConfig{{Name: "r", URL: "u"}},
-},
-},
-}
-cfg.Defaults()
+	// When explicitly set to true on a project inside JiraConfig, Defaults() must not reset it.
+	cfg := JiraConfig{
+		Site:  "x",
+		Email: "a@b",
+		Projects: []ProjectConfig{
+			{
+				Key:                 "SPRINT",
+				Label:               "nightshift",
+				RequireActiveSprint: true,
+				Repos:               []RepoConfig{{Name: "r", URL: "u"}},
+			},
+		},
+	}
+	cfg.Defaults()
 
-if !cfg.Projects[0].RequireActiveSprint {
-t.Error("Defaults() must not reset RequireActiveSprint to false")
-}
+	if !cfg.Projects[0].RequireActiveSprint {
+		t.Error("Defaults() must not reset RequireActiveSprint to false")
+	}
 }
