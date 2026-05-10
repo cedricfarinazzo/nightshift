@@ -385,10 +385,10 @@ func currentLogFile(logDir string) string {
 	return ""
 }
 
-func processLogFile(path string, filter logFilter, tail int, entries *[]logRecord, stats *logStats) {
+func processLogFile(path string, filter logFilter, tail int, entries *[]logRecord, stats *logStats) error {
 	f, err := os.Open(path)
 	if err != nil {
-		return
+		return err
 	}
 	defer func() { _ = f.Close() }()
 
@@ -403,6 +403,11 @@ func processLogFile(path string, filter logFilter, tail int, entries *[]logRecor
 		updateLogStats(stats, record)
 		*entries = appendWithTail(*entries, record, tail)
 	}
+
+	if err := scanner.Err(); err != nil {
+		return fmt.Errorf("scanning file %s: %w", path, err)
+	}
+	return nil
 }
 
 func loadLogEntries(logDir string, filter logFilter, tail int) ([]logRecord, logStats, error) {
@@ -418,8 +423,22 @@ func loadLogEntries(logDir string, filter logFilter, tail int) ([]logRecord, log
 	}
 
 	var entries []logRecord
+	var lastErr error
+	successCount := 0
+
 	for _, path := range files {
-		processLogFile(path, filter, tail, &entries, &stats)
+		if err := processLogFile(path, filter, tail, &entries, &stats); err != nil {
+			lastErr = err
+			// Log warning but continue processing other files
+			fmt.Fprintf(os.Stderr, "warning: %v\n", err)
+		} else {
+			successCount++
+		}
+	}
+
+	// Only return error if all files failed to process
+	if successCount == 0 && lastErr != nil {
+		return nil, stats, lastErr
 	}
 
 	return entries, stats, nil
