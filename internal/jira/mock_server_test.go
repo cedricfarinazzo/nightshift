@@ -17,13 +17,13 @@ import (
 
 // mockServerConfig controls which endpoints succeed and which fail.
 type mockServerConfig struct {
-	myselfStatus      int
-	statusesPayload   string // JSON for project statuses
-	commentStatus     int
-	transitionsGet    string // JSON for GET transitions
-	transitionsPost   int    // HTTP status for POST transitions (move)
-	searchPayload     string // JSON for POST /rest/api/3/search
-	failTransitions   bool   // force GET transitions to return error
+	myselfStatus    int
+	statusesPayload string // JSON for project statuses
+	commentStatus   int
+	transitionsGet  string // JSON for GET transitions
+	transitionsPost int    // HTTP status for POST transitions (move)
+	searchPayload   string // JSON for POST /rest/api/3/search
+	failTransitions bool   // force GET transitions to return error
 }
 
 func defaultMockConfig() mockServerConfig {
@@ -45,7 +45,7 @@ func defaultMockConfig() mockServerConfig {
 			{"id":"11","name":"Todo","to":{"id":"10001","statusCategory":{"key":"new"}}}
 		]}`,
 		transitionsPost: http.StatusNoContent,
-		searchPayload: `{"total":0,"issues":[]}`,
+		searchPayload:   `{"total":0,"issues":[]}`,
 	}
 }
 

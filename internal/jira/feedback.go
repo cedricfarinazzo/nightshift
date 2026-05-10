@@ -14,9 +14,9 @@ import (
 type FeedbackResult struct {
 	TicketKey        string
 	PRURLs           []string
-	ReviewsFound     int // total review comments found
-	FixesMade        int // number of repos where review feedback was addressed
-	PushedCommits    int // number of commits pushed
+	ReviewsFound     int  // total review comments found
+	FixesMade        int  // number of repos where review feedback was addressed
+	PushedCommits    int  // number of commits pushed
 	AcknowledgedOnly bool // true when the agent ran but made no changes (review already handled)
 	Summary          string
 	Error            string

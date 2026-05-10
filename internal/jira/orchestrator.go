@@ -92,12 +92,12 @@ type Orchestrator struct {
 	runID string
 
 	// ops are injectable for testing; set to real functions by NewOrchestrator.
-	fnHasChanges        func(ctx context.Context, repoPath string) (bool, error)
-	fnCommitAndPush     func(ctx context.Context, repoPath, message string) error
-	fnCreatePR          func(ctx context.Context, repo RepoWorkspace, ticket Ticket, jiraSite string) (*PRInfo, error)
-	fnFindPR            func(ctx context.Context, repoPath, branch string) (*PRInfo, error)
-	fnFetchReviews      func(ctx context.Context, repoPath, prURL string) (*PRReviewState, error)
-	fnPostPRComment     func(ctx context.Context, repoPath, prURL, body string) error
+	fnHasChanges             func(ctx context.Context, repoPath string) (bool, error)
+	fnCommitAndPush          func(ctx context.Context, repoPath, message string) error
+	fnCreatePR               func(ctx context.Context, repo RepoWorkspace, ticket Ticket, jiraSite string) (*PRInfo, error)
+	fnFindPR                 func(ctx context.Context, repoPath, branch string) (*PRInfo, error)
+	fnFetchReviews           func(ctx context.Context, repoPath, prURL string) (*PRReviewState, error)
+	fnPostPRComment          func(ctx context.Context, repoPath, prURL, body string) error
 	fnBranchAheadOfBase      func(ctx context.Context, repoPath, branch, base string) (bool, error)
 	fnLocalBranchAheadOfBase func(ctx context.Context, repoPath, base string) (bool, error)
 	fnPushBranch             func(ctx context.Context, repoPath string) error
@@ -816,6 +816,7 @@ func (o *Orchestrator) buildImplementPrompt(ticket Ticket, plan string, ws *Work
 	}
 	return b.String()
 }
+
 // implementation summary so reviewers have full context inline.
 func buildPRImplementationComment(ticket Ticket, summary, jiraSite string) string {
 	var b strings.Builder
