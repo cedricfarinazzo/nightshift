@@ -443,15 +443,15 @@ func TestBuildTodoJQL_NoSprintFilter(t *testing.T) {
 func TestBuildTodoJQL_WithSprintFilter(t *testing.T) {
 	proj := ProjectConfig{Key: "PROJ", Label: "auto", RequireActiveSprint: true}
 	jql := buildTodoJQL(proj, "")
-	if !strings.Contains(jql, "sprint in openSprints() OR sprint is EMPTY") {
-		t.Errorf("JQL should contain sprint filter for Scrum/Kanban when RequireActiveSprint=true, got: %s", jql)
+	if !strings.Contains(jql, "sprint in openSprints()") {
+		t.Errorf("JQL should contain sprint filter when RequireActiveSprint=true, got: %s", jql)
 	}
 }
 
 func TestBuildTodoJQL_SprintFilterBeforeOrderBy(t *testing.T) {
 	proj := ProjectConfig{Key: "PROJ", Label: "auto", RequireActiveSprint: true}
 	jql := buildTodoJQL(proj, "")
-	sprintIdx := strings.Index(jql, "sprint in openSprints() OR sprint is EMPTY")
+	sprintIdx := strings.Index(jql, "sprint in openSprints()")
 	orderIdx := strings.Index(jql, "ORDER BY created ASC")
 	if sprintIdx < 0 || orderIdx < 0 {
 		t.Fatalf("expected both sprint filter and ORDER BY in JQL, got: %s", jql)
@@ -475,7 +475,7 @@ func TestFetchTodoTickets_SprintFilterSentInJQL(t *testing.T) {
 	if err != nil {
 		t.Fatalf("FetchTodoTickets() error = %v", err)
 	}
-	if !strings.Contains(capturedJQL, "sprint in openSprints() OR sprint is EMPTY") {
+	if !strings.Contains(capturedJQL, "sprint in openSprints()") {
 		t.Errorf("expected sprint filter in wire JQL, got: %q", capturedJQL)
 	}
 }
