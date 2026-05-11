@@ -49,17 +49,16 @@ const searchPageSize = 50
 const acKeyword = "acceptance criteria"
 
 // buildTodoJQL constructs the JQL query for FetchTodoTickets.
-// When proj.RequireActiveSprint is true, filters to active sprints only (board_type is ignored;
-// only Scrum projects or Kanban projects with manual sprint assignment will match).
+// When proj.RequireActiveSprint is true, sprint filtering depends on BoardType:
+//   - "scrum" (default): AND sprint in openSprints() — excludes backlog and unstarted sprints
+//   - "kanban": no sprint filter — Jira JQL cannot distinguish board items from backlog items;
+//     control visibility via the nightshift label instead
 func buildTodoJQL(proj ProjectConfig, issueType string) string {
 	jql := fmt.Sprintf(
 		`project = "%s" AND statusCategory = "To Do" AND labels = "%s"`,
 		proj.Key, proj.Label,
 	)
-	if proj.RequireActiveSprint {
-		// Only match items explicitly in active sprints.
-		// This excludes backlog items (sprint is EMPTY) and unstarted sprint items.
-		// Kanban items must be manually assigned to a sprint to appear.
+	if proj.RequireActiveSprint && proj.BoardType != "kanban" {
 		jql += ` AND sprint in openSprints()`
 	}
 	if issueType != "" {

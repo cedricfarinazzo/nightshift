@@ -441,15 +441,23 @@ func TestBuildTodoJQL_NoSprintFilter(t *testing.T) {
 }
 
 func TestBuildTodoJQL_WithSprintFilter(t *testing.T) {
-	proj := ProjectConfig{Key: "PROJ", Label: "auto", RequireActiveSprint: true}
+	proj := ProjectConfig{Key: "PROJ", Label: "auto", RequireActiveSprint: true, BoardType: "scrum"}
 	jql := buildTodoJQL(proj, "")
 	if !strings.Contains(jql, "sprint in openSprints()") {
-		t.Errorf("JQL should contain sprint filter when RequireActiveSprint=true, got: %s", jql)
+		t.Errorf("JQL should contain sprint filter for scrum when RequireActiveSprint=true, got: %s", jql)
+	}
+}
+
+func TestBuildTodoJQL_KanbanNoSprintFilter(t *testing.T) {
+	proj := ProjectConfig{Key: "PROJ", Label: "auto", RequireActiveSprint: true, BoardType: "kanban"}
+	jql := buildTodoJQL(proj, "")
+	if strings.Contains(jql, "sprint") {
+		t.Errorf("JQL should NOT contain sprint filter for kanban (backlog indistinguishable from board), got: %s", jql)
 	}
 }
 
 func TestBuildTodoJQL_SprintFilterBeforeOrderBy(t *testing.T) {
-	proj := ProjectConfig{Key: "PROJ", Label: "auto", RequireActiveSprint: true}
+	proj := ProjectConfig{Key: "PROJ", Label: "auto", RequireActiveSprint: true, BoardType: "scrum"}
 	jql := buildTodoJQL(proj, "")
 	sprintIdx := strings.Index(jql, "sprint in openSprints()")
 	orderIdx := strings.Index(jql, "ORDER BY created ASC")
@@ -470,13 +478,34 @@ func TestFetchTodoTickets_SprintFilterSentInJQL(t *testing.T) {
 
 	proj := mockProject()
 	proj.RequireActiveSprint = true
+	proj.BoardType = "scrum"
 
 	_, err := client.FetchTodoTickets(testCtx(t), proj, "")
 	if err != nil {
 		t.Fatalf("FetchTodoTickets() error = %v", err)
 	}
 	if !strings.Contains(capturedJQL, "sprint in openSprints()") {
-		t.Errorf("expected sprint filter in wire JQL, got: %q", capturedJQL)
+		t.Errorf("expected sprint filter in wire JQL for scrum board, got: %q", capturedJQL)
+	}
+}
+
+func TestFetchTodoTickets_KanbanNoSprintFilterInJQL(t *testing.T) {
+	var capturedJQL string
+	cfg := defaultMockConfig()
+	cfg.capturedJQL = &capturedJQL
+	client, srv := newMockJiraClient(t, cfg)
+	defer srv.Close()
+
+	proj := mockProject()
+	proj.RequireActiveSprint = true
+	proj.BoardType = "kanban"
+
+	_, err := client.FetchTodoTickets(testCtx(t), proj, "")
+	if err != nil {
+		t.Fatalf("FetchTodoTickets() error = %v", err)
+	}
+	if strings.Contains(capturedJQL, "sprint") {
+		t.Errorf("expected no sprint filter in wire JQL for kanban board, got: %q", capturedJQL)
 	}
 }
 
