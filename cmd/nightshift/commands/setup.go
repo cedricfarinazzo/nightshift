@@ -2192,10 +2192,6 @@ func mustExecutablePath() string {
 	return real
 }
 
-func writeGlobalConfig(cfg *config.Config) error {
-	return writeGlobalConfigToPath(cfg, config.GlobalConfigPath())
-}
-
 func writeGlobalConfigToPath(cfg *config.Config, configPath string) error {
 	if err := os.MkdirAll(filepath.Dir(configPath), 0755); err != nil {
 		return fmt.Errorf("create config dir: %w", err)
