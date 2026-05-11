@@ -17,6 +17,7 @@ func newJiraModel() *setupModel {
 	ti.Prompt = "> "
 	return &setupModel{
 		cfg:               &config.Config{},
+		configPath:        os.TempDir() + "/nightshift-test-config.yaml",
 		jiraInput:         ti,
 		jiraTokenEnv:      "JIRA_API_TOKEN",
 		jiraLabel:         "nightshift",

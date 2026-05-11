@@ -1073,7 +1073,7 @@ func (m *setupModel) handleScheduleInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.scheduleInput.Focus()
 	case "enter":
 		m.applyScheduleDefaults()
-		if err := writeGlobalConfig(m.cfg); err != nil {
+		if err := writeGlobalConfigToPath(m.cfg, m.configPath); err != nil {
 			m.scheduleErr = err.Error()
 			return m, nil
 		}
@@ -2510,7 +2510,7 @@ func (m *setupModel) handleJiraEnableInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) 
 	case "n", "N":
 		m.jiraEnabled = false
 		m.cfg.Jira = jiraconfig.JiraConfig{}
-		if err := writeGlobalConfig(m.cfg); err != nil {
+		if err := writeGlobalConfigToPath(m.cfg, m.configPath); err != nil {
 			m.jiraErr = err.Error()
 			return m, nil
 		}
@@ -2524,7 +2524,7 @@ func (m *setupModel) handleJiraEnableInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) 
 		} else {
 			m.jiraEnabled = false
 			m.cfg.Jira = jiraconfig.JiraConfig{}
-			if err := writeGlobalConfig(m.cfg); err != nil {
+			if err := writeGlobalConfigToPath(m.cfg, m.configPath); err != nil {
 				m.jiraErr = err.Error()
 				return m, nil
 			}
@@ -2743,7 +2743,7 @@ func (m *setupModel) handleJiraPingInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	if msg.String() == "enter" {
 		m.applyJiraConfig()
-		if err := writeGlobalConfig(m.cfg); err != nil {
+		if err := writeGlobalConfigToPath(m.cfg, m.configPath); err != nil {
 			m.jiraErr = err.Error()
 			return m, nil
 		}
@@ -2836,6 +2836,12 @@ func jiraProjectsToMaps(projects []jiraconfig.ProjectConfig) []map[string]interf
 		}
 		if proj.Label != "" {
 			p["label"] = proj.Label
+		}
+		if proj.RequireActiveSprint {
+			p["require_active_sprint"] = proj.RequireActiveSprint
+		}
+		if proj.BoardType != "" {
+			p["board_type"] = proj.BoardType
 		}
 		result = append(result, p)
 	}
