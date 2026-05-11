@@ -2843,6 +2843,9 @@ func jiraProjectsToMaps(projects []jiraconfig.ProjectConfig) []map[string]interf
 		if proj.BoardType != "" {
 			p["board_type"] = proj.BoardType
 		}
+		if proj.BoardID > 0 {
+			p["board_id"] = proj.BoardID
+		}
 		result = append(result, p)
 	}
 	return result

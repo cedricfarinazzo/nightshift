@@ -509,6 +509,45 @@ func TestFetchTodoTickets_KanbanNoSprintFilterInJQL(t *testing.T) {
 	}
 }
 
+func TestFetchTodoTickets_KanbanBoardAPIUsedWhenBoardIDSet(t *testing.T) {
+	var capturedBoardJQL string
+	cfg := defaultMockConfig()
+	cfg.capturedBoardJQL = &capturedBoardJQL
+	cfg.boardPayload = `{"startAt":0,"maxResults":50,"total":1,"issues":[{
+		"key":"VC-59",
+		"fields":{
+			"summary":"Board ticket",
+			"labels":["auto"],
+			"status":{"id":"10001","name":"To Do","statusCategory":{"key":"new"}},
+			"description":"Do the thing.",
+			"comment":{"comments":[]},
+			"issuelinks":[]
+		}
+	}]}`
+	client, srv := newMockJiraClient(t, cfg)
+	defer srv.Close()
+
+	proj := mockProject()
+	proj.BoardType = "kanban"
+	proj.BoardID = 42
+	proj.RequireActiveSprint = true
+	proj.Label = "auto"
+
+	tickets, err := client.FetchTodoTickets(testCtx(t), proj, "")
+	if err != nil {
+		t.Fatalf("FetchTodoTickets() with board API error = %v", err)
+	}
+	if len(tickets) != 1 || tickets[0].Key != "VC-59" {
+		t.Errorf("expected VC-59 from board API, got %v", tickets)
+	}
+	if !strings.Contains(capturedBoardJQL, `labels = "auto"`) {
+		t.Errorf("board JQL should filter by label, got: %q", capturedBoardJQL)
+	}
+	if strings.Contains(capturedBoardJQL, "sprint") {
+		t.Errorf("board JQL should not contain sprint filter, got: %q", capturedBoardJQL)
+	}
+}
+
 func TestFetchTodoTickets_NoSprintFilterWhenFlagOff(t *testing.T) {
 	var capturedJQL string
 	cfg := defaultMockConfig()

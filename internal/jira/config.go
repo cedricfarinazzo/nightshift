@@ -17,10 +17,11 @@ type ProjectConfig struct {
 
 	// When true, FetchTodoTickets applies sprint filtering based on BoardType:
 	//   - "scrum" (default): AND sprint in openSprints() — only active sprint items
-	//   - "kanban": no sprint filter — Jira has no JQL way to distinguish board vs backlog items;
-	//     use the label to control which tickets nightshift picks up.
+	//   - "kanban" + BoardID set: uses the Agile board API to fetch only board items (not backlog)
+	//   - "kanban" + no BoardID: no sprint filter — falls back to label-only JQL
 	RequireActiveSprint bool   `mapstructure:"require_active_sprint"`
 	BoardType           string `mapstructure:"board_type"` // "scrum" (default) or "kanban"
+	BoardID             int    `mapstructure:"board_id"`   // Jira Agile board ID (required for kanban board filtering)
 
 	// Optional per-project phase overrides; zero-value means inherit global.
 	Validation PhaseConfig `mapstructure:"validation"`
