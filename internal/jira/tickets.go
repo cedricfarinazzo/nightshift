@@ -49,14 +49,17 @@ const searchPageSize = 50
 const acKeyword = "acceptance criteria"
 
 // buildTodoJQL constructs the JQL query for FetchTodoTickets.
-// When proj.RequireActiveSprint is true, only tickets in an active sprint are matched.
+// When proj.RequireActiveSprint is true, only tickets in an active sprint (Scrum) or Kanban board are matched.
 func buildTodoJQL(proj ProjectConfig, issueType string) string {
 	jql := fmt.Sprintf(
 		`project = "%s" AND statusCategory = "To Do" AND labels = "%s"`,
 		proj.Key, proj.Label,
 	)
 	if proj.RequireActiveSprint {
-		jql += ` AND sprint in openSprints()`
+		// For Scrum boards: sprint in openSprints()
+		// For Kanban boards: sprint is EMPTY (no sprint field)
+		// Combined: (sprint in openSprints() OR sprint is EMPTY)
+		jql += ` AND (sprint in openSprints() OR sprint is EMPTY)`
 	}
 	if issueType != "" {
 		jql += fmt.Sprintf(` AND issuetype = "%s"`, issueType)
