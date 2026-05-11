@@ -238,7 +238,7 @@ func (c *JiraConfig) Defaults() {
 	// Apply defaults to each project's repos, label, and board type.
 	for i := range c.Projects {
 		if c.Projects[i].Label == "" {
-			c.Projects[i].Label = "nightshift"
+			c.Projects[i].Label = c.Label
 		}
 		if c.Projects[i].BoardType == "" {
 			c.Projects[i].BoardType = "scrum"
