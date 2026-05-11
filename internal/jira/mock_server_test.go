@@ -25,6 +25,7 @@ type mockServerConfig struct {
 	transitionsPost int     // HTTP status for POST transitions (move)
 	searchPayload   string  // JSON for POST /rest/api/3/search
 	boardPayload    string  // JSON for GET /rest/agile/1.0/board/{id}/issue
+	backlogPayload  string  // JSON for GET /rest/agile/1.0/board/{id}/backlog
 	failTransitions bool    // force GET transitions to return error
 	capturedJQL     *string // if non-nil, last JQL from search body is written here
 	capturedBoardJQL *string // if non-nil, JQL from board issue request is written here
@@ -51,6 +52,7 @@ func defaultMockConfig() mockServerConfig {
 		transitionsPost: http.StatusNoContent,
 		searchPayload:   `{"total":0,"issues":[]}`,
 		boardPayload:    `{"startAt":0,"maxResults":50,"total":0,"issues":[]}`,
+		backlogPayload:  `{"startAt":0,"maxResults":50,"total":0,"issues":[]}`,
 	}
 }
 
@@ -135,12 +137,17 @@ func newMockJiraClient(t *testing.T, cfg mockServerConfig) (*Client, *httptest.S
 	})
 
 	// GET /rest/agile/1.0/board/{id}/issue  (fetchKanbanBoardTickets)
+	// GET /rest/agile/1.0/board/{id}/backlog (fetchBoardBacklogKeys)
 	mux.HandleFunc("/rest/agile/1.0/board/", func(w http.ResponseWriter, r *http.Request) {
 		if cfg.capturedBoardJQL != nil {
 			*cfg.capturedBoardJQL = r.URL.Query().Get("jql")
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(cfg.boardPayload))
+		if strings.HasSuffix(r.URL.Path, "/backlog") {
+			_, _ = w.Write([]byte(cfg.backlogPayload))
+		} else {
+			_, _ = w.Write([]byte(cfg.boardPayload))
+		}
 	})
 
 	srv := httptest.NewServer(mux)

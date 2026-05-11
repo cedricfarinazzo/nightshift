@@ -85,6 +85,10 @@ func (c *Client) FetchTodoTickets(ctx context.Context, proj ProjectConfig, issue
 
 // fetchKanbanBoardTickets uses the Agile board API to return only issues on the
 // Kanban board (not in the backlog), filtered by label and status category.
+//
+// The Jira board/{id}/issue endpoint returns ALL issues associated with the board
+// including backlog items. To get only "on board" (non-backlog) items we subtract
+// the keys returned by board/{id}/backlog.
 func (c *Client) fetchKanbanBoardTickets(ctx context.Context, proj ProjectConfig, issueType string) ([]Ticket, error) {
 	jql := fmt.Sprintf(`statusCategory = "To Do" AND labels = "%s"`, proj.Label)
 	if issueType != "" {
@@ -94,6 +98,13 @@ func (c *Client) fetchKanbanBoardTickets(ctx context.Context, proj ProjectConfig
 		JQL:    jql,
 		Fields: []string{"summary", "description", "comment", "labels", "status", "issuelinks", "reporter", "assignee", "issuetype", "parent"},
 	}
+
+	// Collect backlog keys so we can exclude them.
+	backlogKeys, err := c.fetchBoardBacklogKeys(ctx, proj.BoardID, opts)
+	if err != nil {
+		return nil, err
+	}
+
 	const pageSize = 50
 	var tickets []Ticket
 	startAt := 0
@@ -103,7 +114,9 @@ func (c *Client) fetchKanbanBoardTickets(ctx context.Context, proj ProjectConfig
 			return nil, fmt.Errorf("jira: board %d issues: %w", proj.BoardID, err)
 		}
 		for _, issue := range page.Issues {
-			tickets = append(tickets, issueToTicketV2(issue))
+			if !backlogKeys[issue.Key] {
+				tickets = append(tickets, issueToTicketV2(issue))
+			}
 		}
 		startAt += len(page.Issues)
 		if len(page.Issues) < pageSize {
@@ -111,6 +124,27 @@ func (c *Client) fetchKanbanBoardTickets(ctx context.Context, proj ProjectConfig
 		}
 	}
 	return c.fetchParentDescriptions(ctx, tickets), nil
+}
+
+// fetchBoardBacklogKeys returns the set of issue keys that are in the board's backlog.
+func (c *Client) fetchBoardBacklogKeys(ctx context.Context, boardID int, opts *model.IssueOptionScheme) (map[string]bool, error) {
+	keys := make(map[string]bool)
+	const pageSize = 50
+	startAt := 0
+	for {
+		page, _, err := c.agile.Board.Backlog(ctx, boardID, opts, startAt, pageSize)
+		if err != nil {
+			return nil, fmt.Errorf("jira: board %d backlog: %w", boardID, err)
+		}
+		for _, issue := range page.Issues {
+			keys[issue.Key] = true
+		}
+		startAt += len(page.Issues)
+		if len(page.Issues) < pageSize {
+			break
+		}
+	}
+	return keys, nil
 }
 
 // FetchInProgressTickets fetches issues that are in a non-review "indeterminate" status,

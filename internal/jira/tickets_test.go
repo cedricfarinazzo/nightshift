@@ -513,17 +513,15 @@ func TestFetchTodoTickets_KanbanBoardAPIUsedWhenBoardIDSet(t *testing.T) {
 	var capturedBoardJQL string
 	cfg := defaultMockConfig()
 	cfg.capturedBoardJQL = &capturedBoardJQL
-	cfg.boardPayload = `{"startAt":0,"maxResults":50,"total":1,"issues":[{
-		"key":"VC-59",
-		"fields":{
-			"summary":"Board ticket",
-			"labels":["auto"],
-			"status":{"id":"10001","name":"To Do","statusCategory":{"key":"new"}},
-			"description":"Do the thing.",
-			"comment":{"comments":[]},
-			"issuelinks":[]
-		}
-	}]}`
+	// board/issue returns VC-59 (on board) and VC-31 (also returned but in backlog)
+	cfg.boardPayload = `{"startAt":0,"maxResults":50,"total":2,"issues":[
+		{"key":"VC-59","fields":{"summary":"Board ticket","labels":["auto"],"status":{"id":"10001","name":"To Do","statusCategory":{"key":"new"}},"description":"Do the thing.","comment":{"comments":[]},"issuelinks":[]}},
+		{"key":"VC-31","fields":{"summary":"Backlog ticket","labels":["auto"],"status":{"id":"10001","name":"To Do","statusCategory":{"key":"new"}},"description":"In backlog.","comment":{"comments":[]},"issuelinks":[]}}
+	]}`
+	// board/backlog returns VC-31 only — it should be excluded from results
+	cfg.backlogPayload = `{"startAt":0,"maxResults":50,"total":1,"issues":[
+		{"key":"VC-31","fields":{"summary":"Backlog ticket","labels":["auto"],"status":{"id":"10001","name":"To Do","statusCategory":{"key":"new"}},"description":"In backlog.","comment":{"comments":[]},"issuelinks":[]}}
+	]}`
 	client, srv := newMockJiraClient(t, cfg)
 	defer srv.Close()
 
@@ -538,7 +536,7 @@ func TestFetchTodoTickets_KanbanBoardAPIUsedWhenBoardIDSet(t *testing.T) {
 		t.Fatalf("FetchTodoTickets() with board API error = %v", err)
 	}
 	if len(tickets) != 1 || tickets[0].Key != "VC-59" {
-		t.Errorf("expected VC-59 from board API, got %v", tickets)
+		t.Errorf("expected only VC-59 (backlog VC-31 excluded), got %v", tickets)
 	}
 	if !strings.Contains(capturedBoardJQL, `labels = "auto"`) {
 		t.Errorf("board JQL should filter by label, got: %q", capturedBoardJQL)
