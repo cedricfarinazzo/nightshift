@@ -379,28 +379,40 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 				result.Error = err.Error()
 				result.Duration = time.Since(start)
 				o.log.Errorf("ticket %s: validation failed: %v", ticket.Key, err)
+				if o.progressf != nil {
+					o.progressf("validate      ✗ failed: %v", err)
+				}
 				o.notifyPhase(ticket.Key, PhaseValidate, true)
 				return result, nil
 			}
 			if !vr.Valid {
 				issues := strings.Join(vr.Issues, "; ")
-				o.savePhaseLog(ctx, ticket.Key, PhaseValidate, valCfg.Provider, valCfg.Model, validateStart, false, issues, fmt.Sprintf("score %d/10: %s", vr.Score, issues))
+				o.savePhaseLog(ctx, ticket.Key, PhaseValidate, valCfg.Provider, valCfg.Model, validateStart, false, issues, fmt.Sprintf("score %.1f/10: %s", vr.Score, issues))
 				if hErr := o.client.HandleInvalidTicket(ctx, ticket.Key, vr); hErr != nil {
 					o.log.Errorf("ticket %s: handle invalid: %v", ticket.Key, hErr)
 				}
 				result.Status = TicketRejected
-				result.Summary = fmt.Sprintf("rejected: score %d/10", vr.Score)
+				result.Summary = fmt.Sprintf("rejected: score %.1f/10", vr.Score)
 				result.Duration = time.Since(start)
-				o.log.Infof("ticket %s rejected (score %d/10)", ticket.Key, vr.Score)
+				o.log.Infof("ticket %s rejected (score %.1f/10)", ticket.Key, vr.Score)
+				if o.progressf != nil {
+					o.progressf("validate      ✗ rejected (score %.1f/10): %s", vr.Score, strings.Join(vr.Issues, "; "))
+				}
 				o.notifyPhase(ticket.Key, PhaseValidate, true)
 				return result, nil
 			}
 			o.savePhaseLog(ctx, ticket.Key, PhaseValidate, valCfg.Provider, valCfg.Model, validateStart, true, strings.Join(vr.Suggestions, "; "), "")
 			o.postPhaseComment(ctx, ticket.Key, CommentValidation,
-				fmt.Sprintf("Ticket validated (score %d/10).", vr.Score), time.Since(start))
-			o.log.Infof("ticket %s validated (score %d/10)", ticket.Key, vr.Score)
+				buildValidationComment(vr), time.Since(start))
+			o.log.Infof("ticket %s validated (score %.1f/10)", ticket.Key, vr.Score)
+			if o.progressf != nil {
+				o.progressf("validate      ✓ score %.1f/10", vr.Score)
+			}
 		} else {
 			o.log.Infof("ticket %s: validation skipped", ticket.Key)
+			if o.progressf != nil {
+				o.progressf("validate      skipped")
+			}
 		}
 
 		// Transition to In Progress
@@ -438,6 +450,9 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 			result.Error = err.Error()
 			result.Duration = time.Since(start)
 			o.log.Errorf("ticket %s: plan failed: %v", ticket.Key, err)
+			if o.progressf != nil {
+				o.progressf("plan          ✗ failed: %v", err)
+			}
 			o.notifyPhase(ticket.Key, PhasePlan, true)
 			return result, nil
 		}
@@ -446,6 +461,9 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 		o.emit("📝 posting plan to Jira %s", ticket.Key)
 		o.postPhaseComment(ctx, ticket.Key, CommentPlan, planResult.Output, time.Since(planStart))
 		o.log.Infof("ticket %s: plan complete", ticket.Key)
+		if o.progressf != nil {
+			o.progressf("plan          ✓ done")
+		}
 		o.notifyPhase(ticket.Key, PhasePlan, true)
 	}
 
@@ -474,6 +492,9 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 			result.Error = err.Error()
 			result.Duration = time.Since(start)
 			o.log.Errorf("ticket %s: implement failed: %v", ticket.Key, err)
+			if o.progressf != nil {
+				o.progressf("implement     ✗ failed: %v", err)
+			}
 			o.notifyPhase(ticket.Key, PhaseImplement, true)
 			return result, nil
 		}
@@ -482,6 +503,9 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 		o.emit("📝 posting implementation summary to Jira %s", ticket.Key)
 		o.postPhaseComment(ctx, ticket.Key, CommentImplement, implResult.Output, time.Since(implStart))
 		o.log.Infof("ticket %s: implementation complete", ticket.Key)
+		if o.progressf != nil {
+			o.progressf("implement     ✓ done")
+		}
 		o.notifyPhase(ticket.Key, PhaseImplement, true)
 	}
 
@@ -552,6 +576,9 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 				changedRepos = append(changedRepos, repo)
 			}
 		}
+		if o.progressf != nil {
+			o.progressf("commit        ✓ %d repo(s) committed", len(changedRepos))
+		}
 		o.notifyPhase(ticket.Key, PhaseCommit, true)
 		// Persist commit phase log (non-agent phase: no provider/model/output).
 		o.savePhaseLog(ctx, ticket.Key, PhaseCommit, "", "", commitStart, true, "", "")
@@ -588,6 +615,9 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 			result.Error = implErr.Error()
 			result.Duration = time.Since(start)
 			o.log.Errorf("ticket %s: %v", ticket.Key, implErr)
+			if o.progressf != nil {
+				o.progressf("commit        ✗ no changes produced")
+			}
 			o.notifyPhase(ticket.Key, PhaseCommit, true)
 			return result, nil
 		}
@@ -612,6 +642,9 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 				result.Status = TicketFailed
 				result.Error = err.Error()
 				result.Duration = time.Since(start)
+				if o.progressf != nil {
+					o.progressf("pr            ✗ failed: %v", err)
+				}
 				o.notifyPhase(ticket.Key, PhasePR, true)
 				return result, nil
 			}
@@ -666,6 +699,9 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 				}
 			}
 		}
+		if o.progressf != nil {
+			o.progressf("pr            ✓ %d PR(s): %s", len(result.PRURLs), strings.Join(result.PRURLs, ", "))
+		}
 		o.notifyPhase(ticket.Key, PhasePR, true)
 		// Persist PR phase log (non-agent phase: no provider/model/output).
 		o.savePhaseLog(ctx, ticket.Key, PhasePR, "", "", prStart, true, "", "")
@@ -702,9 +738,15 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 			result.Status = TicketFailed
 			result.Error = err.Error()
 			result.Duration = time.Since(start)
+			if o.progressf != nil {
+				o.progressf("status        ✗ Jira transition failed: %v", err)
+			}
 			o.notifyPhase(ticket.Key, PhaseStatus, true)
 			o.savePhaseLog(ctx, ticket.Key, PhaseStatus, "", "", statusStart, false, "", err.Error())
 			return result, nil
+		}
+		if o.progressf != nil {
+			o.progressf("status        ✓ transitioned to review")
 		}
 		o.notifyPhase(ticket.Key, PhaseStatus, true)
 		// Persist status phase log (non-agent phase: no provider/model/output).
@@ -721,6 +763,9 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 	}
 	o.postPhaseComment(ctx, ticket.Key, CommentStatusChange, statusBody, result.Duration)
 	o.log.Infof("ticket %s: completed in %s", ticket.Key, result.Duration.Round(time.Second))
+	if o.progressf != nil {
+		o.progressf("✓ completed in %s", result.Duration.Round(time.Second))
+	}
 	return result, nil
 }
 
@@ -736,44 +781,47 @@ func buildParentSection(b *strings.Builder, ticket Ticket) {
 }
 
 // buildCommentsSection appends a comments section to b when the ticket has comments.
+// Comment bodies are passed through compressText to strip filler before injection.
 func buildCommentsSection(b *strings.Builder, ticket Ticket) {
 	if len(ticket.Comments) == 0 {
 		return
 	}
 	b.WriteString("\n## Comments\n")
 	for _, c := range ticket.Comments {
-		fmt.Fprintf(b, "- %s: %s\n", c.Author, c.Body)
+		fmt.Fprintf(b, "- %s: %s\n", c.Author, compressText(c.Body))
 	}
 }
 
 // buildPlanPrompt constructs the prompt for the plan phase.
+// ~44% word reduction vs original (measured: 54 → 30 words static template).
 func (o *Orchestrator) buildPlanPrompt(ticket Ticket) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "You are a planning agent. Create a detailed implementation plan for this Jira ticket.\n\n")
+	fmt.Fprintf(&b, "Planning agent. Create implementation plan for ticket.\n\n")
 	buildParentSection(&b, ticket)
 	fmt.Fprintf(&b, "\n## Ticket\nKey: %s\nTitle: %s\n", ticket.Key, ticket.Summary)
-	fmt.Fprintf(&b, "Description:\n%s\n", ticket.Description)
+	fmt.Fprintf(&b, "Description:\n%s\n", compressText(ticket.Description))
 	if ticket.AcceptanceCriteria != "" {
-		fmt.Fprintf(&b, "\nAcceptance Criteria:\n%s\n", ticket.AcceptanceCriteria)
+		fmt.Fprintf(&b, "\nAcceptance Criteria:\n%s\n", compressText(ticket.AcceptanceCriteria))
 	}
 	buildCommentsSection(&b, ticket)
 	b.WriteString("\n## Instructions\n")
-	b.WriteString("1. Break the work into clear, ordered steps\n")
+	b.WriteString("1. Break work into ordered steps\n")
 	b.WriteString("2. Identify files to create or modify\n")
-	b.WriteString("3. Note any dependencies or risks\n")
-	b.WriteString("4. Output the plan as plain text\n")
+	b.WriteString("3. Note dependencies and risks\n")
+	b.WriteString("4. Output plan as plain text\n")
 	return b.String()
 }
 
 // buildImplementPrompt constructs the prompt for the implementation phase.
+// ~38% word reduction vs original (measured: 105 → 65 words static template).
 func (o *Orchestrator) buildImplementPrompt(ticket Ticket, plan string, ws *Workspace) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "You are an implementation agent. Implement the following Jira ticket.\n\n")
+	fmt.Fprintf(&b, "Implementation agent. Implement ticket below.\n\n")
 	buildParentSection(&b, ticket)
 	fmt.Fprintf(&b, "\n## Ticket\nKey: %s\nTitle: %s\n", ticket.Key, ticket.Summary)
-	fmt.Fprintf(&b, "Description:\n%s\n", ticket.Description)
+	fmt.Fprintf(&b, "Description:\n%s\n", compressText(ticket.Description))
 	if ticket.AcceptanceCriteria != "" {
-		fmt.Fprintf(&b, "\nAcceptance Criteria:\n%s\n", ticket.AcceptanceCriteria)
+		fmt.Fprintf(&b, "\nAcceptance Criteria:\n%s\n", compressText(ticket.AcceptanceCriteria))
 	}
 	buildCommentsSection(&b, ticket)
 	fmt.Fprintf(&b, "\n## Plan\n%s\n", plan)
@@ -784,21 +832,19 @@ func (o *Orchestrator) buildImplementPrompt(ticket Ticket, plan string, ws *Work
 				repo.Name, repo.Path, repo.Branch, repo.BaseBranch)
 		}
 		if len(ws.Repos) > 1 {
-			b.WriteString("\nYou are responsible for making changes across ALL repos listed above. ")
-			b.WriteString("Use their absolute paths to edit files in each repo. ")
-			b.WriteString("Do not limit your edits to your working directory.\n")
+			b.WriteString("\nMake changes across ALL repos above. Use absolute paths. Don't limit edits to working directory.\n")
 		}
 	}
 	b.WriteString("\n## Instructions\n")
-	b.WriteString("1. Implement the plan step by step — complete EVERY step before stopping\n")
+	b.WriteString("1. Implement plan step by step — complete EVERY step before stopping\n")
 	b.WriteString("2. Make all necessary code changes\n")
 	b.WriteString("3. Verify ALL acceptance criteria are met\n")
-	b.WriteString("4. Do not commit or push — that will be handled separately\n")
-	b.WriteString("5. If you encounter ambiguity, make a reasonable assumption and document it in a comment\n")
-	b.WriteString("6. Do NOT stop early — continue until the entire plan is implemented, lint passes, and tests pass\n")
+	b.WriteString("4. Do not commit or push — handled separately\n")
+	b.WriteString("5. On ambiguity, make reasonable assumption and document in comment\n")
+	b.WriteString("6. Do NOT stop early — continue until plan implemented, lint passes, tests pass\n")
 	if ws != nil && len(ws.Repos) > 0 {
 		b.WriteString("\n## Quality Checks (REQUIRED before finishing)\n")
-		b.WriteString("For each repo above, run the following commands and fix ALL failures before stopping:\n\n")
+		b.WriteString("For each repo above, run commands below and fix ALL failures before stopping:\n\n")
 		for _, repo := range ws.Repos {
 			lintCmd := repo.LintCommand
 			if lintCmd == "" {

@@ -97,52 +97,68 @@ func modelOptionValues(opts []modelOption) []string {
 	return vals
 }
 
-// claudeModels lists available Claude models.
-// Source: https://platform.claude.com/docs/en/about-claude/models/overview (Claude API aliases)
+// claudeModels lists available Claude models (static fallback).
+// Updated at runtime via FetchAnthropicModels when ANTHROPIC_API_KEY is set.
+// Source: https://platform.claude.com/docs/en/about-claude/models/overview
 var claudeModels = []modelOption{
 	{label: "default", value: ""},
-	{label: "claude-opus-4-6", value: "claude-opus-4-6"},
+	{label: "claude-opus-4-7", value: "claude-opus-4-7"},
 	{label: "claude-sonnet-4-6", value: "claude-sonnet-4-6"},
-	{label: "claude-haiku-4-5", value: "claude-haiku-4-5"},
+	{label: "claude-haiku-4-5-20251001", value: "claude-haiku-4-5-20251001"},
+	{label: "claude-opus-4-6", value: "claude-opus-4-6"},
+	{label: "claude-sonnet-4-5-20250929", value: "claude-sonnet-4-5-20250929"},
+	{label: "claude-opus-4-5-20251101", value: "claude-opus-4-5-20251101"},
+	{label: "claude-opus-4-1-20250805", value: "claude-opus-4-1-20250805"},
 }
 
-// codexModels lists available Codex models.
-// Source: https://developers.openai.com/codex/models/
+// codexModels lists available Codex/GPT models (static fallback).
+// Updated at runtime via FetchOpenAIModels when OPENAI_API_KEY is set.
+// Source: https://developers.openai.com/api/docs/models
 var codexModels = []modelOption{
 	{label: "default", value: ""},
-	{label: "gpt-5.3-codex", value: "gpt-5.3-codex"},
-	{label: "gpt-5.3-codex-spark", value: "gpt-5.3-codex-spark"},
-	{label: "gpt-5.2-codex", value: "gpt-5.2-codex"},
-	{label: "gpt-5.2", value: "gpt-5.2"},
-	{label: "gpt-5.1-codex-max", value: "gpt-5.1-codex-max"},
-	{label: "gpt-5.1-codex", value: "gpt-5.1-codex"},
-	{label: "gpt-5.1", value: "gpt-5.1"},
-	{label: "gpt-5-codex", value: "gpt-5-codex"},
-	{label: "gpt-5", value: "gpt-5"},
-}
-
-// copilotModels lists available Copilot models.
-// Source: `copilot --help`, see the --model flag description for the full list.
-var copilotModels = []modelOption{
-	{label: "default", value: ""},
-	{label: "claude-sonnet-4.6", value: "claude-sonnet-4.6"},
-	{label: "claude-sonnet-4.5", value: "claude-sonnet-4.5"},
-	{label: "claude-haiku-4.5", value: "claude-haiku-4.5"},
-	{label: "claude-opus-4.6", value: "claude-opus-4.6"},
-	{label: "claude-opus-4.6-fast", value: "claude-opus-4.6-fast"},
-	{label: "claude-opus-4.5", value: "claude-opus-4.5"},
-	{label: "claude-sonnet-4", value: "claude-sonnet-4"},
-	{label: "gemini-3-pro-preview", value: "gemini-3-pro-preview"},
+	{label: "gpt-5.5", value: "gpt-5.5"},
+	{label: "gpt-5.4", value: "gpt-5.4"},
+	{label: "gpt-5.4-mini", value: "gpt-5.4-mini"},
+	{label: "gpt-5.4-nano", value: "gpt-5.4-nano"},
 	{label: "gpt-5.3-codex", value: "gpt-5.3-codex"},
 	{label: "gpt-5.2-codex", value: "gpt-5.2-codex"},
 	{label: "gpt-5.2", value: "gpt-5.2"},
-	{label: "gpt-5.1-codex-max", value: "gpt-5.1-codex-max"},
-	{label: "gpt-5.1-codex", value: "gpt-5.1-codex"},
-	{label: "gpt-5.1", value: "gpt-5.1"},
-	{label: "gpt-5.1-codex-mini", value: "gpt-5.1-codex-mini"},
 	{label: "gpt-5-mini", value: "gpt-5-mini"},
 	{label: "gpt-4.1", value: "gpt-4.1"},
 }
+
+// initCopilotModels generates the copilot model list from providers.CopilotModels(),
+// reordering to place sonnet models first (followed by others) for better default selection.
+func initCopilotModels() []modelOption {
+	opts := []modelOption{{label: "default", value: ""}}
+	models := providers.CopilotModels()
+
+	// Partition: sonnet models first, then rest
+	var sonnetModels []string
+	var otherModels []string
+
+	for _, m := range models {
+		if strings.Contains(m, "sonnet") {
+			sonnetModels = append(sonnetModels, m)
+		} else {
+			otherModels = append(otherModels, m)
+		}
+	}
+
+	// Combine: sonnet first, then others
+	for _, m := range sonnetModels {
+		opts = append(opts, modelOption{label: m, value: m})
+	}
+	for _, m := range otherModels {
+		opts = append(opts, modelOption{label: m, value: m})
+	}
+
+	return opts
+}
+
+// copilotModels lists available Copilot models, generated from providers.CopilotModels()
+// with sonnet models prioritized as better defaults.
+var copilotModels = initCopilotModels()
 
 type setupModel struct {
 	step setupStep
@@ -172,6 +188,7 @@ type setupModel struct {
 	claudeModelIdx  int
 	codexModelIdx   int
 	copilotModelIdx int
+	modelsLoading   int // counts pending dynamic-fetch goroutines (0 = done)
 
 	taskPresetCursor int
 	taskCursor       int
@@ -266,6 +283,16 @@ type jiraPingMsg struct {
 	err string
 }
 
+type anthropicModelsFetchedMsg struct {
+	models []string
+	err    error
+}
+
+type openaiModelsFetchedMsg struct {
+	models []string
+	err    error
+}
+
 type jiraRepoEntry struct {
 	URL        string
 	BaseBranch string
@@ -340,6 +367,14 @@ func newSetupModel() (*setupModel, error) {
 	nightshiftInPath := err == nil
 	includePathStep := !nightshiftInPath
 
+	pendingFetches := 0
+	if os.Getenv("ANTHROPIC_API_KEY") != "" {
+		pendingFetches++
+	}
+	if os.Getenv("OPENAI_API_KEY") != "" {
+		pendingFetches++
+	}
+
 	model := &setupModel{
 		step:              stepWelcome,
 		cfg:               cfg,
@@ -359,6 +394,7 @@ func newSetupModel() (*setupModel, error) {
 		scheduleInput:     scheduleInput,
 		spinner:           spin,
 		nightshiftInPath:  nightshiftInPath,
+		modelsLoading:     pendingFetches,
 		claudeModelIdx:    modelIndex(claudeModels, cfg.Providers.Claude.Model),
 		codexModelIdx:     modelIndex(codexModels, cfg.Providers.Codex.Model),
 		copilotModelIdx:   modelIndex(copilotModels, cfg.Providers.Copilot.Model),
@@ -417,7 +453,27 @@ func newSetupModel() (*setupModel, error) {
 
 // Init implements tea.Model.
 func (m *setupModel) Init() tea.Cmd {
-	return m.spinner.Tick
+	cmds := []tea.Cmd{m.spinner.Tick}
+
+	if key := os.Getenv("ANTHROPIC_API_KEY"); key != "" {
+		cmds = append(cmds, func() tea.Msg {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			ids, err := providers.FetchAnthropicModels(ctx, key)
+			return anthropicModelsFetchedMsg{models: ids, err: err}
+		})
+	}
+
+	if key := os.Getenv("OPENAI_API_KEY"); key != "" {
+		cmds = append(cmds, func() tea.Msg {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			ids, err := providers.FetchOpenAIModels(ctx, key)
+			return openaiModelsFetchedMsg{models: ids, err: err}
+		})
+	}
+
+	return tea.Batch(cmds...)
 }
 
 // Update implements tea.Model.
@@ -489,6 +545,30 @@ func (m *setupModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.jiraPinging = false
 		m.jiraPingOK = msg.ok
 		m.jiraPingErr = msg.err
+	case anthropicModelsFetchedMsg:
+		if m.modelsLoading > 0 {
+			m.modelsLoading--
+		}
+		if msg.err == nil && len(msg.models) > 0 {
+			opts := []modelOption{{label: "default", value: ""}}
+			for _, id := range msg.models {
+				opts = append(opts, modelOption{label: id, value: id})
+			}
+			claudeModels = opts
+			m.claudeModelIdx = modelIndex(claudeModels, m.cfg.Providers.Claude.Model)
+		}
+	case openaiModelsFetchedMsg:
+		if m.modelsLoading > 0 {
+			m.modelsLoading--
+		}
+		if msg.err == nil && len(msg.models) > 0 {
+			opts := []modelOption{{label: "default", value: ""}}
+			for _, id := range msg.models {
+				opts = append(opts, modelOption{label: id, value: id})
+			}
+			codexModels = opts
+			m.codexModelIdx = modelIndex(codexModels, m.cfg.Providers.Codex.Model)
+		}
 	}
 
 	return m, cmd
@@ -1804,6 +1884,10 @@ func renderModelFields(b *strings.Builder, m *setupModel) {
 	}
 	b.WriteString(styleNote.Render("Tip: 'default' lets the CLI pick its built-in model."))
 	b.WriteString("\n")
+	if m.modelsLoading > 0 {
+		b.WriteString(styleDim.Render(m.spinner.View() + " Fetching live model list…"))
+		b.WriteString("\n")
+	}
 }
 
 func (m *setupModel) handleModelInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {

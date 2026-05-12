@@ -146,21 +146,21 @@ func (o *Orchestrator) ProcessFeedback(ctx context.Context, ticket Ticket, ws *W
 			// After filtering by lastReworkAt, if nothing remains → skip regardless
 			// of ReviewDecision (it stays CHANGES_REQUESTED until a re-review).
 			// On first run (lastReworkAt zero), fall back to the original heuristic.
+			// Failing CI checks are always current state and not filtered by lastReworkAt.
+			hasFailingChecks := len(reviewState.FailingChecks) > 0
 			if !lastReworkAt.IsZero() {
-				if len(reviewState.Reviews) == 0 && !hasActionableComments(reviewState) {
+				if len(reviewState.Reviews) == 0 && !hasActionableComments(reviewState) && !hasFailingChecks {
 					o.log.Infof("ticket %s: skipping rework — no new content since lastReworkAt=%s",
 						ticket.Key, lastReworkAt.Format(time.RFC3339))
-					o.emit("  ✓ no new review comments since last rework — skipping")
+					o.emit("  ✓ no new review comments or failing checks since last rework — skipping")
 					continue
 				}
 			} else {
-				// No previous rework: proceed only when changes are explicitly requested
-				// or there are actionable inline comments (Copilot posts COMMENTED reviews,
-				// not CHANGES_REQUESTED). Outdated comments are included — position=null
-				// means the diff moved after a push, not that the suggestion was resolved.
-				if reviewState.ReviewDecision != "CHANGES_REQUESTED" && !hasActionableComments(reviewState) {
-					o.log.Infof("ticket %s: skipping rework — no actionable comments", ticket.Key)
-					o.emit("  ✓ no actionable review comments — skipping")
+				// No previous rework: proceed only when changes are explicitly requested,
+				// there are actionable inline comments, or CI checks are failing.
+				if reviewState.ReviewDecision != "CHANGES_REQUESTED" && !hasActionableComments(reviewState) && !hasFailingChecks {
+					o.log.Infof("ticket %s: skipping rework — no actionable comments or failing checks", ticket.Key)
+					o.emit("  ✓ no actionable review comments or failing checks — skipping")
 					continue
 				}
 			}
@@ -257,16 +257,16 @@ func hasActionableComments(rs *PRReviewState) bool {
 }
 
 // buildReworkPrompt constructs the agent prompt from PR review comments.
-// Ticket context (title, description, AC, comments) is prepended so the agent
-// can cross-reference the original intent while addressing feedback.
+// Ticket context prepended so agent can cross-reference original intent.
+// ~35% word reduction vs original (measured: 91 → 59 words static template).
 func buildReworkPrompt(ticket Ticket, review *PRReviewState, repo RepoWorkspace) string {
 	var b strings.Builder
 
 	// Ticket context — mirrors buildPlanPrompt / buildImplementPrompt pattern.
 	fmt.Fprintf(&b, "## Ticket\nKey: %s\nTitle: %s\n", ticket.Key, ticket.Summary)
-	fmt.Fprintf(&b, "Description:\n%s\n", ticket.Description)
+	fmt.Fprintf(&b, "Description:\n%s\n", compressText(ticket.Description))
 	if ticket.AcceptanceCriteria != "" {
-		fmt.Fprintf(&b, "\nAcceptance Criteria:\n%s\n", ticket.AcceptanceCriteria)
+		fmt.Fprintf(&b, "\nAcceptance Criteria:\n%s\n", compressText(ticket.AcceptanceCriteria))
 	}
 	buildCommentsSection(&b, ticket)
 	b.WriteString("\n---\n\n")
@@ -276,24 +276,36 @@ func buildReworkPrompt(ticket Ticket, review *PRReviewState, repo RepoWorkspace)
 	b.WriteString("### Reviewer Comments\n\n")
 	for _, r := range review.Reviews {
 		if r.State == "CHANGES_REQUESTED" || r.State == "COMMENTED" {
-			fmt.Fprintf(&b, "**%s** (%s):\n%s\n\n", r.Author, r.State, r.Body)
+			fmt.Fprintf(&b, "**%s** (%s):\n%s\n\n", r.Author, r.State, compressText(r.Body))
 		}
 	}
 	b.WriteString("### Inline Comments\n\n")
 	for _, c := range review.Comments {
 		if c.Path != "" && !c.Resolved {
 			if c.Outdated {
-				fmt.Fprintf(&b, "**%s:%d** (%s) [OUTDATED — verify if still applies to current code]:\n%s\n\n", c.Path, c.Line, c.Author, c.Body)
+				fmt.Fprintf(&b, "**%s:%d** (%s) [OUTDATED — verify if still applies]:\n%s\n\n", c.Path, c.Line, c.Author, compressText(c.Body))
 			} else {
-				fmt.Fprintf(&b, "**%s:%d** (%s):\n%s\n\n", c.Path, c.Line, c.Author, c.Body)
+				fmt.Fprintf(&b, "**%s:%d** (%s):\n%s\n\n", c.Path, c.Line, c.Author, compressText(c.Body))
 			}
 		}
 	}
+	if len(review.FailingChecks) > 0 {
+		b.WriteString("### Failing CI Checks\n\n")
+		b.WriteString("Status checks failing on PR:\n\n")
+		for _, cr := range review.FailingChecks {
+			if cr.LogsURL != "" {
+				fmt.Fprintf(&b, "- **%s** (`%s`) — %s\n", cr.Name, cr.Conclusion, cr.LogsURL)
+			} else {
+				fmt.Fprintf(&b, "- **%s** (`%s`)\n", cr.Name, cr.Conclusion)
+			}
+		}
+		b.WriteString("\nFix all CI failures before push.\n\n")
+	}
 	b.WriteString("### Instructions\n")
-	b.WriteString("Address ALL reviewer feedback above. For each comment:\n")
-	b.WriteString("1. Make the requested change\n")
-	b.WriteString("2. If you disagree, explain why in a code comment\n")
-	b.WriteString("3. Do not modify code unrelated to the review feedback\n")
+	b.WriteString("Address ALL reviewer feedback. For each comment:\n")
+	b.WriteString("1. Make requested change\n")
+	b.WriteString("2. On disagreement, explain in code comment\n")
+	b.WriteString("3. Don't modify code unrelated to review feedback\n")
 	lintCmd := repo.LintCommand
 	if lintCmd == "" {
 		lintCmd = "golangci-lint run ./..."
@@ -303,10 +315,10 @@ func buildReworkPrompt(ticket Ticket, review *PRReviewState, repo RepoWorkspace)
 		testCmd = "go test ./..."
 	}
 	b.WriteString("\n### Quality Checks (REQUIRED before finishing)\n")
-	b.WriteString("After addressing all feedback, run the following commands and fix ALL failures:\n\n")
+	b.WriteString("After feedback addressed, run commands below and fix ALL failures:\n\n")
 	fmt.Fprintf(&b, "- Lint: `%s`\n", lintCmd)
 	fmt.Fprintf(&b, "- Test: `%s`\n\n", testCmd)
-	b.WriteString("Do not finish until both commands exit with code 0. Do not commit or push — that will be handled separately.\n")
+	b.WriteString("Do not finish until both exit code 0. Do not commit or push — handled separately.\n")
 	return b.String()
 }
 
