@@ -75,7 +75,7 @@ type jiraPreviewTicket struct {
 	Dependencies    []string `json:"dependencies,omitempty"`
 	Blocks          []string `json:"blocks,omitempty"`
 	BranchName      string   `json:"branch_name"`
-	ValidationScore *int     `json:"validation_score,omitempty"`
+	ValidationScore *float64 `json:"validation_score,omitempty"`
 	ValidationMsg   string   `json:"validation_msg,omitempty"`
 }
 
@@ -231,7 +231,7 @@ func runJiraPreview(cmd *cobra.Command, _ []string) error {
 							score := vr.Score
 							pt.ValidationScore = &score
 							if !vr.Valid {
-								pt.ValidationMsg = fmt.Sprintf("score %d/10 — below threshold", vr.Score)
+								pt.ValidationMsg = fmt.Sprintf("score %.1f/10 — below threshold", vr.Score)
 							}
 						}
 					}

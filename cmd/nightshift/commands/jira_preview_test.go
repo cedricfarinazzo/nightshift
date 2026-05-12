@@ -50,7 +50,7 @@ func TestRenderJiraPreviewText_ConnectionFailed(t *testing.T) {
 }
 
 func TestRenderJiraPreviewText_TodoTickets(t *testing.T) {
-	score := 8
+	score := float64(8)
 	result := &jiraPreviewResult{
 		GeneratedAt:  time.Now(),
 		JiraProject:  "PROJ",
@@ -68,7 +68,7 @@ func TestRenderJiraPreviewText_TodoTickets(t *testing.T) {
 		Phases:         []jiraPreviewPhase{},
 	}
 	out := renderJiraPreviewText(result, jiraPreviewTextOptions{})
-	for _, want := range []string{"PROJ-1", "Fix the thing", "feature/PROJ-1", "score 8/10"} {
+	for _, want := range []string{"PROJ-1", "Fix the thing", "feature/PROJ-1", "score 8.0/10"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q in output:\n%s", want, out)
 		}
@@ -237,7 +237,7 @@ func TestRenderJiraPreviewText_PhaseAssignments(t *testing.T) {
 // ── writeJiraPreviewJSON ──────────────────────────────────────────────────────
 
 func TestWriteJiraPreviewJSON(t *testing.T) {
-	score := 7
+	score := float64(7)
 	now := time.Now().Truncate(time.Second)
 	result := &jiraPreviewResult{
 		GeneratedAt:  now,

@@ -21,6 +21,14 @@ type PRInfo struct {
 	IsNew      bool
 }
 
+// CheckRun represents a single GitHub Actions / check-run result for a commit.
+type CheckRun struct {
+	Name       string
+	Status     string // "completed", "in_progress", "queued"
+	Conclusion string // "failure", "timed_out", "cancelled", "success", "neutral", "skipped", ""
+	LogsURL    string
+}
+
 // PRReviewState captures the current review state of a pull request.
 type PRReviewState struct {
 	URL            string
@@ -29,6 +37,8 @@ type PRReviewState struct {
 	ReviewDecision string
 	Reviews        []Review
 	Comments       []PRComment
+	FailingChecks  []CheckRun // check-runs with a failing conclusion (populated by FetchPRReviewComments)
+	HeadRefOid     string     // head commit SHA; included in FetchPRReviewComments to avoid duplicate gh pr view calls
 }
 
 // Review represents a single pull request review.
@@ -159,9 +169,10 @@ func buildPRBody(ticket Ticket, jiraSite string) string {
 
 // FetchPRReviewComments fetches the current review state for a PR using `gh pr view --json`
 // and appends inline review thread comments (with resolved status) via the GitHub GraphQL API.
+// It also populates FailingChecks with any failing GitHub status checks on the PR head commit.
 func FetchPRReviewComments(ctx context.Context, repoPath, prURL string) (*PRReviewState, error) {
 	out, err := ghExec(ctx, repoPath, "pr", "view", prURL,
-		"--json", "url,state,reviewDecision,reviews,comments,number")
+		"--json", "url,state,reviewDecision,reviews,comments,number,headRefOid")
 	if err != nil {
 		return nil, fmt.Errorf("jira: pr: fetch review state: %w", err)
 	}
@@ -178,7 +189,86 @@ func FetchPRReviewComments(ctx context.Context, repoPath, prURL string) (*PRRevi
 	if err == nil {
 		rs.Comments = append(rs.Comments, inline...)
 	}
+
+	// Fetch failing GitHub status checks — non-fatal; log and continue on error.
+	// Pass the head SHA from the initial query to avoid a duplicate gh pr view call.
+	checks, err := FetchPRCheckRuns(ctx, repoPath, rs.Number, rs.HeadRefOid)
+	if err != nil {
+		logging.Get().Warnf("jira: pr: fetch check-runs for PR #%d (%s) in repo %s: %v", rs.Number, prURL, repoPath, err)
+	} else {
+		rs.FailingChecks = checks
+	}
+
 	return rs, nil
+}
+
+// FetchPRCheckRuns fetches GitHub check-run results for the head commit of a PR and returns
+// only those that completed with a failing conclusion (failure, timed_out, cancelled, or action_required).
+// If sha is non-empty, it is used directly; otherwise, the head commit SHA is fetched via gh pr view.
+func FetchPRCheckRuns(ctx context.Context, repoPath string, prNumber int, sha ...string) ([]CheckRun, error) {
+	if prNumber == 0 {
+		return nil, nil
+	}
+
+	// Use provided SHA if available; otherwise fetch from PR.
+	commitSha := ""
+	if len(sha) > 0 && sha[0] != "" {
+		commitSha = sha[0]
+	} else {
+		// Resolve the head commit SHA for this PR.
+		shaOut, err := ghExec(ctx, repoPath, "pr", "view", fmt.Sprintf("%d", prNumber),
+			"--json", "headRefOid", "--jq", ".headRefOid")
+		if err != nil {
+			return nil, fmt.Errorf("gh pr view headRefOid: %w", err)
+		}
+		commitSha = strings.TrimSpace(shaOut)
+	}
+
+	if commitSha == "" {
+		return nil, fmt.Errorf("empty head SHA for PR #%d", prNumber)
+	}
+
+	out, err := ghExec(ctx, repoPath, "api",
+		fmt.Sprintf("repos/{owner}/{repo}/commits/%s/check-runs?per_page=100", commitSha))
+	if err != nil {
+		return nil, fmt.Errorf("gh api check-runs: %w", err)
+	}
+	return parseCheckRuns(out)
+}
+
+// parseCheckRuns decodes the GitHub check-runs API response and returns only entries
+// that completed with a failing conclusion (failure, timed_out, cancelled, action_required).
+// These are the conclusions that block PR merges or require manual intervention.
+func parseCheckRuns(raw string) ([]CheckRun, error) {
+	var v struct {
+		CheckRuns []struct {
+			Name       string `json:"name"`
+			Status     string `json:"status"`
+			Conclusion string `json:"conclusion"`
+			DetailsURL string `json:"details_url"`
+		} `json:"check_runs"`
+	}
+	if err := json.Unmarshal([]byte(raw), &v); err != nil {
+		return nil, fmt.Errorf("parse check-runs: %w", err)
+	}
+	failingConclusions := map[string]bool{
+		"failure":           true,
+		"timed_out":         true,
+		"cancelled":         true,
+		"action_required":   true,
+	}
+	runs := make([]CheckRun, 0)
+	for _, cr := range v.CheckRuns {
+		if cr.Status == "completed" && failingConclusions[cr.Conclusion] {
+			runs = append(runs, CheckRun{
+				Name:       cr.Name,
+				Status:     cr.Status,
+				Conclusion: cr.Conclusion,
+				LogsURL:    cr.DetailsURL,
+			})
+		}
+	}
+	return runs, nil
 }
 
 // fetchReviewThreads fetches per-line review thread comments via the GitHub GraphQL API.
@@ -257,6 +347,7 @@ func parsePRReviewState(raw string) (*PRReviewState, error) {
 		Number         int    `json:"number"`
 		State          string `json:"state"`
 		ReviewDecision string `json:"reviewDecision"`
+		HeadRefOid     string `json:"headRefOid"`
 		Reviews        []struct {
 			Author struct {
 				Login string `json:"login"`
@@ -281,6 +372,7 @@ func parsePRReviewState(raw string) (*PRReviewState, error) {
 		Number:         v.Number,
 		State:          v.State,
 		ReviewDecision: v.ReviewDecision,
+		HeadRefOid:     v.HeadRefOid,
 	}
 	for _, r := range v.Reviews {
 		rs.Reviews = append(rs.Reviews, Review{
