@@ -1027,7 +1027,7 @@ func (m *setupModel) handleBudgetInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.budgetCursor--
 		}
 	case "down", "j":
-		if m.budgetCursor < 6 {
+		if m.budgetCursor < 7 {
 			m.budgetCursor++
 		}
 	case "e":
@@ -1259,6 +1259,9 @@ func (m *setupModel) applyBudgetDefaults() {
 	if m.cfg.Budget.WeeklyTokens == 0 {
 		m.cfg.Budget.WeeklyTokens = config.DefaultWeeklyTokens
 	}
+	if m.cfg.Budget.Tracking == "" {
+		m.cfg.Budget.Tracking = config.DefaultTrackingMode
+	}
 }
 
 func (m *setupModel) budgetFieldValue() string {
@@ -1277,6 +1280,8 @@ func (m *setupModel) budgetFieldValue() string {
 		return m.cfg.Budget.SnapshotInterval
 	case 6:
 		return m.cfg.Budget.WeekStartDay
+	case 7:
+		return m.cfg.Budget.Tracking
 	default:
 		return ""
 	}
@@ -1323,6 +1328,11 @@ func (m *setupModel) applyBudgetEdit() error {
 			return fmt.Errorf("week_start_day must be monday or sunday")
 		}
 		m.cfg.Budget.WeekStartDay = value
+	case 7:
+		if value != "passive" && value != "active" && value != "hybrid" {
+			return fmt.Errorf("tracking must be passive, active, or hybrid")
+		}
+		m.cfg.Budget.Tracking = value
 	}
 	return nil
 }
@@ -1807,6 +1817,7 @@ func renderBudgetFields(b *strings.Builder, m *setupModel) {
 		fmt.Sprintf("Calibrate enabled: %t", m.cfg.Budget.CalibrateEnabled),
 		fmt.Sprintf("Snapshot interval: %s", m.cfg.Budget.SnapshotInterval),
 		fmt.Sprintf("Week start day: %s", m.cfg.Budget.WeekStartDay),
+		fmt.Sprintf("Tracking: %s", m.cfg.Budget.Tracking),
 	}
 	for i, field := range fields {
 		cursor := " "
@@ -2300,6 +2311,7 @@ func writeGlobalConfigToPath(cfg *config.Config, configPath string) error {
 	v.Set("budget.snapshot_interval", cfg.Budget.SnapshotInterval)
 	v.Set("budget.snapshot_retention_days", cfg.Budget.SnapshotRetentionDays)
 	v.Set("budget.week_start_day", cfg.Budget.WeekStartDay)
+	v.Set("budget.tracking", cfg.Budget.Tracking)
 
 	// Providers: set fields individually to match mapstructure tag names (fixes #20)
 	v.Set("providers.claude.enabled", cfg.Providers.Claude.Enabled)
