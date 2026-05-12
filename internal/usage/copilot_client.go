@@ -107,7 +107,7 @@ func (c *CopilotClient) FetchQuotas(ctx context.Context) (*CopilotUserResponse, 
 	if err != nil {
 		return nil, fmt.Errorf("copilot: request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	switch resp.StatusCode {
 	case http.StatusUnauthorized:

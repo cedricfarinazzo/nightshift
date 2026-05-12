@@ -24,19 +24,10 @@ type copilotAPIResponse struct {
 	AccessTypeSKU  string                     `json:"access_type_sku"`
 	QuotaResetDate string                     `json:"quota_reset_date"`
 	// Premium plan
-	QuotaSnapshots map[string]premiumQuota    `json:"quota_snapshots"`
+	QuotaSnapshots map[string]CopilotQuotaSnapshot `json:"quota_snapshots"`
 	// Free plan
 	LimitedUserQuotas map[string]int          `json:"limited_user_quotas"`
 	MonthlyQuotas     map[string]int          `json:"monthly_quotas"`
-}
-
-type premiumQuota struct {
-	Entitlement      int     `json:"entitlement"`
-	Remaining        int     `json:"remaining"`
-	PercentRemaining float64 `json:"percent_remaining"`
-	OverageCount     int     `json:"overage_count"`
-	OveragePermitted bool    `json:"overage_permitted"`
-	Unlimited        bool    `json:"unlimited"`
 }
 
 // CopilotUserResponse is the normalized, caller-facing response.
@@ -60,14 +51,7 @@ func normalize(raw copilotAPIResponse) *CopilotUserResponse {
 
 	// Premium plan: quota_snapshots
 	for k, v := range raw.QuotaSnapshots {
-		resp.Quotas[k] = CopilotQuotaSnapshot{
-			Entitlement:      v.Entitlement,
-			Remaining:        v.Remaining,
-			PercentRemaining: v.PercentRemaining,
-			OverageCount:     v.OverageCount,
-			OveragePermitted: v.OveragePermitted,
-			Unlimited:        v.Unlimited,
-		}
+		resp.Quotas[k] = v
 	}
 
 	// Free plan: limited_user_quotas (per-feature remaining counts)

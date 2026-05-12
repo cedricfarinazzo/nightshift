@@ -15,7 +15,7 @@ func TestFetchQuotas_PremiumPlan(t *testing.T) {
 		CopilotPlan:    "pro",
 		AccessTypeSKU:  "copilot_pro",
 		QuotaResetDate: "2026-06-01",
-		QuotaSnapshots: map[string]premiumQuota{
+		QuotaSnapshots: map[string]CopilotQuotaSnapshot{
 			"premium_interactions": {
 				Entitlement:      300,
 				Remaining:        250,
