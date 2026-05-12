@@ -384,9 +384,9 @@ func TestE2E_VC6_ValidateTicket_WithStubAgent(t *testing.T) {
 		t.Fatalf("ValidateTicket: %v", err)
 	}
 	if result.Score != 8 {
-		t.Errorf("Score = %d, want 8", result.Score)
+		t.Errorf("Score = %.1f, want 8", result.Score)
 	}
-	t.Logf("ValidateTicket(%s): valid=%v score=%d issues=%v", ticket.Key, result.Valid, result.Score, result.Issues)
+	t.Logf("ValidateTicket(%s): valid=%v score=%.1f issues=%v", ticket.Key, result.Valid, result.Score, result.Issues)
 }
 
 func TestE2E_VC6_ValidateTicket_RejectedFlow(t *testing.T) {
@@ -417,9 +417,9 @@ func TestE2E_VC6_ValidateTicket_RejectedFlow(t *testing.T) {
 		t.Error("expected Valid=false for stubbed low-score response")
 	}
 	if result.Score != 3 {
-		t.Errorf("Score = %d, want 3", result.Score)
+		t.Errorf("Score = %.1f, want 3", result.Score)
 	}
-	t.Logf("ValidateTicket(%s) correctly flagged as invalid: score=%d issues=%v", ticket.Key, result.Score, result.Issues)
+	t.Logf("ValidateTicket(%s) correctly flagged as invalid: score=%.1f issues=%v", ticket.Key, result.Score, result.Issues)
 }
 
 // ── VC-7: Per-ticket workspace & branch management ───────────────────────────
