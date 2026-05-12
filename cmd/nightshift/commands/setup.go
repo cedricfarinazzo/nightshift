@@ -124,30 +124,38 @@ var codexModels = []modelOption{
 	{label: "gpt-4.1", value: "gpt-4.1"},
 }
 
-// copilotModels lists available Copilot models (hardcoded — no API exists).
-// Source: https://docs.github.com/en/copilot/reference/ai-models/supported-models (2026-05-10)
-var copilotModels = []modelOption{
-	{label: "default", value: ""},
-	{label: "claude-haiku-4.5", value: "claude-haiku-4.5"},
-	{label: "claude-opus-4.5", value: "claude-opus-4.5"},
-	{label: "claude-opus-4.6", value: "claude-opus-4.6"},
-	{label: "claude-opus-4.7", value: "claude-opus-4.7"},
-	{label: "claude-sonnet-4.5", value: "claude-sonnet-4.5"},
-	{label: "claude-sonnet-4.6", value: "claude-sonnet-4.6"},
-	{label: "gemini-2.5-pro", value: "gemini-2.5-pro"},
-	{label: "gemini-3-flash", value: "gemini-3-flash"},
-	{label: "gemini-3.1-pro", value: "gemini-3.1-pro"},
-	{label: "gpt-4.1", value: "gpt-4.1"},
-	{label: "gpt-5-mini", value: "gpt-5-mini"},
-	{label: "gpt-5.2", value: "gpt-5.2"},
-	{label: "gpt-5.2-codex", value: "gpt-5.2-codex"},
-	{label: "gpt-5.3-codex", value: "gpt-5.3-codex"},
-	{label: "gpt-5.4", value: "gpt-5.4"},
-	{label: "gpt-5.4-mini", value: "gpt-5.4-mini"},
-	{label: "gpt-5.4-nano", value: "gpt-5.4-nano"},
-	{label: "gpt-5.5", value: "gpt-5.5"},
-	{label: "grok-code-fast-1", value: "grok-code-fast-1"},
+// initCopilotModels generates the copilot model list from providers.CopilotModels(),
+// reordering to place sonnet models first (followed by others) for better default selection.
+func initCopilotModels() []modelOption {
+	opts := []modelOption{{label: "default", value: ""}}
+	models := providers.CopilotModels()
+
+	// Partition: sonnet models first, then rest
+	var sonnetModels []string
+	var otherModels []string
+
+	for _, m := range models {
+		if strings.Contains(m, "sonnet") {
+			sonnetModels = append(sonnetModels, m)
+		} else {
+			otherModels = append(otherModels, m)
+		}
+	}
+
+	// Combine: sonnet first, then others
+	for _, m := range sonnetModels {
+		opts = append(opts, modelOption{label: m, value: m})
+	}
+	for _, m := range otherModels {
+		opts = append(opts, modelOption{label: m, value: m})
+	}
+
+	return opts
 }
+
+// copilotModels lists available Copilot models, generated from providers.CopilotModels()
+// with sonnet models prioritized as better defaults.
+var copilotModels = initCopilotModels()
 
 type setupModel struct {
 	step setupStep

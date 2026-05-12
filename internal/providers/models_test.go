@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 )
 
@@ -21,12 +22,13 @@ func TestFetchAnthropicModels_Success(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	// Patch default client base URL by injecting a test transport.
-	origClient := http.DefaultClient
-	http.DefaultClient = &http.Client{
+	// Inject test client instead of mutating global DefaultClient.
+	testClient := &http.Client{
 		Transport: rewriteHostTransport{target: srv.URL, inner: http.DefaultTransport},
 	}
-	defer func() { http.DefaultClient = origClient }()
+	origClient := httpClient
+	httpClient = testClient
+	defer func() { httpClient = origClient }()
 
 	ids, err := FetchAnthropicModels(context.Background(), "test-key")
 	if err != nil {
@@ -57,11 +59,12 @@ func TestFetchAnthropicModels_Paginated(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	origClient := http.DefaultClient
-	http.DefaultClient = &http.Client{
+	testClient := &http.Client{
 		Transport: rewriteHostTransport{target: srv.URL, inner: http.DefaultTransport},
 	}
-	defer func() { http.DefaultClient = origClient }()
+	origClient := httpClient
+	httpClient = testClient
+	defer func() { httpClient = origClient }()
 
 	ids, err := FetchAnthropicModels(context.Background(), "key")
 	if err != nil {
@@ -78,11 +81,12 @@ func TestFetchAnthropicModels_Error(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	origClient := http.DefaultClient
-	http.DefaultClient = &http.Client{
+	testClient := &http.Client{
 		Transport: rewriteHostTransport{target: srv.URL, inner: http.DefaultTransport},
 	}
-	defer func() { http.DefaultClient = origClient }()
+	origClient := httpClient
+	httpClient = testClient
+	defer func() { httpClient = origClient }()
 
 	_, err := FetchAnthropicModels(context.Background(), "bad-key")
 	if err == nil {
@@ -103,11 +107,12 @@ func TestFetchOpenAIModels_Success(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	origClient := http.DefaultClient
-	http.DefaultClient = &http.Client{
+	testClient := &http.Client{
 		Transport: rewriteHostTransport{target: srv.URL, inner: http.DefaultTransport},
 	}
-	defer func() { http.DefaultClient = origClient }()
+	origClient := httpClient
+	httpClient = testClient
+	defer func() { httpClient = origClient }()
 
 	ids, err := FetchOpenAIModels(context.Background(), "test-key")
 	if err != nil {
@@ -129,11 +134,12 @@ func TestFetchOpenAIModels_Error(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	origClient := http.DefaultClient
-	http.DefaultClient = &http.Client{
+	testClient := &http.Client{
 		Transport: rewriteHostTransport{target: srv.URL, inner: http.DefaultTransport},
 	}
-	defer func() { http.DefaultClient = origClient }()
+	origClient := httpClient
+	httpClient = testClient
+	defer func() { httpClient = origClient }()
 
 	_, err := FetchOpenAIModels(context.Background(), "key")
 	if err == nil {
@@ -166,16 +172,17 @@ type rewriteHostTransport struct {
 
 func (t rewriteHostTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	req = req.Clone(req.Context())
-	req.URL.Scheme = "http"
-	req.URL.Host = req.URL.Host // keep host for path matching but swap scheme+host
-	// Replace host with test server
-	u := *req.URL
-	u.Scheme = "http"
-	// extract host from target
-	targetURL := t.target
-	if len(targetURL) > 7 {
-		u.Host = targetURL[7:] // strip "http://"
+
+	// Parse target URL to get scheme and host
+	targetURL, err := url.Parse(t.target)
+	if err != nil {
+		return nil, err
 	}
-	req.URL = &u
+
+	// Rewrite request to point to test server while preserving path and query
+	req.URL.Scheme = targetURL.Scheme
+	req.URL.Host = targetURL.Host
+	req.Host = targetURL.Host
+
 	return t.inner.RoundTrip(req)
 }

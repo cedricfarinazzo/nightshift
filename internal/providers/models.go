@@ -5,9 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"sort"
 	"strings"
 )
+
+var httpClient = http.DefaultClient
 
 // FetchAnthropicModels fetches available model IDs from the Anthropic API.
 // Returns an error when the API is unreachable or the key is invalid; callers
@@ -17,25 +20,28 @@ func FetchAnthropicModels(ctx context.Context, apiKey string) ([]string, error) 
 	afterID := ""
 
 	for {
-		url := "https://api.anthropic.com/v1/models"
+		baseURL := "https://api.anthropic.com/v1/models"
+		fetchURL := baseURL
 		if afterID != "" {
-			url += "?after_id=" + afterID
+			q := url.Values{}
+			q.Set("after_id", afterID)
+			fetchURL = baseURL + "?" + q.Encode()
 		}
 
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, fetchURL, nil)
 		if err != nil {
 			return nil, fmt.Errorf("build request: %w", err)
 		}
 		req.Header.Set("X-Api-Key", apiKey)
 		req.Header.Set("anthropic-version", "2023-06-01")
 
-		resp, err := http.DefaultClient.Do(req)
+		resp, err := httpClient.Do(req)
 		if err != nil {
 			return nil, fmt.Errorf("fetch anthropic models: %w", err)
 		}
-		defer resp.Body.Close()
 
 		if resp.StatusCode != http.StatusOK {
+			resp.Body.Close()
 			return nil, fmt.Errorf("anthropic models API status %d", resp.StatusCode)
 		}
 
@@ -45,8 +51,10 @@ func FetchAnthropicModels(ctx context.Context, apiKey string) ([]string, error) 
 			LastID  string                            `json:"last_id"`
 		}
 		if err := json.NewDecoder(resp.Body).Decode(&page); err != nil {
+			resp.Body.Close()
 			return nil, fmt.Errorf("decode anthropic models: %w", err)
 		}
+		resp.Body.Close()
 
 		for _, m := range page.Data {
 			if m.ID != "" {
@@ -74,7 +82,7 @@ func FetchOpenAIModels(ctx context.Context, apiKey string) ([]string, error) {
 	}
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("fetch openai models: %w", err)
 	}
