@@ -103,36 +103,39 @@ func parseValidationResponse(output string) (*ValidationResult, error) {
 	return &vr, nil
 }
 
-// HandleInvalidTicket posts a structured rejection comment and transitions
-// the ticket to the NEEDS INFO status.
-func (c *Client) HandleInvalidTicket(ctx context.Context, ticketKey string, result *ValidationResult) error {
-	// Build comment as plain text paragraphs (no markdown) so it renders
-	// correctly in Jira's ADF-based comment renderer.
+// buildValidationComment formats a validation result as a Jira comment body.
+func buildValidationComment(vr *ValidationResult) string {
 	var sb strings.Builder
-	fmt.Fprintf(&sb, "❌ Nightshift — Ticket Rejected\nReason: Not enough information for autonomous execution.\nQuality score: %.1f/10", result.Score)
-
-	if len(result.Issues) > 0 {
+	if vr.Valid {
+		fmt.Fprintf(&sb, "✅ Nightshift — Ticket Validated\nQuality score: %.1f/10", vr.Score)
+	} else {
+		fmt.Fprintf(&sb, "❌ Nightshift — Ticket Rejected\nReason: Not enough information for autonomous execution.\nQuality score: %.1f/10", vr.Score)
+	}
+	if len(vr.Issues) > 0 {
 		sb.WriteString("\n\nIssues found:\n")
-		for _, issue := range result.Issues {
+		for _, issue := range vr.Issues {
 			fmt.Fprintf(&sb, "• %s\n", issue)
 		}
 	}
-
-	if len(result.Missing) > 0 {
+	if len(vr.Missing) > 0 {
 		sb.WriteString("\n\nTo fix, please add:\n")
-		for _, m := range result.Missing {
+		for _, m := range vr.Missing {
 			fmt.Fprintf(&sb, "• %s\n", m)
 		}
 	}
-
-	if len(result.Suggestions) > 0 {
+	if len(vr.Suggestions) > 0 {
 		sb.WriteString("\n\nSuggestions:\n")
-		for _, s := range result.Suggestions {
+		for _, s := range vr.Suggestions {
 			fmt.Fprintf(&sb, "• %s\n", s)
 		}
 	}
+	return sb.String()
+}
 
-	if err := c.AddComment(ctx, ticketKey, sb.String()); err != nil {
+// HandleInvalidTicket posts a structured rejection comment and transitions
+// the ticket to the NEEDS INFO status.
+func (c *Client) HandleInvalidTicket(ctx context.Context, ticketKey string, result *ValidationResult) error {
+	if err := c.AddComment(ctx, ticketKey, buildValidationComment(result)); err != nil {
 		return fmt.Errorf("jira: handle invalid ticket %s: %w", ticketKey, err)
 	}
 	if err := c.TransitionToNeedsInfo(ctx, ticketKey); err != nil {

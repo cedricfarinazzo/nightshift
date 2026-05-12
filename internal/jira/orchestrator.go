@@ -403,7 +403,7 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 			}
 			o.savePhaseLog(ctx, ticket.Key, PhaseValidate, valCfg.Provider, valCfg.Model, validateStart, true, strings.Join(vr.Suggestions, "; "), "")
 			o.postPhaseComment(ctx, ticket.Key, CommentValidation,
-				fmt.Sprintf("Ticket validated (score %.1f/10).", vr.Score), time.Since(start))
+				buildValidationComment(vr), time.Since(start))
 			o.log.Infof("ticket %s validated (score %.1f/10)", ticket.Key, vr.Score)
 			if o.progressf != nil {
 				o.progressf("validate      ✓ score %.1f/10", vr.Score)
