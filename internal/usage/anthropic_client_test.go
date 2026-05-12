@@ -13,29 +13,12 @@ import (
 
 // mockStore is an in-memory CredentialStore for tests.
 type mockStore struct {
-	access    string
-	refresh   string
-	expiresAt time.Time
-	written   []writeCall
+	access string
+	err    error
 }
 
-type writeCall struct {
-	access, refresh string
-	expiresAt       time.Time
-}
-
-func (m *mockStore) ReadToken(ctx context.Context) (string, string, time.Time, error) {
-	return m.access, m.refresh, m.expiresAt, nil
-}
-
-func (m *mockStore) WriteToken(access, refresh string, expiresAt time.Time) error {
-	m.written = append(m.written, writeCall{access, refresh, expiresAt})
-	m.access = access
-	if refresh != "" {
-		m.refresh = refresh
-	}
-	m.expiresAt = expiresAt
-	return nil
+func (m *mockStore) ReadToken(_ context.Context) (string, error) {
+	return m.access, m.err
 }
 
 func validQuotaBody() []byte {
@@ -57,19 +40,6 @@ func validQuotaBody() []byte {
 	return b
 }
 
-func oauthRefreshHandler(newAccess, newRefresh string) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		resp := oauthTokenResponse{
-			AccessToken:  newAccess,
-			RefreshToken: newRefresh,
-			ExpiresIn:    3600,
-		}
-		b, _ := json.Marshal(resp)
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write(b)
-	})
-}
-
 func TestFetchQuotas_Success(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") == "" {
@@ -83,15 +53,11 @@ func TestFetchQuotas_Success(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	store := &mockStore{access: "tok_valid", refresh: "ref", expiresAt: time.Now().Add(time.Hour)}
-	client := NewAnthropicClient(WithBaseURL(srv.URL), WithCredentialStore(store))
+	client := NewAnthropicClient(WithBaseURL(srv.URL), WithCredentialStore(&mockStore{access: "tok_valid"}))
 
 	resp, err := client.FetchQuotas(context.Background())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
-	}
-	if resp == nil {
-		t.Fatal("nil response")
 	}
 	fh, ok := resp["five_hour"]
 	if !ok {
@@ -108,70 +74,17 @@ func TestFetchQuotas_Success(t *testing.T) {
 	}
 }
 
-func TestFetchQuotas_401_RefreshRetry_Success(t *testing.T) {
-	callCount := 0
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		callCount++
-		if callCount == 1 {
-			w.WriteHeader(http.StatusUnauthorized)
-			return
-		}
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write(validQuotaBody())
-	}))
-	defer srv.Close()
-
-	oauthSrv := httptest.NewServer(oauthRefreshHandler("tok_refreshed", "ref_new"))
-	defer oauthSrv.Close()
-
-	store := &mockStore{
-		access:    "tok_expired",
-		refresh:   "ref_old",
-		expiresAt: time.Now().Add(time.Hour),
-	}
-	client := NewAnthropicClient(
-		WithBaseURL(srv.URL),
-		WithCredentialStore(store),
-		WithOAuthBaseURL(oauthSrv.URL),
-	)
-
-	resp, err := client.FetchQuotas(context.Background())
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if resp == nil {
-		t.Fatal("nil response")
-	}
-	if callCount != 2 {
-		t.Errorf("expected 2 HTTP calls, got %d", callCount)
-	}
-	if len(store.written) == 0 {
-		t.Error("expected WriteToken to be called after refresh")
-	}
-}
-
-func TestFetchQuotas_401_RefreshFails(t *testing.T) {
+func TestFetchQuotas_401(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
 	}))
 	defer srv.Close()
 
-	oauthSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusBadRequest)
-		_, _ = w.Write([]byte(`{"error":"invalid_grant"}`))
-	}))
-	defer oauthSrv.Close()
-
-	store := &mockStore{access: "tok_bad", refresh: "ref_bad", expiresAt: time.Now().Add(time.Hour)}
-	client := NewAnthropicClient(
-		WithBaseURL(srv.URL),
-		WithCredentialStore(store),
-		WithOAuthBaseURL(oauthSrv.URL),
-	)
+	client := NewAnthropicClient(WithBaseURL(srv.URL), WithCredentialStore(&mockStore{access: "tok_bad"}))
 
 	_, err := client.FetchQuotas(context.Background())
-	if err == nil {
-		t.Fatal("expected error, got nil")
+	if !errors.Is(err, ErrUnauthorized) {
+		t.Errorf("expected ErrUnauthorized, got %v", err)
 	}
 }
 
@@ -181,8 +94,7 @@ func TestFetchQuotas_403(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	store := &mockStore{access: "tok", expiresAt: time.Now().Add(time.Hour)}
-	client := NewAnthropicClient(WithBaseURL(srv.URL), WithCredentialStore(store))
+	client := NewAnthropicClient(WithBaseURL(srv.URL), WithCredentialStore(&mockStore{access: "tok"}))
 
 	_, err := client.FetchQuotas(context.Background())
 	if !errors.Is(err, ErrForbidden) {
@@ -196,8 +108,7 @@ func TestFetchQuotas_429(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	store := &mockStore{access: "tok", expiresAt: time.Now().Add(time.Hour)}
-	client := NewAnthropicClient(WithBaseURL(srv.URL), WithCredentialStore(store))
+	client := NewAnthropicClient(WithBaseURL(srv.URL), WithCredentialStore(&mockStore{access: "tok"}))
 
 	_, err := client.FetchQuotas(context.Background())
 	if !errors.Is(err, ErrRateLimited) {
@@ -212,8 +123,7 @@ func TestFetchQuotas_500(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	store := &mockStore{access: "tok", expiresAt: time.Now().Add(time.Hour)}
-	client := NewAnthropicClient(WithBaseURL(srv.URL), WithCredentialStore(store))
+	client := NewAnthropicClient(WithBaseURL(srv.URL), WithCredentialStore(&mockStore{access: "tok"}))
 
 	_, err := client.FetchQuotas(context.Background())
 	if !errors.Is(err, ErrServerError) {
@@ -232,45 +142,11 @@ func TestFetchQuotas_BodyTruncation(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	store := &mockStore{access: "tok", expiresAt: time.Now().Add(time.Hour)}
-	client := NewAnthropicClient(WithBaseURL(srv.URL), WithCredentialStore(store))
+	client := NewAnthropicClient(WithBaseURL(srv.URL), WithCredentialStore(&mockStore{access: "tok"}))
 
 	_, err := client.FetchQuotas(context.Background())
-	if err == nil {
-		t.Fatal("expected parse error on non-JSON body")
-	}
-}
-
-func TestFetchQuotas_ExpiredTokenAutoRefresh(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write(validQuotaBody())
-	}))
-	defer srv.Close()
-
-	oauthSrv := httptest.NewServer(oauthRefreshHandler("tok_fresh", "ref_fresh"))
-	defer oauthSrv.Close()
-
-	store := &mockStore{
-		access:    "tok_old",
-		refresh:   "ref_old",
-		expiresAt: time.Now().Add(-time.Minute), // already expired
-	}
-	client := NewAnthropicClient(
-		WithBaseURL(srv.URL),
-		WithCredentialStore(store),
-		WithOAuthBaseURL(oauthSrv.URL),
-	)
-
-	resp, err := client.FetchQuotas(context.Background())
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if resp == nil {
-		t.Fatal("nil response")
-	}
-	if len(store.written) == 0 {
-		t.Error("expected WriteToken after proactive refresh")
+	if !errors.Is(err, ErrBodyTruncation) {
+		t.Errorf("expected ErrBodyTruncation, got %v", err)
 	}
 }
 
@@ -285,13 +161,20 @@ func TestFetchQuotas_TokenSentToServer(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	store := &mockStore{access: secret, expiresAt: time.Now().Add(time.Hour)}
-	client := NewAnthropicClient(WithBaseURL(srv.URL), WithCredentialStore(store))
-
+	client := NewAnthropicClient(WithBaseURL(srv.URL), WithCredentialStore(&mockStore{access: secret}))
 	_, _ = client.FetchQuotas(context.Background())
 
 	if captured != "Bearer "+secret {
 		t.Errorf("unexpected Authorization header: %s", captured)
+	}
+}
+
+func TestFetchQuotas_StoreError(t *testing.T) {
+	client := NewAnthropicClient(WithCredentialStore(&mockStore{err: fmt.Errorf("no credentials")}))
+
+	_, err := client.FetchQuotas(context.Background())
+	if err == nil {
+		t.Fatal("expected error when store fails")
 	}
 }
 
@@ -332,7 +215,7 @@ type mockKeychainRunner struct {
 	keyringErr     error
 }
 
-func (m *mockKeychainRunner) Run(ctx context.Context, name string, args []string, dir string, stdin string) (string, string, int, error) {
+func (m *mockKeychainRunner) Run(_ context.Context, name string, _ []string, _ string, _ string) (string, string, int, error) {
 	if name == "security" {
 		return m.keychainResult, "", m.keychainCode, m.keychainErr
 	}
@@ -345,85 +228,49 @@ func (m *mockKeychainRunner) Run(ctx context.Context, name string, args []string
 func TestTokenDiscovery_Keychain(t *testing.T) {
 	creds := claudeCredentialsFile{}
 	creds.ClaudeAiOauth.AccessToken = "from_keychain"
-	creds.ClaudeAiOauth.RefreshToken = "refresh_keychain"
-	creds.ClaudeAiOauth.ExpiresAt = 1234567890000
 
 	b, _ := json.Marshal(creds)
 	runner := &mockKeychainRunner{keychainResult: string(b), keychainCode: 0}
 
 	td := NewTokenDiscovery(runner)
-	access, refresh, expiresAt, err := td.ReadToken(context.Background())
+	access, err := td.ReadToken(context.Background())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if access != "from_keychain" {
 		t.Errorf("access = %s, want from_keychain", access)
 	}
-	if refresh != "refresh_keychain" {
-		t.Errorf("refresh = %s, want refresh_keychain", refresh)
-	}
-	if expiresAt.IsZero() {
-		t.Error("expiresAt should be parsed from keychain")
-	}
 }
 
 func TestTokenDiscovery_Keyring(t *testing.T) {
 	creds := claudeCredentialsFile{}
 	creds.ClaudeAiOauth.AccessToken = "from_keyring"
-	creds.ClaudeAiOauth.RefreshToken = "refresh_keyring"
 
 	b, _ := json.Marshal(creds)
 	runner := &mockKeychainRunner{
-		keychainCode:  1,           // keychain fails
+		keychainCode:  1,
 		keyringResult: string(b),
 		keyringCode:   0,
 	}
 
 	td := NewTokenDiscovery(runner)
-	access, refresh, _, err := td.ReadToken(context.Background())
+	access, err := td.ReadToken(context.Background())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if access != "from_keyring" {
 		t.Errorf("access = %s, want from_keyring", access)
 	}
-	if refresh != "refresh_keyring" {
-		t.Errorf("refresh = %s, want refresh_keyring", refresh)
-	}
 }
 
-func TestTokenDiscovery_FileBackfall(t *testing.T) {
-	// Both keychain and keyring fail, should fall back to file
-	// Create a tokenDiscovery with a path that definitely doesn't exist
+func TestTokenDiscovery_FileFallback(t *testing.T) {
 	runner := &mockKeychainRunner{keychainCode: 1, keyringCode: 1}
 	td := &tokenDiscovery{
 		runner:   runner,
 		filePath: "/nonexistent/path/.credentials.json",
 	}
-	_, _, _, err := td.ReadToken(context.Background())
-	// Error is expected since the file doesn't exist
+	_, err := td.ReadToken(context.Background())
 	if err == nil {
 		t.Fatal("expected error on missing file")
-	}
-}
-
-func TestBodyLimitDetection(t *testing.T) {
-	// Create response that exceeds limit
-	large := make([]byte, bodyLimitBytes+100)
-	for i := range large {
-		large[i] = 'x'
-	}
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write(large)
-	}))
-	defer srv.Close()
-
-	store := &mockStore{access: "tok", expiresAt: time.Now().Add(time.Hour)}
-	client := NewAnthropicClient(WithBaseURL(srv.URL), WithCredentialStore(store))
-
-	_, err := client.FetchQuotas(context.Background())
-	if !errors.Is(err, ErrBodyTruncation) && err == nil {
-		t.Fatalf("expected ErrBodyTruncation or parse error, got %v", err)
 	}
 }
