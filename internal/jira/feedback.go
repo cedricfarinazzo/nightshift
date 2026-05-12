@@ -291,7 +291,7 @@ func buildReworkPrompt(ticket Ticket, review *PRReviewState, repo RepoWorkspace)
 	}
 	if len(review.FailingChecks) > 0 {
 		b.WriteString("### Failing CI Checks\n\n")
-		b.WriteString("The following GitHub status checks are failing on this PR:\n\n")
+		b.WriteString("Status checks failing on PR:\n\n")
 		for _, cr := range review.FailingChecks {
 			if cr.LogsURL != "" {
 				fmt.Fprintf(&b, "- **%s** (`%s`) — %s\n", cr.Name, cr.Conclusion, cr.LogsURL)
@@ -299,7 +299,7 @@ func buildReworkPrompt(ticket Ticket, review *PRReviewState, repo RepoWorkspace)
 				fmt.Fprintf(&b, "- **%s** (`%s`)\n", cr.Name, cr.Conclusion)
 			}
 		}
-		b.WriteString("\nFix all CI failures before pushing.\n\n")
+		b.WriteString("\nFix all CI failures before push.\n\n")
 	}
 	b.WriteString("### Instructions\n")
 	b.WriteString("Address ALL reviewer feedback. For each comment:\n")
