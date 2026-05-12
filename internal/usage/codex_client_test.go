@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -43,7 +44,10 @@ func sampleUsageJSON(creditsBalance interface{}) string {
 }
 
 func newClient(primary, fallback, oauth string, creds *CodexCredentials) *CodexClient {
-	c := NewCodexClientWithCreds(creds)
+	c, err := NewCodexClientWithCreds(creds, "test/1.0")
+	if err != nil {
+		panic(err)
+	}
 	c.primaryURL = primary
 	c.fallbackURL = fallback
 	c.oauthURL = oauth
@@ -84,9 +88,9 @@ func TestFetchUsage_success(t *testing.T) {
 }
 
 func TestFetchUsage_fallback404(t *testing.T) {
-	fallbackCalled := false
+	var fallbackCalled atomic.Bool
 	fallbackSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fallbackCalled = true
+		fallbackCalled.Store(true)
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(sampleUsageJSON(0)))
 	}))
@@ -104,7 +108,7 @@ func TestFetchUsage_fallback404(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !fallbackCalled {
+	if !fallbackCalled.Load() {
 		t.Error("fallback URL not called")
 	}
 	if resp == nil {
@@ -128,9 +132,9 @@ func TestFetchUsage_fallbackAlsoFails(t *testing.T) {
 }
 
 func TestFetchUsage_tokenRefreshOn401(t *testing.T) {
-	refreshed := false
+	var refreshed atomic.Bool
 	oauthSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		refreshed = true
+		refreshed.Store(true)
 		json.NewEncoder(w).Encode(oauthTokenResponse{
 			AccessToken:  "newtoken",
 			RefreshToken: "newrefresh",
@@ -139,10 +143,10 @@ func TestFetchUsage_tokenRefreshOn401(t *testing.T) {
 	}))
 	defer oauthSrv.Close()
 
-	calls := 0
+	var calls atomic.Int32
 	apiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		calls++
-		if calls == 1 {
+		callNum := calls.Add(1)
+		if callNum == 1 {
 			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}
@@ -158,7 +162,7 @@ func TestFetchUsage_tokenRefreshOn401(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !refreshed {
+	if !refreshed.Load() {
 		t.Error("token refresh not called")
 	}
 	if resp == nil {

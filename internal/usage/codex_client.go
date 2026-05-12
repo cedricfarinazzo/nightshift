@@ -12,7 +12,6 @@ const (
 	codexPrimaryURL  = "https://chatgpt.com/backend-api/wham/usage"
 	codexFallbackURL = "https://chatgpt.com/api/codex/usage"
 	codexTimeout     = 10 * time.Second
-	nightshiftVersion = "0.3.4"
 )
 
 // CodexClient fetches real-time rate limit usage from the Codex/ChatGPT API.
@@ -27,24 +26,32 @@ type CodexClient struct {
 }
 
 // NewCodexClient creates a client by auto-discovering credentials.
-func NewCodexClient() (*CodexClient, error) {
+// userAgent defaults to "nightshift/unknown" if empty; callers should inject actual version.
+func NewCodexClient(userAgent string) (*CodexClient, error) {
 	creds, err := LoadCredentials()
 	if err != nil {
 		return nil, err
 	}
-	return NewCodexClientWithCreds(creds), nil
+	return NewCodexClientWithCreds(creds, userAgent)
 }
 
 // NewCodexClientWithCreds creates a client with pre-loaded credentials (useful in tests).
-func NewCodexClientWithCreds(creds *CodexCredentials) *CodexClient {
+// Returns error if creds is nil. userAgent defaults to "nightshift/unknown" if empty.
+func NewCodexClientWithCreds(creds *CodexCredentials, userAgent string) (*CodexClient, error) {
+	if creds == nil {
+		return nil, fmt.Errorf("codex: credentials required")
+	}
+	if userAgent == "" {
+		userAgent = "nightshift/unknown"
+	}
 	return &CodexClient{
 		httpClient:  &http.Client{Timeout: codexTimeout},
 		primaryURL:  codexPrimaryURL,
 		fallbackURL: codexFallbackURL,
 		creds:       creds,
-		userAgent:   "nightshift/" + nightshiftVersion,
+		userAgent:   userAgent,
 		oauthURL:    codexOAuthURL,
-	}
+	}, nil
 }
 
 // FetchUsage retrieves current rate limit utilization from the Codex usage API.

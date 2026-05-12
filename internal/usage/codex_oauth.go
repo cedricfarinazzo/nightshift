@@ -50,7 +50,9 @@ func refreshTokenWithURL(ctx context.Context, creds *CodexCredentials, oauthURL 
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-	resp, err := http.DefaultClient.Do(req)
+	// Use timeout-bounded client for refresh requests (avoid indefinite hang).
+	httpClient := &http.Client{Timeout: codexTimeout}
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("codex: refresh token request: %w", err)
 	}
@@ -83,8 +85,7 @@ func refreshTokenWithURL(ctx context.Context, creds *CodexCredentials, oauthURL 
 
 	if creds.AuthFilePath != "" {
 		if err := writeCredentials(creds.AuthFilePath, creds); err != nil {
-			// Non-fatal: log but continue — creds in memory are valid.
-			_ = err
+			return fmt.Errorf("codex: failed to write rotated token to %s: %w (credentials in memory updated but not persisted; next refresh will fail)", creds.AuthFilePath, err)
 		}
 	}
 
