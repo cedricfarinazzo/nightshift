@@ -33,7 +33,7 @@ func TestParseValidationResponse(t *testing.T) {
 		name      string
 		input     string
 		wantValid bool
-		wantScore int
+		wantScore float64
 		wantErr   bool
 	}{
 		{
@@ -115,7 +115,7 @@ func TestParseValidationResponse(t *testing.T) {
 				t.Errorf("Valid = %v, want %v", got.Valid, tt.wantValid)
 			}
 			if got.Score != tt.wantScore {
-				t.Errorf("Score = %d, want %d", got.Score, tt.wantScore)
+				t.Errorf("Score = %.1f, want %.1f", got.Score, tt.wantScore)
 			}
 		})
 	}
@@ -199,7 +199,7 @@ func TestValidateTicket_Success(t *testing.T) {
 		t.Error("expected Valid=true")
 	}
 	if result.Score != 8 {
-		t.Errorf("Score = %d, want 8", result.Score)
+		t.Errorf("Score = %.1f, want 8", result.Score)
 	}
 }
 

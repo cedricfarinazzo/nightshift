@@ -15,7 +15,7 @@ const validationTimeout = 2 * time.Minute
 // ValidationResult holds the outcome of LLM-based ticket quality evaluation.
 type ValidationResult struct {
 	Valid       bool     `json:"valid"`
-	Score       int      `json:"score"`
+	Score       float64  `json:"score"`
 	Issues      []string `json:"issues"`
 	Missing     []string `json:"missing"`
 	Suggestions []string `json:"suggestions"`
@@ -109,7 +109,7 @@ func (c *Client) HandleInvalidTicket(ctx context.Context, ticketKey string, resu
 	// Build comment as plain text paragraphs (no markdown) so it renders
 	// correctly in Jira's ADF-based comment renderer.
 	var sb strings.Builder
-	fmt.Fprintf(&sb, "❌ Nightshift — Ticket Rejected\nReason: Not enough information for autonomous execution.\nQuality score: %d/10", result.Score)
+	fmt.Fprintf(&sb, "❌ Nightshift — Ticket Rejected\nReason: Not enough information for autonomous execution.\nQuality score: %.1f/10", result.Score)
 
 	if len(result.Issues) > 0 {
 		sb.WriteString("\n\nIssues found:\n")

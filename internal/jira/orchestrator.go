@@ -387,26 +387,26 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 			}
 			if !vr.Valid {
 				issues := strings.Join(vr.Issues, "; ")
-				o.savePhaseLog(ctx, ticket.Key, PhaseValidate, valCfg.Provider, valCfg.Model, validateStart, false, issues, fmt.Sprintf("score %d/10: %s", vr.Score, issues))
+				o.savePhaseLog(ctx, ticket.Key, PhaseValidate, valCfg.Provider, valCfg.Model, validateStart, false, issues, fmt.Sprintf("score %.1f/10: %s", vr.Score, issues))
 				if hErr := o.client.HandleInvalidTicket(ctx, ticket.Key, vr); hErr != nil {
 					o.log.Errorf("ticket %s: handle invalid: %v", ticket.Key, hErr)
 				}
 				result.Status = TicketRejected
-				result.Summary = fmt.Sprintf("rejected: score %d/10", vr.Score)
+				result.Summary = fmt.Sprintf("rejected: score %.1f/10", vr.Score)
 				result.Duration = time.Since(start)
-				o.log.Infof("ticket %s rejected (score %d/10)", ticket.Key, vr.Score)
+				o.log.Infof("ticket %s rejected (score %.1f/10)", ticket.Key, vr.Score)
 				if o.progressf != nil {
-					o.progressf("validate      ✗ rejected (score %d/10): %s", vr.Score, strings.Join(vr.Issues, "; "))
+					o.progressf("validate      ✗ rejected (score %.1f/10): %s", vr.Score, strings.Join(vr.Issues, "; "))
 				}
 				o.notifyPhase(ticket.Key, PhaseValidate, true)
 				return result, nil
 			}
 			o.savePhaseLog(ctx, ticket.Key, PhaseValidate, valCfg.Provider, valCfg.Model, validateStart, true, strings.Join(vr.Suggestions, "; "), "")
 			o.postPhaseComment(ctx, ticket.Key, CommentValidation,
-				fmt.Sprintf("Ticket validated (score %d/10).", vr.Score), time.Since(start))
-			o.log.Infof("ticket %s validated (score %d/10)", ticket.Key, vr.Score)
+				fmt.Sprintf("Ticket validated (score %.1f/10).", vr.Score), time.Since(start))
+			o.log.Infof("ticket %s validated (score %.1f/10)", ticket.Key, vr.Score)
 			if o.progressf != nil {
-				o.progressf("validate      ✓ score %d/10", vr.Score)
+				o.progressf("validate      ✓ score %.1f/10", vr.Score)
 			}
 		} else {
 			o.log.Infof("ticket %s: validation skipped", ticket.Key)
