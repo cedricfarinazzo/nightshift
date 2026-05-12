@@ -11,11 +11,14 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/marcus/nightshift/cmd/nightshift/commands"
 )
 
 const (
-	copilotAPIURL  = "https://api.github.com/copilot_internal/user"
-	copilotTimeout = 30 * time.Second
+	defaultCopilotAPIURL = "https://api.github.com/copilot_internal/user"
+	copilotTimeout       = 30 * time.Second
+	tokenDiscoveryTimeout = 5 * time.Second
 )
 
 // Sentinel errors for Copilot API responses.
@@ -29,6 +32,7 @@ var (
 type CopilotClient struct {
 	token      string
 	httpClient *http.Client
+	baseURL    string
 	userAgent  string
 	// ghExec runs gh with the given args and returns stdout. Injectable for tests.
 	ghExec func(args ...string) ([]byte, error)
@@ -41,10 +45,11 @@ type CopilotClient struct {
 func NewCopilotClient() (*CopilotClient, error) {
 	c := &CopilotClient{
 		httpClient: &http.Client{Timeout: copilotTimeout},
-		userAgent:  "nightshift/0.3.4",
+		baseURL:    defaultCopilotAPIURL,
+		userAgent:  "nightshift/" + commands.Version,
 		ghExec:     defaultGHExec,
 	}
-	token, err := c.discoverToken()
+	token, err := c.discoverToken(context.Background())
 	if err != nil {
 		return nil, err
 	}
@@ -52,14 +57,31 @@ func NewCopilotClient() (*CopilotClient, error) {
 	return c, nil
 }
 
-// newCopilotClientWithExec is used in tests to inject a fake ghExec.
+// newCopilotClientWithExec is used in tests to inject a fake ghExec and custom baseURL.
 func newCopilotClientWithExec(ghExec func(args ...string) ([]byte, error)) (*CopilotClient, error) {
 	c := &CopilotClient{
 		httpClient: &http.Client{Timeout: copilotTimeout},
-		userAgent:  "nightshift/0.3.4",
+		baseURL:    defaultCopilotAPIURL,
+		userAgent:  "nightshift/" + commands.Version,
 		ghExec:     ghExec,
 	}
-	token, err := c.discoverToken()
+	token, err := c.discoverToken(context.Background())
+	if err != nil {
+		return nil, err
+	}
+	c.token = token
+	return c, nil
+}
+
+// NewCopilotClientWithBaseURL constructs a client with a custom API base URL (useful for GitHub Enterprise or tests).
+func NewCopilotClientWithBaseURL(baseURL string) (*CopilotClient, error) {
+	c := &CopilotClient{
+		httpClient: &http.Client{Timeout: copilotTimeout},
+		baseURL:    baseURL,
+		userAgent:  "nightshift/" + commands.Version,
+		ghExec:     defaultGHExec,
+	}
+	token, err := c.discoverToken(context.Background())
 	if err != nil {
 		return nil, err
 	}
@@ -68,12 +90,15 @@ func newCopilotClientWithExec(ghExec func(args ...string) ([]byte, error)) (*Cop
 }
 
 func defaultGHExec(args ...string) ([]byte, error) {
-	return exec.Command("gh", args...).Output()
+	ctx, cancel := context.WithTimeout(context.Background(), tokenDiscoveryTimeout)
+	defer cancel()
+	return exec.CommandContext(ctx, "gh", args...).Output()
 }
 
-func (c *CopilotClient) discoverToken() (string, error) {
-	// 1. gh auth token
-	if out, err := c.ghExec("auth", "token"); err == nil {
+func (c *CopilotClient) discoverToken(ctx context.Context) (string, error) {
+	// 1. gh auth token (defaultGHExec handles timeout internally)
+	out, err := c.ghExec("auth", "token")
+	if err == nil {
 		if tok := strings.TrimSpace(string(out)); tok != "" {
 			return tok, nil
 		}
@@ -94,12 +119,11 @@ func (c *CopilotClient) discoverToken() (string, error) {
 
 // FetchQuotas calls the Copilot internal user API and returns normalized quota data.
 func (c *CopilotClient) FetchQuotas(ctx context.Context) (*CopilotUserResponse, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, copilotAPIURL, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("copilot: building request: %w", err)
 	}
-	req.Header.Set("Authorization", "Bearer [REDACTED]") // placeholder; real token set below
-	req.Header["Authorization"] = []string{"Bearer " + c.token}
+	req.Header.Set("Authorization", "Bearer "+c.token)
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("User-Agent", c.userAgent)
 

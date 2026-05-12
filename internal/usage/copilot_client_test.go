@@ -232,12 +232,11 @@ func clientWithServer(t *testing.T, srv *httptest.Server) *CopilotClient {
 	}
 	// Override HTTP client to target test server.
 	c.httpClient = &http.Client{}
-	// Patch the URL by replacing the transport.
-	c.httpClient.Transport = rewriteTransport{base: http.DefaultTransport, target: srv.URL}
+	c.baseURL = srv.URL + "/copilot_internal/user"
 	return c
 }
 
-// rewriteTransport rewrites all requests to target.
+// rewriteTransport rewrites scheme and host while preserving path and query.
 type rewriteTransport struct {
 	base   http.RoundTripper
 	target string
@@ -245,14 +244,13 @@ type rewriteTransport struct {
 
 func (rt rewriteTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	req = req.Clone(req.Context())
-	req.URL.Scheme = "http"
-	req.URL.Host = req.URL.Hostname() // strip port from original
-	// Replace host entirely with test server host.
-	parsed, err := http.NewRequest(req.Method, rt.target+req.URL.Path, req.Body)
+	// Parse target to extract scheme and host
+	parsed, err := http.NewRequest(req.Method, rt.target, req.Body)
 	if err != nil {
 		return nil, err
 	}
-	parsed.Header = req.Header
-	parsed = parsed.WithContext(req.Context())
-	return rt.base.RoundTrip(parsed)
+	// Rewrite only scheme and host; preserve path and query
+	req.URL.Scheme = parsed.URL.Scheme
+	req.URL.Host = parsed.URL.Host
+	return rt.base.RoundTrip(req)
 }
