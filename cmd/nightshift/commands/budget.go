@@ -199,7 +199,10 @@ func printProviderBudgetActive(
 		if len(pu.Quotas) > 0 {
 			for _, q := range pu.Quotas {
 				label := formatQuotaWindowLabel(q.Window)
-				bar := unicodeProgressBar(q.Utilization*100, 10)
+				if label == "" {
+					continue
+				}
+				bar := unicodeProgressBar(q.Utilization*100, 25)
 				pct := fmt.Sprintf("%.0f%%", q.Utilization*100)
 				resetStr := ""
 				if !q.ResetsAt.IsZero() {
@@ -209,7 +212,7 @@ func printProviderBudgetActive(
 			}
 		} else if passiveErr == nil {
 			// No API quota data — fall back to passive bar
-			bar := unicodeProgressBar(result.UsedPercent, 10)
+			bar := unicodeProgressBar(result.UsedPercent, 25)
 			pct := fmt.Sprintf("%.0f%%", result.UsedPercent)
 			resetStr := ""
 			if snapCollector != nil {

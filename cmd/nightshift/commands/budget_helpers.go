@@ -2,6 +2,7 @@ package commands
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -88,22 +89,63 @@ func formatResetCountdown(t time.Time) string {
 }
 
 // formatQuotaWindowLabel maps API window key names to short display labels.
+// Returns empty string for unknown windows so callers can skip them.
 func formatQuotaWindowLabel(window string) string {
 	switch {
-	case window == "five_hour" || strings.HasSuffix(window, "s") && strings.Contains(window, "18000"):
+	case window == "five_hour" || (strings.HasSuffix(window, "s") && strings.Contains(window, "18000")):
 		return "5-Hour"
 	case window == "seven_day" || window == "weekly":
 		return "Weekly"
-	case window == "monthly" || window == "one_month":
+	case window == "monthly" || window == "one_month" || window == "monthly_limit":
 		return "Monthly"
+	case window == "extra_usage":
+		return "Extra"
 	case window == "premium_interactions":
 		return "Premium"
-	case strings.HasSuffix(window, "-primary"):
-		return "5h-pri"
+	case window == "completions":
+		return "Complete"
+	case window == "chat":
+		return "Chat"
+	case strings.HasSuffix(window, "s-primary"):
+		return primaryWindowLabel(strings.TrimSuffix(window, "s-primary"))
+	case strings.HasSuffix(window, "s") && !strings.Contains(window, "_"):
+		// Numeric second-based windows like "18000s"
+		return secondsWindowLabel(strings.TrimSuffix(window, "s"))
 	default:
-		if len(window) > 8 {
-			return window[:8]
-		}
-		return window
+		return ""
+	}
+}
+
+func primaryWindowLabel(secStr string) string {
+	secs, err := strconv.Atoi(secStr)
+	if err != nil {
+		return "pri"
+	}
+	hours := secs / 3600
+	switch {
+	case hours <= 5:
+		return "5h-pri"
+	case hours <= 24:
+		return "1d-pri"
+	default:
+		return "7d-pri"
+	}
+}
+
+func secondsWindowLabel(secStr string) string {
+	secs, err := strconv.Atoi(secStr)
+	if err != nil {
+		return secStr
+	}
+	hours := secs / 3600
+	switch {
+	case hours <= 1:
+		return fmt.Sprintf("%dm", secs/60)
+	case hours <= 5:
+		return "5-Hour"
+	case hours <= 24:
+		return fmt.Sprintf("%dh", hours)
+	default:
+		return fmt.Sprintf("%dd", hours/24)
 	}
 }

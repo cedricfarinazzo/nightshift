@@ -85,7 +85,7 @@ func TestFormatQuotaWindowLabel(t *testing.T) {
 		{"monthly", "Monthly"},
 		{"premium_interactions", "Premium"},
 		{"18000s-primary", "5h-pri"},
-		{"short", "short"},
+		{"short", ""},
 	}
 	for _, tc := range tests {
 		got := formatQuotaWindowLabel(tc.window)
