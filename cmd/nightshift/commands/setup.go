@@ -102,11 +102,13 @@ func modelOptionValues(opts []modelOption) []string {
 // Source: https://platform.claude.com/docs/en/about-claude/models/overview
 var claudeModels = []modelOption{
 	{label: "default", value: ""},
-	{label: "claude-opus-4-7-20250805", value: "claude-opus-4-7-20250805"},
-	{label: "claude-opus-4-6-20250514", value: "claude-opus-4-6-20250514"},
-	{label: "claude-sonnet-4-6-20250514", value: "claude-sonnet-4-6-20250514"},
-	{label: "claude-sonnet-4-5-20250514", value: "claude-sonnet-4-5-20250514"},
+	{label: "claude-opus-4-7", value: "claude-opus-4-7"},
+	{label: "claude-sonnet-4-6", value: "claude-sonnet-4-6"},
 	{label: "claude-haiku-4-5-20251001", value: "claude-haiku-4-5-20251001"},
+	{label: "claude-opus-4-6", value: "claude-opus-4-6"},
+	{label: "claude-sonnet-4-5-20250929", value: "claude-sonnet-4-5-20250929"},
+	{label: "claude-opus-4-5-20251101", value: "claude-opus-4-5-20251101"},
+	{label: "claude-opus-4-1-20250805", value: "claude-opus-4-1-20250805"},
 }
 
 // codexModels lists available Codex/GPT models (static fallback).
