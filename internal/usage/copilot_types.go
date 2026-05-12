@@ -7,6 +7,7 @@ import "strings"
 type CopilotQuotaSnapshot struct {
 	Entitlement      int     `json:"entitlement"`
 	Remaining        int     `json:"remaining"`
+	QuotaRemaining   float64 `json:"quota_remaining"`
 	PercentRemaining float64 `json:"percent_remaining"`
 	OverageCount     int     `json:"overage_count"`
 	OveragePermitted bool    `json:"overage_permitted"`
