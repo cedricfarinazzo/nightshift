@@ -47,19 +47,19 @@ type WindowConfig struct {
 
 // BudgetConfig controls token budget allocation.
 type BudgetConfig struct {
-	Mode                  string         `mapstructure:"mode"`                    // daily | weekly
-	MaxPercent            int            `mapstructure:"max_percent"`             // Max % of budget per run
-	AggressiveEndOfWeek   bool           `mapstructure:"aggressive_end_of_week"`  // Ramp up in last 2 days
-	ReservePercent        int            `mapstructure:"reserve_percent"`         // Always keep in reserve
-	WeeklyTokens          int            `mapstructure:"weekly_tokens"`           // Fallback weekly budget
-	PerProvider           map[string]int `mapstructure:"per_provider"`            // Per-provider overrides
-	BillingMode           string         `mapstructure:"billing_mode"`            // subscription | api
-	CalibrateEnabled      bool           `mapstructure:"calibrate_enabled"`       // Enable budget calibration
-	SnapshotInterval      string         `mapstructure:"snapshot_interval"`       // Interval for snapshots
-	SnapshotRetentionDays int            `mapstructure:"snapshot_retention_days"` // Snapshot retention in days
-	WeekStartDay          string         `mapstructure:"week_start_day"`          // monday | sunday
-	DBPath                string         `mapstructure:"db_path"`                 // Override DB path
-	Tracking              string         `mapstructure:"tracking"`                // passive | active | hybrid
+	Mode                  string         `json:"mode" yaml:"mode" mapstructure:"mode"`                    // daily | weekly
+	MaxPercent            int            `json:"max_percent" yaml:"max_percent" mapstructure:"max_percent"`             // Max % of budget per run
+	AggressiveEndOfWeek   bool           `json:"aggressive_end_of_week" yaml:"aggressive_end_of_week" mapstructure:"aggressive_end_of_week"`  // Ramp up in last 2 days
+	ReservePercent        int            `json:"reserve_percent" yaml:"reserve_percent" mapstructure:"reserve_percent"`         // Always keep in reserve
+	WeeklyTokens          int            `json:"weekly_tokens" yaml:"weekly_tokens" mapstructure:"weekly_tokens"`           // Fallback weekly budget
+	PerProvider           map[string]int `json:"per_provider" yaml:"per_provider" mapstructure:"per_provider"`            // Per-provider overrides
+	BillingMode           string         `json:"billing_mode" yaml:"billing_mode" mapstructure:"billing_mode"`            // subscription | api
+	CalibrateEnabled      bool           `json:"calibrate_enabled" yaml:"calibrate_enabled" mapstructure:"calibrate_enabled"`       // Enable budget calibration
+	SnapshotInterval      string         `json:"snapshot_interval" yaml:"snapshot_interval" mapstructure:"snapshot_interval"`       // Interval for snapshots
+	SnapshotRetentionDays int            `json:"snapshot_retention_days" yaml:"snapshot_retention_days" mapstructure:"snapshot_retention_days"` // Snapshot retention in days
+	WeekStartDay          string         `json:"week_start_day" yaml:"week_start_day" mapstructure:"week_start_day"`          // monday | sunday
+	DBPath                string         `json:"db_path" yaml:"db_path" mapstructure:"db_path"`                 // Override DB path
+	Tracking              string         `json:"tracking" yaml:"tracking" mapstructure:"tracking"`                // passive | active | hybrid
 }
 
 // ProvidersConfig defines AI provider settings.
@@ -156,6 +156,7 @@ const (
 	DefaultSnapshotInterval  = "30m"
 	DefaultSnapshotRetention = 90
 	DefaultWeekStartDay      = "monday"
+	DefaultTrackingMode      = "passive"
 	DefaultLogLevel          = "info"
 	DefaultLogFormat         = "json"
 	DefaultClaudeDataPath    = "~/.claude"
@@ -259,7 +260,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("budget.snapshot_retention_days", DefaultSnapshotRetention)
 	v.SetDefault("budget.week_start_day", DefaultWeekStartDay)
 	v.SetDefault("budget.db_path", DefaultDBPath())
-	v.SetDefault("budget.tracking", "passive")
+	v.SetDefault("budget.tracking", DefaultTrackingMode)
 
 	// Provider defaults
 	v.SetDefault("providers.preference", []string{"claude", "codex", "copilot"})

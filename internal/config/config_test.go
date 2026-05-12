@@ -50,8 +50,8 @@ func TestValidate_TrackingMode(t *testing.T) {
 	valid := []string{"passive", "active", "hybrid", ""}
 	for _, mode := range valid {
 		cfg := &Config{Budget: BudgetConfig{Tracking: mode}}
-		if err := Validate(cfg); err == ErrInvalidTrackingMode {
-			t.Errorf("tracking=%q: unexpected ErrInvalidTrackingMode", mode)
+		if err := Validate(cfg); err != nil {
+			t.Errorf("tracking=%q: expected nil, got %v", mode, err)
 		}
 	}
 
