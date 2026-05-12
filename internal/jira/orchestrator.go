@@ -379,28 +379,40 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 				result.Error = err.Error()
 				result.Duration = time.Since(start)
 				o.log.Errorf("ticket %s: validation failed: %v", ticket.Key, err)
+				if o.progressf != nil {
+					o.progressf("validate      ✗ failed: %v", err)
+				}
 				o.notifyPhase(ticket.Key, PhaseValidate, true)
 				return result, nil
 			}
 			if !vr.Valid {
 				issues := strings.Join(vr.Issues, "; ")
-				o.savePhaseLog(ctx, ticket.Key, PhaseValidate, valCfg.Provider, valCfg.Model, validateStart, false, issues, fmt.Sprintf("score %d/10: %s", vr.Score, issues))
+				o.savePhaseLog(ctx, ticket.Key, PhaseValidate, valCfg.Provider, valCfg.Model, validateStart, false, issues, fmt.Sprintf("score %.1f/10: %s", vr.Score, issues))
 				if hErr := o.client.HandleInvalidTicket(ctx, ticket.Key, vr); hErr != nil {
 					o.log.Errorf("ticket %s: handle invalid: %v", ticket.Key, hErr)
 				}
 				result.Status = TicketRejected
-				result.Summary = fmt.Sprintf("rejected: score %d/10", vr.Score)
+				result.Summary = fmt.Sprintf("rejected: score %.1f/10", vr.Score)
 				result.Duration = time.Since(start)
-				o.log.Infof("ticket %s rejected (score %d/10)", ticket.Key, vr.Score)
+				o.log.Infof("ticket %s rejected (score %.1f/10)", ticket.Key, vr.Score)
+				if o.progressf != nil {
+					o.progressf("validate      ✗ rejected (score %.1f/10): %s", vr.Score, strings.Join(vr.Issues, "; "))
+				}
 				o.notifyPhase(ticket.Key, PhaseValidate, true)
 				return result, nil
 			}
 			o.savePhaseLog(ctx, ticket.Key, PhaseValidate, valCfg.Provider, valCfg.Model, validateStart, true, strings.Join(vr.Suggestions, "; "), "")
 			o.postPhaseComment(ctx, ticket.Key, CommentValidation,
-				fmt.Sprintf("Ticket validated (score %d/10).", vr.Score), time.Since(start))
-			o.log.Infof("ticket %s validated (score %d/10)", ticket.Key, vr.Score)
+				buildValidationComment(vr), time.Since(start))
+			o.log.Infof("ticket %s validated (score %.1f/10)", ticket.Key, vr.Score)
+			if o.progressf != nil {
+				o.progressf("validate      ✓ score %.1f/10", vr.Score)
+			}
 		} else {
 			o.log.Infof("ticket %s: validation skipped", ticket.Key)
+			if o.progressf != nil {
+				o.progressf("validate      skipped")
+			}
 		}
 
 		// Transition to In Progress
@@ -438,6 +450,9 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 			result.Error = err.Error()
 			result.Duration = time.Since(start)
 			o.log.Errorf("ticket %s: plan failed: %v", ticket.Key, err)
+			if o.progressf != nil {
+				o.progressf("plan          ✗ failed: %v", err)
+			}
 			o.notifyPhase(ticket.Key, PhasePlan, true)
 			return result, nil
 		}
@@ -446,6 +461,9 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 		o.emit("📝 posting plan to Jira %s", ticket.Key)
 		o.postPhaseComment(ctx, ticket.Key, CommentPlan, planResult.Output, time.Since(planStart))
 		o.log.Infof("ticket %s: plan complete", ticket.Key)
+		if o.progressf != nil {
+			o.progressf("plan          ✓ done")
+		}
 		o.notifyPhase(ticket.Key, PhasePlan, true)
 	}
 
@@ -474,6 +492,9 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 			result.Error = err.Error()
 			result.Duration = time.Since(start)
 			o.log.Errorf("ticket %s: implement failed: %v", ticket.Key, err)
+			if o.progressf != nil {
+				o.progressf("implement     ✗ failed: %v", err)
+			}
 			o.notifyPhase(ticket.Key, PhaseImplement, true)
 			return result, nil
 		}
@@ -482,6 +503,9 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 		o.emit("📝 posting implementation summary to Jira %s", ticket.Key)
 		o.postPhaseComment(ctx, ticket.Key, CommentImplement, implResult.Output, time.Since(implStart))
 		o.log.Infof("ticket %s: implementation complete", ticket.Key)
+		if o.progressf != nil {
+			o.progressf("implement     ✓ done")
+		}
 		o.notifyPhase(ticket.Key, PhaseImplement, true)
 	}
 
@@ -552,6 +576,9 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 				changedRepos = append(changedRepos, repo)
 			}
 		}
+		if o.progressf != nil {
+			o.progressf("commit        ✓ %d repo(s) committed", len(changedRepos))
+		}
 		o.notifyPhase(ticket.Key, PhaseCommit, true)
 		// Persist commit phase log (non-agent phase: no provider/model/output).
 		o.savePhaseLog(ctx, ticket.Key, PhaseCommit, "", "", commitStart, true, "", "")
@@ -588,6 +615,9 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 			result.Error = implErr.Error()
 			result.Duration = time.Since(start)
 			o.log.Errorf("ticket %s: %v", ticket.Key, implErr)
+			if o.progressf != nil {
+				o.progressf("commit        ✗ no changes produced")
+			}
 			o.notifyPhase(ticket.Key, PhaseCommit, true)
 			return result, nil
 		}
@@ -612,6 +642,9 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 				result.Status = TicketFailed
 				result.Error = err.Error()
 				result.Duration = time.Since(start)
+				if o.progressf != nil {
+					o.progressf("pr            ✗ failed: %v", err)
+				}
 				o.notifyPhase(ticket.Key, PhasePR, true)
 				return result, nil
 			}
@@ -666,6 +699,9 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 				}
 			}
 		}
+		if o.progressf != nil {
+			o.progressf("pr            ✓ %d PR(s): %s", len(result.PRURLs), strings.Join(result.PRURLs, ", "))
+		}
 		o.notifyPhase(ticket.Key, PhasePR, true)
 		// Persist PR phase log (non-agent phase: no provider/model/output).
 		o.savePhaseLog(ctx, ticket.Key, PhasePR, "", "", prStart, true, "", "")
@@ -702,9 +738,15 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 			result.Status = TicketFailed
 			result.Error = err.Error()
 			result.Duration = time.Since(start)
+			if o.progressf != nil {
+				o.progressf("status        ✗ Jira transition failed: %v", err)
+			}
 			o.notifyPhase(ticket.Key, PhaseStatus, true)
 			o.savePhaseLog(ctx, ticket.Key, PhaseStatus, "", "", statusStart, false, "", err.Error())
 			return result, nil
+		}
+		if o.progressf != nil {
+			o.progressf("status        ✓ transitioned to review")
 		}
 		o.notifyPhase(ticket.Key, PhaseStatus, true)
 		// Persist status phase log (non-agent phase: no provider/model/output).
@@ -721,6 +763,9 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 	}
 	o.postPhaseComment(ctx, ticket.Key, CommentStatusChange, statusBody, result.Duration)
 	o.log.Infof("ticket %s: completed in %s", ticket.Key, result.Duration.Round(time.Second))
+	if o.progressf != nil {
+		o.progressf("✓ completed in %s", result.Duration.Round(time.Second))
+	}
 	return result, nil
 }
 
