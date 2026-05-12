@@ -35,6 +35,7 @@ type anthropicActiveProvider struct {
 	passive ClaudeUsageProvider
 	mu      sync.Mutex
 	src     string
+	hybrid  bool // if true, only warn at debug level on API errors (expected fallback)
 }
 
 func (p *anthropicActiveProvider) Name() string { return "claude" }
@@ -51,7 +52,13 @@ func (p *anthropicActiveProvider) GetUsedPercent(mode string, weeklyBudget int64
 			}
 			// seven_day key absent — fall through to passive
 		} else {
-			log.Warn().Err(err).Str("provider", "claude").Msg("budget: api fetch failed, falling back to file")
+			// In hybrid mode, API errors are expected (missing credentials); log at debug.
+			// In active mode, warn so user knows the fallback is happening.
+			if p.hybrid {
+				log.Debug().Err(err).Str("provider", "claude").Msg("budget: anthropic api unavailable, using passive fallback")
+			} else {
+				log.Warn().Err(err).Str("provider", "claude").Msg("budget: api fetch failed, falling back to file")
+			}
 		}
 	}
 	if p.passive != nil {
@@ -84,6 +91,11 @@ type codexActiveProvider struct {
 	passive CodexUsageProvider
 	mu      sync.Mutex
 	src     string
+	// Cache last FetchUsage response to avoid duplicate API calls
+	// when both GetUsedPercent and GetResetTime are called for the same check.
+	cachedResp  *usage.CodexUsageResponse
+	cachedTime  time.Time
+	cacheTTL    time.Duration // default 1 minute
 }
 
 func (p *codexActiveProvider) Name() string { return "codex" }
@@ -92,6 +104,14 @@ func (p *codexActiveProvider) GetUsedPercent(mode string, weeklyBudget int64) (f
 	if p.client != nil {
 		resp, err := p.client.FetchUsage(context.Background())
 		if err == nil && resp != nil && resp.RateLimit != nil && resp.RateLimit.SecondaryWindow != nil {
+			// Cache response for reuse by GetResetTime (1-minute TTL).
+			p.mu.Lock()
+			p.cachedResp = resp
+			p.cachedTime = time.Now()
+			if p.cacheTTL == 0 {
+				p.cacheTTL = 1 * time.Minute
+			}
+			p.mu.Unlock()
 			pct := resp.RateLimit.SecondaryWindow.UsedPercent
 			p.setSource("api")
 			log.Debug().Str("provider", "codex").Str("source", "api").Float64("used_pct", pct).Msg("budget: usage from api")
@@ -114,6 +134,16 @@ func (p *codexActiveProvider) GetUsedPercent(mode string, weeklyBudget int64) (f
 }
 
 func (p *codexActiveProvider) GetResetTime(mode string) (time.Time, error) {
+	// Check cache first to avoid duplicate API calls.
+	p.mu.Lock()
+	if p.cachedResp != nil && time.Since(p.cachedTime) < p.cacheTTL {
+		defer p.mu.Unlock()
+		if p.cachedResp.RateLimit != nil && p.cachedResp.RateLimit.SecondaryWindow != nil {
+			return p.cachedResp.RateLimit.SecondaryWindow.ResetAt.Time, nil
+		}
+	}
+	p.mu.Unlock()
+
 	if p.client != nil {
 		resp, err := p.client.FetchUsage(context.Background())
 		if err == nil && resp != nil && resp.RateLimit != nil && resp.RateLimit.SecondaryWindow != nil {
@@ -144,6 +174,11 @@ type copilotActiveProvider struct {
 	passive CopilotUsageProvider
 	mu      sync.Mutex
 	src     string
+	// Cache last FetchQuotas response to avoid duplicate API calls
+	// when both GetUsedPercent and GetResetTime are called for the same check.
+	cachedResp  *usage.CopilotUserResponse
+	cachedTime  time.Time
+	cacheTTL    time.Duration // default 1 minute
 }
 
 func (p *copilotActiveProvider) Name() string { return "copilot" }
@@ -152,6 +187,15 @@ func (p *copilotActiveProvider) GetUsedPercent(mode string, monthlyLimit int64) 
 	if p.client != nil {
 		resp, err := p.client.FetchQuotas(context.Background())
 		if err == nil && resp != nil {
+			// Cache response for reuse by GetResetTime (1-minute TTL).
+			p.mu.Lock()
+			p.cachedResp = resp
+			p.cachedTime = time.Now()
+			if p.cacheTTL == 0 {
+				p.cacheTTL = 1 * time.Minute
+			}
+			p.mu.Unlock()
+
 			if snap, ok := resp.Quotas["premium_interactions"]; ok {
 				// PercentRemaining is 0–100; convert to used %.
 				pct := 100 - snap.PercentRemaining
@@ -180,6 +224,20 @@ func (p *copilotActiveProvider) GetUsedPercent(mode string, monthlyLimit int64) 
 }
 
 func (p *copilotActiveProvider) GetResetTime(mode string) (time.Time, error) {
+	// Check cache first to avoid duplicate API calls.
+	p.mu.Lock()
+	if p.cachedResp != nil && time.Since(p.cachedTime) < p.cacheTTL {
+		defer p.mu.Unlock()
+		if p.cachedResp.QuotaResetDate != "" {
+			t, parseErr := time.Parse("2006-01-02", p.cachedResp.QuotaResetDate)
+			if parseErr == nil {
+				return t, nil
+			}
+			log.Warn().Str("raw", p.cachedResp.QuotaResetDate).Err(parseErr).Msg("budget: copilot reset date parse failed")
+		}
+	}
+	p.mu.Unlock()
+
 	if p.client != nil {
 		resp, err := p.client.FetchQuotas(context.Background())
 		if err == nil && resp != nil && resp.QuotaResetDate != "" {
@@ -209,7 +267,7 @@ func (p *copilotActiveProvider) setSource(s string) {
 }
 
 // NewManagerWithTracking builds a Manager respecting cfg.Budget.Tracking.
-// For "passive" mode it delegates to NewManagerFromProviders with no change.
+// For "passive" mode it delegates to NewManager with no change.
 // For "active" and "hybrid" modes it wraps each provider with an API client
 // that falls back to the passive provider on error.
 // Returns the same *Manager type so call sites require no changes.
@@ -234,9 +292,11 @@ func NewManagerWithTracking(
 	claudeP = &anthropicActiveProvider{
 		client:  anthropicClient,
 		passive: passiveClaude,
+		hybrid:  mode == "hybrid", // suppress warnings for expected fallback in hybrid mode
 	}
 
 	// Codex client — fails at construction if no credentials.
+	// In hybrid mode, construction failure is expected and safe; active mode logs and falls back.
 	codexClient, err := usage.NewCodexClient("")
 	if err != nil {
 		if mode == "active" {

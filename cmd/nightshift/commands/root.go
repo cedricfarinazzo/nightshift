@@ -4,6 +4,7 @@ package commands
 import (
 	"os"
 
+	"github.com/marcus/nightshift/internal/usage"
 	"github.com/spf13/cobra"
 )
 
@@ -30,6 +31,9 @@ func Execute() {
 }
 
 func init() {
+	// Initialize usage.Version for API clients (User-Agent headers).
+	usage.Version = Version
+
 	// Global flags can be added here
 	rootCmd.PersistentFlags().Bool("verbose", false, "Enable verbose output")
 }
