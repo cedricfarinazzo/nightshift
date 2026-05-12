@@ -1,12 +1,14 @@
 package commands
 
 import (
+	"context"
 	"fmt"
 	"path/filepath"
 	"time"
 
 	"github.com/marcus/nightshift/internal/budget"
 	"github.com/marcus/nightshift/internal/config"
+	"github.com/marcus/nightshift/internal/db"
 	"github.com/marcus/nightshift/internal/logging"
 	"github.com/marcus/nightshift/internal/reporting"
 )
@@ -35,6 +37,10 @@ func (r *runReport) addTask(task reporting.TaskResult) {
 }
 
 func (r *runReport) finalize(cfg *config.Config, log *logging.Logger) {
+	r.finalizeWithDB(cfg, log, nil)
+}
+
+func (r *runReport) finalizeWithDB(cfg *config.Config, log *logging.Logger, database *db.DB) {
 	if r == nil || r.results == nil || cfg == nil {
 		return
 	}
@@ -52,8 +58,26 @@ func (r *runReport) finalize(cfg *config.Config, log *logging.Logger) {
 	}
 	r.results.LogPath = logPath
 
+	// Fetch cost snapshots for active/hybrid tracking modes.
+	if cfg.Budget.Tracking != "" && cfg.Budget.Tracking != "passive" {
+		ctx := context.Background()
+		snapshots := budget.FetchAllCostSnapshots(ctx)
+		r.results.CostSnapshots = snapshots
+		// Persist for yesterday-delta in future summaries.
+		if database != nil {
+			for i := range snapshots {
+				if err := database.SaveCostSnapshot(ctx, &snapshots[i]); err != nil {
+					log.Warnf("cost snapshot save (%s): %v", snapshots[i].Provider, err)
+				}
+			}
+		}
+	}
+
 	if cfg.Reporting.MorningSummary {
 		gen := reporting.NewGenerator(cfg)
+		if database != nil {
+			gen = gen.WithCostHistory(database)
+		}
 		summary, err := gen.Generate(r.results)
 		if err != nil {
 			log.Warnf("summary generate: %v", err)

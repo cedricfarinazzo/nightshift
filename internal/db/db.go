@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/marcus/nightshift/internal/usage"
 	_ "modernc.org/sqlite"
 )
 
@@ -326,6 +327,97 @@ func (d *DB) GetJiraRun(ctx context.Context, runID string) (*JiraRun, error) {
 		}
 	}
 	return &r, nil
+}
+
+// --- Cost snapshots ---
+
+// SaveCostSnapshot inserts a cost_snapshots row.
+func (d *DB) SaveCostSnapshot(ctx context.Context, s *usage.CostSnapshot) error {
+	if d == nil || d.sql == nil {
+		return fmt.Errorf("db not open")
+	}
+	if s == nil {
+		return fmt.Errorf("snapshot is nil")
+	}
+	_, err := d.sql.ExecContext(ctx,
+		`INSERT INTO cost_snapshots (provider, total_budget, used, remaining, overage, currency, period, captured_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		s.Provider,
+		nullableFloat64(s.TotalBudget),
+		nullableFloat64(s.Used),
+		nullableFloat64(s.Remaining),
+		s.OverageCount,
+		s.Currency,
+		s.Period,
+		s.CapturedAt.UTC().Format(time.RFC3339),
+	)
+	return err
+}
+
+// GetLatestCostSnapshot returns the most recent cost_snapshots row for the given provider.
+// Returns (nil, nil) when no rows exist.
+func (d *DB) GetLatestCostSnapshot(ctx context.Context, provider string) (*usage.CostSnapshot, error) {
+	if d == nil || d.sql == nil {
+		return nil, fmt.Errorf("db not open")
+	}
+	row := d.sql.QueryRowContext(ctx,
+		`SELECT provider, total_budget, used, remaining, overage, currency, period, captured_at
+		 FROM cost_snapshots WHERE provider=? ORDER BY captured_at DESC LIMIT 1`,
+		provider,
+	)
+	return scanCostSnapshot(row)
+}
+
+// GetYesterdayCostSnapshot returns the most recent cost_snapshots row for the given provider
+// that was captured before today (UTC midnight).
+func (d *DB) GetYesterdayCostSnapshot(ctx context.Context, provider string) (*usage.CostSnapshot, error) {
+	if d == nil || d.sql == nil {
+		return nil, fmt.Errorf("db not open")
+	}
+	today := time.Now().UTC().Format("2006-01-02")
+	row := d.sql.QueryRowContext(ctx,
+		`SELECT provider, total_budget, used, remaining, overage, currency, period, captured_at
+		 FROM cost_snapshots WHERE provider=? AND date(captured_at) < ? ORDER BY captured_at DESC LIMIT 1`,
+		provider, today,
+	)
+	return scanCostSnapshot(row)
+}
+
+func scanCostSnapshot(row *sql.Row) (*usage.CostSnapshot, error) {
+	var s usage.CostSnapshot
+	var totalBudget, used, remaining sql.NullFloat64
+	var capturedAtStr string
+	err := row.Scan(&s.Provider, &totalBudget, &used, &remaining,
+		&s.OverageCount, &s.Currency, &s.Period, &capturedAtStr)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, err
+	}
+	if totalBudget.Valid {
+		v := totalBudget.Float64
+		s.TotalBudget = &v
+	}
+	if used.Valid {
+		v := used.Float64
+		s.Used = &v
+	}
+	if remaining.Valid {
+		v := remaining.Float64
+		s.Remaining = &v
+	}
+	if t, err := time.Parse(time.RFC3339, capturedAtStr); err == nil {
+		s.CapturedAt = t
+	}
+	return &s, nil
+}
+
+func nullableFloat64(v *float64) any {
+	if v == nil {
+		return nil
+	}
+	return *v
 }
 
 // nullableString returns nil for empty strings so they become SQL NULL.

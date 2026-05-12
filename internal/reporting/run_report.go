@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/marcus/nightshift/internal/usage"
 )
 
 // DefaultRunReportPath returns the default path for a run report file.
@@ -53,6 +55,10 @@ func RenderRunReport(results *RunResults, logPath string) (string, error) {
 	}
 	buf.WriteString("\n")
 
+	if len(results.CostSnapshots) > 0 {
+		renderCostSection(&buf, results.CostSnapshots)
+	}
+
 	writeTaskSection(&buf, "Tasks Completed", completed, "")
 	writeTaskSection(&buf, "Tasks Failed", failed, "")
 	writeTaskSection(&buf, "Tasks Skipped", skipped, "Skip reason: ")
@@ -73,6 +79,47 @@ func SaveRunReport(results *RunResults, path string, logPath string) error {
 		return fmt.Errorf("writing report: %w", err)
 	}
 	return nil
+}
+
+// renderCostSection writes a markdown Cost Summary table to buf.
+func renderCostSection(buf *bytes.Buffer, snapshots []usage.CostSnapshot) {
+	buf.WriteString("## Cost Summary\n")
+	buf.WriteString("| Provider | Used | Remaining | Budget |\n")
+	buf.WriteString("|----------|------|-----------|--------|\n")
+	for _, s := range snapshots {
+		usedStr, remStr, budgetStr := "-", "-", "-"
+		switch s.Provider {
+		case "anthropic":
+			if s.Used != nil {
+				usedStr = fmt.Sprintf("$%.2f", *s.Used)
+			}
+			if s.Remaining != nil {
+				remStr = fmt.Sprintf("$%.2f", *s.Remaining)
+			}
+			if s.TotalBudget != nil {
+				budgetStr = fmt.Sprintf("$%.2f/mo", *s.TotalBudget)
+			}
+		case "codex":
+			if s.Remaining != nil {
+				remStr = fmt.Sprintf("$%.2f", *s.Remaining)
+			}
+			budgetStr = "credits"
+		case "copilot":
+			if s.OverageCount > 0 {
+				usedStr = fmt.Sprintf("%d overage", s.OverageCount)
+			} else {
+				usedStr = "0 overage"
+			}
+			if s.Remaining != nil {
+				remStr = fmt.Sprintf("%.0f left", *s.Remaining)
+			}
+			if s.TotalBudget != nil {
+				budgetStr = fmt.Sprintf("%.0f/mo", *s.TotalBudget)
+			}
+		}
+		fmt.Fprintf(buf, "| %s | %s | %s | %s |\n", s.Provider, usedStr, remStr, budgetStr)
+	}
+	buf.WriteString("\n")
 }
 
 func writeTaskSection(buf *bytes.Buffer, title string, tasks []TaskResult, reasonPrefix string) {
