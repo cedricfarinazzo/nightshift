@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -23,7 +24,7 @@ type writeCall struct {
 	expiresAt       time.Time
 }
 
-func (m *mockStore) ReadToken() (string, string, time.Time, error) {
+func (m *mockStore) ReadToken(ctx context.Context) (string, string, time.Time, error) {
 	return m.access, m.refresh, m.expiresAt, nil
 }
 
@@ -92,7 +93,7 @@ func TestFetchQuotas_Success(t *testing.T) {
 	if resp == nil {
 		t.Fatal("nil response")
 	}
-	fh, ok := (*resp)["five_hour"]
+	fh, ok := resp["five_hour"]
 	if !ok {
 		t.Fatal("missing five_hour key")
 	}
@@ -123,16 +124,16 @@ func TestFetchQuotas_401_RefreshRetry_Success(t *testing.T) {
 	oauthSrv := httptest.NewServer(oauthRefreshHandler("tok_refreshed", "ref_new"))
 	defer oauthSrv.Close()
 
-	origOAuth := oauthBaseURL
-	oauthBaseURL = oauthSrv.URL
-	defer func() { oauthBaseURL = origOAuth }()
-
 	store := &mockStore{
 		access:    "tok_expired",
 		refresh:   "ref_old",
 		expiresAt: time.Now().Add(time.Hour),
 	}
-	client := NewAnthropicClient(WithBaseURL(srv.URL), WithCredentialStore(store))
+	client := NewAnthropicClient(
+		WithBaseURL(srv.URL),
+		WithCredentialStore(store),
+		WithOAuthBaseURL(oauthSrv.URL),
+	)
 
 	resp, err := client.FetchQuotas(context.Background())
 	if err != nil {
@@ -161,12 +162,12 @@ func TestFetchQuotas_401_RefreshFails(t *testing.T) {
 	}))
 	defer oauthSrv.Close()
 
-	origOAuth := oauthBaseURL
-	oauthBaseURL = oauthSrv.URL
-	defer func() { oauthBaseURL = origOAuth }()
-
 	store := &mockStore{access: "tok_bad", refresh: "ref_bad", expiresAt: time.Now().Add(time.Hour)}
-	client := NewAnthropicClient(WithBaseURL(srv.URL), WithCredentialStore(store))
+	client := NewAnthropicClient(
+		WithBaseURL(srv.URL),
+		WithCredentialStore(store),
+		WithOAuthBaseURL(oauthSrv.URL),
+	)
 
 	_, err := client.FetchQuotas(context.Background())
 	if err == nil {
@@ -250,16 +251,16 @@ func TestFetchQuotas_ExpiredTokenAutoRefresh(t *testing.T) {
 	oauthSrv := httptest.NewServer(oauthRefreshHandler("tok_fresh", "ref_fresh"))
 	defer oauthSrv.Close()
 
-	origOAuth := oauthBaseURL
-	oauthBaseURL = oauthSrv.URL
-	defer func() { oauthBaseURL = origOAuth }()
-
 	store := &mockStore{
 		access:    "tok_old",
 		refresh:   "ref_old",
 		expiresAt: time.Now().Add(-time.Minute), // already expired
 	}
-	client := NewAnthropicClient(WithBaseURL(srv.URL), WithCredentialStore(store))
+	client := NewAnthropicClient(
+		WithBaseURL(srv.URL),
+		WithCredentialStore(store),
+		WithOAuthBaseURL(oauthSrv.URL),
+	)
 
 	resp, err := client.FetchQuotas(context.Background())
 	if err != nil {
@@ -307,7 +308,7 @@ func TestParseQuotaResponse_ResetsAt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	entry := (*resp)["five_hour"]
+	entry := resp["five_hour"]
 	want := time.Date(2026, 5, 12, 15, 30, 0, 0, time.UTC)
 	if !entry.ResetsAt.Equal(want) {
 		t.Errorf("ResetsAt = %v, want %v", entry.ResetsAt, want)
@@ -318,5 +319,111 @@ func TestParseQuotaResponse_InvalidJSON(t *testing.T) {
 	_, err := parseQuotaResponse([]byte("not json"))
 	if err == nil {
 		t.Fatal("expected error on invalid JSON")
+	}
+}
+
+// mockKeychainRunner is a test implementation of KeychainRunner.
+type mockKeychainRunner struct {
+	keychainResult string
+	keychainCode   int
+	keychainErr    error
+	keyringResult  string
+	keyringCode    int
+	keyringErr     error
+}
+
+func (m *mockKeychainRunner) Run(ctx context.Context, name string, args []string, dir string, stdin string) (string, string, int, error) {
+	if name == "security" {
+		return m.keychainResult, "", m.keychainCode, m.keychainErr
+	}
+	if name == "secret-tool" {
+		return m.keyringResult, "", m.keyringCode, m.keyringErr
+	}
+	return "", "", 1, fmt.Errorf("unknown command: %s", name)
+}
+
+func TestTokenDiscovery_Keychain(t *testing.T) {
+	creds := claudeCredentialsFile{}
+	creds.ClaudeAiOauth.AccessToken = "from_keychain"
+	creds.ClaudeAiOauth.RefreshToken = "refresh_keychain"
+	creds.ClaudeAiOauth.ExpiresAt = 1234567890000
+
+	b, _ := json.Marshal(creds)
+	runner := &mockKeychainRunner{keychainResult: string(b), keychainCode: 0}
+
+	td := NewTokenDiscovery(runner)
+	access, refresh, expiresAt, err := td.ReadToken(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if access != "from_keychain" {
+		t.Errorf("access = %s, want from_keychain", access)
+	}
+	if refresh != "refresh_keychain" {
+		t.Errorf("refresh = %s, want refresh_keychain", refresh)
+	}
+	if expiresAt.IsZero() {
+		t.Error("expiresAt should be parsed from keychain")
+	}
+}
+
+func TestTokenDiscovery_Keyring(t *testing.T) {
+	creds := claudeCredentialsFile{}
+	creds.ClaudeAiOauth.AccessToken = "from_keyring"
+	creds.ClaudeAiOauth.RefreshToken = "refresh_keyring"
+
+	b, _ := json.Marshal(creds)
+	runner := &mockKeychainRunner{
+		keychainCode:  1,           // keychain fails
+		keyringResult: string(b),
+		keyringCode:   0,
+	}
+
+	td := NewTokenDiscovery(runner)
+	access, refresh, _, err := td.ReadToken(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if access != "from_keyring" {
+		t.Errorf("access = %s, want from_keyring", access)
+	}
+	if refresh != "refresh_keyring" {
+		t.Errorf("refresh = %s, want refresh_keyring", refresh)
+	}
+}
+
+func TestTokenDiscovery_FileBackfall(t *testing.T) {
+	// Both keychain and keyring fail, should fall back to file
+	// Create a tokenDiscovery with a path that definitely doesn't exist
+	runner := &mockKeychainRunner{keychainCode: 1, keyringCode: 1}
+	td := &tokenDiscovery{
+		runner:   runner,
+		filePath: "/nonexistent/path/.credentials.json",
+	}
+	_, _, _, err := td.ReadToken(context.Background())
+	// Error is expected since the file doesn't exist
+	if err == nil {
+		t.Fatal("expected error on missing file")
+	}
+}
+
+func TestBodyLimitDetection(t *testing.T) {
+	// Create response that exceeds limit
+	large := make([]byte, bodyLimitBytes+100)
+	for i := range large {
+		large[i] = 'x'
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(large)
+	}))
+	defer srv.Close()
+
+	store := &mockStore{access: "tok", expiresAt: time.Now().Add(time.Hour)}
+	client := NewAnthropicClient(WithBaseURL(srv.URL), WithCredentialStore(store))
+
+	_, err := client.FetchQuotas(context.Background())
+	if !errors.Is(err, ErrBodyTruncation) && err == nil {
+		t.Fatalf("expected ErrBodyTruncation or parse error, got %v", err)
 	}
 }

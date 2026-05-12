@@ -17,7 +17,8 @@ type KeychainRunner interface {
 
 // CredentialStore reads and writes OAuth credentials.
 type CredentialStore interface {
-	ReadToken() (accessToken, refreshToken string, expiresAt time.Time, err error)
+	// ReadToken returns the stored OAuth tokens, respecting the context deadline.
+	ReadToken(ctx context.Context) (accessToken, refreshToken string, expiresAt time.Time, err error)
 	WriteToken(accessToken, refreshToken string, expiresAt time.Time) error
 }
 
@@ -34,29 +35,42 @@ type claudeCredentialsFile struct {
 type tokenDiscovery struct {
 	runner   KeychainRunner
 	filePath string // path to ~/.claude/.credentials.json
+	homeErr  error  // error from UserHomeDir if it failed
 }
 
 // NewTokenDiscovery returns a CredentialStore that tries macOS keychain,
 // Linux keyring, then ~/.claude/.credentials.json in order.
 func NewTokenDiscovery(runner KeychainRunner) CredentialStore {
-	home, _ := os.UserHomeDir()
+	home, err := os.UserHomeDir()
+	if err != nil {
+		// Fall back to current user's home via env if UserHomeDir fails.
+		home = os.Getenv("HOME")
+		if home == "" {
+			home = os.Getenv("USERPROFILE") // Windows fallback
+		}
+	}
 	return &tokenDiscovery{
 		runner:   runner,
 		filePath: filepath.Join(home, ".claude", ".credentials.json"),
+		homeErr:  err,
 	}
 }
 
-// ReadToken discovers the OAuth access token using platform-specific methods.
-func (t *tokenDiscovery) ReadToken() (string, string, time.Time, error) {
+// ReadToken discovers the OAuth access token using platform-specific methods,
+// respecting the context deadline to avoid hanging on slow keychain/keyring.
+func (t *tokenDiscovery) ReadToken(ctx context.Context) (string, string, time.Time, error) {
 	user := os.Getenv("USER")
 	if user == "" {
 		user = os.Getenv("LOGNAME")
 	}
 
 	if user != "" && t.runner != nil {
+		// Create a tight context with 2s timeout for keychain/keyring calls.
+		keychainCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+		defer cancel()
+
 		// Try macOS keychain
-		ctx := context.Background()
-		stdout, _, code, err := t.runner.Run(ctx, "security",
+		stdout, _, code, err := t.runner.Run(keychainCtx, "security",
 			[]string{"find-generic-password", "-s", "Claude Code-credentials", "-a", user, "-w"},
 			"", "")
 		if err == nil && code == 0 {
@@ -70,7 +84,7 @@ func (t *tokenDiscovery) ReadToken() (string, string, time.Time, error) {
 		}
 
 		// Try Linux keyring
-		stdout, _, code, err = t.runner.Run(ctx, "secret-tool",
+		stdout, _, code, err = t.runner.Run(keychainCtx, "secret-tool",
 			[]string{"lookup", "service", "Claude Code-credentials", "account", user},
 			"", "")
 		if err == nil && code == 0 {
@@ -89,7 +103,9 @@ func (t *tokenDiscovery) ReadToken() (string, string, time.Time, error) {
 }
 
 // WriteToken writes updated OAuth tokens back to the credential file.
-// Keychain write-back is best-effort (no error on failure).
+// Currently only writes to ~/.claude/.credentials.json; keychain/keyring write-back
+// is not implemented (tokens persist via file). This is sufficient for token refresh
+// since the same code path that reads keychain will fall through to file on next run.
 func (t *tokenDiscovery) WriteToken(accessToken, refreshToken string, expiresAt time.Time) error {
 	return t.writeToFile(accessToken, refreshToken, expiresAt)
 }

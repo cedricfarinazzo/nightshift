@@ -14,10 +14,8 @@ import (
 const (
 	claudeOAuthClientID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
 	defaultOAuthBaseURL = "https://console.anthropic.com"
+	oauthBodyLimitBytes = 64 * 1024 // 64KB
 )
-
-// oauthBaseURL can be overridden in tests.
-var oauthBaseURL = defaultOAuthBaseURL
 
 type oauthTokenResponse struct {
 	AccessToken  string `json:"access_token"`
@@ -27,9 +25,12 @@ type oauthTokenResponse struct {
 }
 
 // RefreshToken exchanges a refresh token for a new access token and writes it back to store.
-func RefreshToken(ctx context.Context, httpClient *http.Client, refreshToken string, store CredentialStore) (string, error) {
+func RefreshToken(ctx context.Context, httpClient *http.Client, refreshToken string, store CredentialStore, oauthBaseURL string) (string, error) {
 	if httpClient == nil {
 		httpClient = &http.Client{Timeout: 30 * time.Second}
+	}
+	if oauthBaseURL == "" {
+		oauthBaseURL = defaultOAuthBaseURL
 	}
 
 	endpoint := oauthBaseURL + "/v1/oauth/token"
@@ -51,9 +52,14 @@ func RefreshToken(ctx context.Context, httpClient *http.Client, refreshToken str
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
+	// Check for body size before reading to detect truncation.
+	lr := io.LimitReader(resp.Body, oauthBodyLimitBytes+1)
+	body, err := io.ReadAll(lr)
 	if err != nil {
 		return "", fmt.Errorf("reading token refresh response: %w", err)
+	}
+	if len(body) > oauthBodyLimitBytes {
+		return "", fmt.Errorf("token refresh response exceeds %d bytes", oauthBodyLimitBytes)
 	}
 
 	if resp.StatusCode != http.StatusOK {

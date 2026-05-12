@@ -17,6 +17,9 @@ type AnthropicQuotaEntry struct {
 	Utilization float64
 	// ResetsAt is when the quota window resets.
 	ResetsAt time.Time
+	// ResetsAtRaw preserves the original RFC3339 string if parsing failed,
+	// so callers can log/inspect the raw value if needed.
+	ResetsAtRaw string
 	// IsEnabled indicates whether this quota is active.
 	IsEnabled bool
 	// MonthlyLimit is the optional monthly token/credit limit.
