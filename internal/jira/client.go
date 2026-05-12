@@ -7,6 +7,7 @@ import (
 
 	"strings"
 
+	atlassianagile "github.com/ctreminiom/go-atlassian/v2/jira/agile"
 	atlassianjira "github.com/ctreminiom/go-atlassian/v2/jira/v3"
 	model "github.com/ctreminiom/go-atlassian/v2/pkg/infra/models"
 	"github.com/marcus/nightshift/internal/logging"
@@ -15,6 +16,7 @@ import (
 // Client wraps the go-atlassian Jira client with nightshift-specific helpers.
 type Client struct {
 	jira      *atlassianjira.Client
+	agile     *atlassianagile.Client
 	cfg       JiraConfig
 	log       *logging.Logger
 	statusMap *StatusMap // cached result of DiscoverStatuses
@@ -44,10 +46,16 @@ func NewClient(cfg JiraConfig) (*Client, error) {
 		return nil, fmt.Errorf("jira: creating client: %w", err)
 	}
 	client.Auth.SetBasicAuth(cfg.Email, apiToken)
+	agileClient, err := atlassianagile.New(nil, siteURL)
+	if err != nil {
+		return nil, fmt.Errorf("jira: creating agile client: %w", err)
+	}
+	agileClient.Auth.SetBasicAuth(cfg.Email, apiToken)
 	return &Client{
-		jira: client,
-		cfg:  cfg,
-		log:  logging.Component("jira"),
+		jira:  client,
+		agile: agileClient,
+		cfg:   cfg,
+		log:   logging.Component("jira"),
 	}, nil
 }
 

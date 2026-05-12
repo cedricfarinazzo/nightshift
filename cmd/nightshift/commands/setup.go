@@ -1073,7 +1073,7 @@ func (m *setupModel) handleScheduleInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.scheduleInput.Focus()
 	case "enter":
 		m.applyScheduleDefaults()
-		if err := writeGlobalConfig(m.cfg); err != nil {
+		if err := writeGlobalConfigToPath(m.cfg, m.configPath); err != nil {
 			m.scheduleErr = err.Error()
 			return m, nil
 		}
@@ -2192,10 +2192,6 @@ func mustExecutablePath() string {
 	return real
 }
 
-func writeGlobalConfig(cfg *config.Config) error {
-	return writeGlobalConfigToPath(cfg, config.GlobalConfigPath())
-}
-
 func writeGlobalConfigToPath(cfg *config.Config, configPath string) error {
 	if err := os.MkdirAll(filepath.Dir(configPath), 0755); err != nil {
 		return fmt.Errorf("create config dir: %w", err)
@@ -2510,7 +2506,7 @@ func (m *setupModel) handleJiraEnableInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) 
 	case "n", "N":
 		m.jiraEnabled = false
 		m.cfg.Jira = jiraconfig.JiraConfig{}
-		if err := writeGlobalConfig(m.cfg); err != nil {
+		if err := writeGlobalConfigToPath(m.cfg, m.configPath); err != nil {
 			m.jiraErr = err.Error()
 			return m, nil
 		}
@@ -2524,7 +2520,7 @@ func (m *setupModel) handleJiraEnableInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) 
 		} else {
 			m.jiraEnabled = false
 			m.cfg.Jira = jiraconfig.JiraConfig{}
-			if err := writeGlobalConfig(m.cfg); err != nil {
+			if err := writeGlobalConfigToPath(m.cfg, m.configPath); err != nil {
 				m.jiraErr = err.Error()
 				return m, nil
 			}
@@ -2743,7 +2739,7 @@ func (m *setupModel) handleJiraPingInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	if msg.String() == "enter" {
 		m.applyJiraConfig()
-		if err := writeGlobalConfig(m.cfg); err != nil {
+		if err := writeGlobalConfigToPath(m.cfg, m.configPath); err != nil {
 			m.jiraErr = err.Error()
 			return m, nil
 		}
@@ -2836,6 +2832,15 @@ func jiraProjectsToMaps(projects []jiraconfig.ProjectConfig) []map[string]interf
 		}
 		if proj.Label != "" {
 			p["label"] = proj.Label
+		}
+		if proj.RequireActiveSprint {
+			p["require_active_sprint"] = proj.RequireActiveSprint
+		}
+		if proj.BoardType != "" {
+			p["board_type"] = proj.BoardType
+		}
+		if proj.BoardID > 0 {
+			p["board_id"] = proj.BoardID
 		}
 		result = append(result, p)
 	}
@@ -2988,7 +2993,7 @@ func renderJiraReposStep(b *strings.Builder, m *setupModel) {
 				b.WriteString(styleWarn.Render("⚠ HTTPS URL detected — SSH is required (use git@github.com:...)") + "\n")
 			}
 		} else {
-			b.WriteString(fmt.Sprintf("Base branch for %s\n", repoNameFromURL(m.jiraRepoEditURL)))
+			fmt.Fprintf(b, "Base branch for %s\n", repoNameFromURL(m.jiraRepoEditURL))
 			b.WriteString(styleNote.Render("Default branch for new feature branches (default: main)"))
 			b.WriteString("\n\n")
 			b.WriteString(m.jiraInput.View() + "\n")

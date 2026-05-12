@@ -12,18 +12,23 @@ import (
 	"strings"
 	"testing"
 
+	atlassianagile "github.com/ctreminiom/go-atlassian/v2/jira/agile"
 	atlassianjira "github.com/ctreminiom/go-atlassian/v2/jira/v3"
 )
 
 // mockServerConfig controls which endpoints succeed and which fail.
 type mockServerConfig struct {
 	myselfStatus    int
-	statusesPayload string // JSON for project statuses
+	statusesPayload string  // JSON for project statuses
 	commentStatus   int
-	transitionsGet  string // JSON for GET transitions
-	transitionsPost int    // HTTP status for POST transitions (move)
-	searchPayload   string // JSON for POST /rest/api/3/search
-	failTransitions bool   // force GET transitions to return error
+	transitionsGet  string  // JSON for GET transitions
+	transitionsPost int     // HTTP status for POST transitions (move)
+	searchPayload   string  // JSON for POST /rest/api/3/search
+	boardPayload    string  // JSON for GET /rest/agile/1.0/board/{id}/issue
+	backlogPayload  string  // JSON for GET /rest/agile/1.0/board/{id}/backlog
+	failTransitions bool    // force GET transitions to return error
+	capturedJQL     *string // if non-nil, last JQL from search body is written here
+	capturedBoardJQL *string // if non-nil, JQL from board issue request is written here
 }
 
 func defaultMockConfig() mockServerConfig {
@@ -46,6 +51,8 @@ func defaultMockConfig() mockServerConfig {
 		]}`,
 		transitionsPost: http.StatusNoContent,
 		searchPayload:   `{"total":0,"issues":[]}`,
+		boardPayload:    `{"startAt":0,"maxResults":50,"total":0,"issues":[]}`,
+		backlogPayload:  `{"startAt":0,"maxResults":50,"total":0,"issues":[]}`,
 	}
 }
 
@@ -117,8 +124,30 @@ func newMockJiraClient(t *testing.T, cfg mockServerConfig) (*Client, *httptest.S
 
 	// POST /rest/api/3/search/jql  (fetchTickets via SearchJQL)
 	mux.HandleFunc("/rest/api/3/search/jql", func(w http.ResponseWriter, r *http.Request) {
+		if cfg.capturedJQL != nil {
+			var body struct {
+				JQL string `json:"jql"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err == nil {
+				*cfg.capturedJQL = body.JQL
+			}
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(cfg.searchPayload))
+	})
+
+	// GET /rest/agile/1.0/board/{id}/issue  (fetchKanbanBoardTickets)
+	// GET /rest/agile/1.0/board/{id}/backlog (fetchBoardBacklogKeys)
+	mux.HandleFunc("/rest/agile/1.0/board/", func(w http.ResponseWriter, r *http.Request) {
+		if cfg.capturedBoardJQL != nil {
+			*cfg.capturedBoardJQL = r.URL.Query().Get("jql")
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if strings.HasSuffix(r.URL.Path, "/backlog") {
+			_, _ = w.Write([]byte(cfg.backlogPayload))
+		} else {
+			_, _ = w.Write([]byte(cfg.boardPayload))
+		}
 	})
 
 	srv := httptest.NewServer(mux)
@@ -129,6 +158,12 @@ func newMockJiraClient(t *testing.T, cfg mockServerConfig) (*Client, *httptest.S
 	}
 	atlClient.Auth.SetBasicAuth("test@test.com", "test-token")
 
+	agileClient, err := atlassianagile.New(srv.Client(), srv.URL)
+	if err != nil {
+		t.Fatalf("atlassianagile.New: %v", err)
+	}
+	agileClient.Auth.SetBasicAuth("test@test.com", "test-token")
+
 	jiraCfg := JiraConfig{
 		Site:     "test",
 		Email:    "test@test.com",
@@ -137,8 +172,9 @@ func newMockJiraClient(t *testing.T, cfg mockServerConfig) (*Client, *httptest.S
 		Label:    "nightshift",
 	}
 	client := &Client{
-		jira: atlClient,
-		cfg:  jiraCfg,
+		jira:  atlClient,
+		agile: agileClient,
+		cfg:   jiraCfg,
 	}
 	return client, srv
 }

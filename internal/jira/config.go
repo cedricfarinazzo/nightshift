@@ -15,6 +15,14 @@ type ProjectConfig struct {
 	Label string       `mapstructure:"label"` // label filter (e.g., "nightshift")
 	Repos []RepoConfig `mapstructure:"repos"`
 
+	// When true, FetchTodoTickets applies sprint filtering based on BoardType:
+	//   - "scrum" (default): AND sprint in openSprints() — only active sprint items
+	//   - "kanban" + BoardID set: uses the Agile board API to fetch only board items (not backlog)
+	//   - "kanban" + no BoardID: no sprint filter — falls back to label-only JQL
+	RequireActiveSprint bool   `mapstructure:"require_active_sprint"`
+	BoardType           string `mapstructure:"board_type"` // "scrum" (default) or "kanban"
+	BoardID             int    `mapstructure:"board_id"`   // Jira Agile board ID (required for kanban board filtering)
+
 	// Optional per-project phase overrides; zero-value means inherit global.
 	Validation PhaseConfig `mapstructure:"validation"`
 	Plan       PhaseConfig `mapstructure:"plan"`
@@ -228,10 +236,13 @@ func (c *JiraConfig) Defaults() {
 		}}
 	}
 
-	// Apply defaults to each project's repos and label.
+	// Apply defaults to each project's repos, label, and board type.
 	for i := range c.Projects {
 		if c.Projects[i].Label == "" {
-			c.Projects[i].Label = "nightshift"
+			c.Projects[i].Label = c.Label
+		}
+		if c.Projects[i].BoardType == "" {
+			c.Projects[i].BoardType = "scrum"
 		}
 		for j := range c.Projects[i].Repos {
 			if c.Projects[i].Repos[j].BaseBranch == "" {

@@ -48,22 +48,103 @@ type IssueLink struct {
 const searchPageSize = 50
 const acKeyword = "acceptance criteria"
 
-// FetchTodoTickets fetches issues in the "To Do" status category filtered by the project's label.
-// If issueType is non-empty, further filters by issue type (case-insensitive).
-func (c *Client) FetchTodoTickets(ctx context.Context, proj ProjectConfig, issueType string) ([]Ticket, error) {
+// buildTodoJQL constructs the JQL query for FetchTodoTickets.
+// When proj.RequireActiveSprint is true, sprint filtering depends on BoardType:
+//   - "scrum" (default): AND sprint in openSprints() — excludes backlog and unstarted sprints
+//   - "kanban" + BoardID > 0: no sprint filter needed — FetchTodoTickets uses the Agile board API
+//   - "kanban" + no BoardID: no sprint filter — falls back to label-only JQL
+func buildTodoJQL(proj ProjectConfig, issueType string) string {
 	jql := fmt.Sprintf(
 		`project = "%s" AND statusCategory = "To Do" AND labels = "%s"`,
 		proj.Key, proj.Label,
 	)
+	if proj.RequireActiveSprint && proj.BoardType != "kanban" {
+		jql += ` AND sprint in openSprints()`
+	}
 	if issueType != "" {
 		jql += fmt.Sprintf(` AND issuetype = "%s"`, issueType)
 	}
-	jql += " ORDER BY created ASC"
+	return jql + ` ORDER BY created ASC`
+}
+
+// FetchTodoTickets fetches issues in the "To Do" status category filtered by the project's label.
+// If issueType is non-empty, further filters by issue type (case-insensitive).
+// For kanban projects with a board_id configured and require_active_sprint=true, uses the
+// Agile board API so only board items (not backlog) are returned.
+func (c *Client) FetchTodoTickets(ctx context.Context, proj ProjectConfig, issueType string) ([]Ticket, error) {
+	if proj.BoardType == "kanban" && proj.BoardID > 0 && proj.RequireActiveSprint {
+		return c.fetchKanbanBoardTickets(ctx, proj, issueType)
+	}
+	jql := buildTodoJQL(proj, issueType)
 	tickets, err := c.fetchTickets(ctx, jql)
 	if err != nil {
 		return nil, err
 	}
 	return c.fetchParentDescriptions(ctx, tickets), nil
+}
+
+// fetchKanbanBoardTickets uses the Agile board API to return only issues on the
+// Kanban board (not in the backlog), filtered by label and status category.
+//
+// The Jira board/{id}/issue endpoint returns ALL issues associated with the board
+// including backlog items. To get only "on board" (non-backlog) items we subtract
+// the keys returned by board/{id}/backlog.
+func (c *Client) fetchKanbanBoardTickets(ctx context.Context, proj ProjectConfig, issueType string) ([]Ticket, error) {
+	jql := fmt.Sprintf(`statusCategory = "To Do" AND labels = "%s"`, proj.Label)
+	if issueType != "" {
+		jql += fmt.Sprintf(` AND issuetype = "%s"`, issueType)
+	}
+	opts := &model.IssueOptionScheme{
+		JQL:    jql,
+		Fields: []string{"summary", "description", "comment", "labels", "status", "issuelinks", "reporter", "assignee", "issuetype", "parent"},
+	}
+
+	// Collect backlog keys so we can exclude them.
+	backlogKeys, err := c.fetchBoardBacklogKeys(ctx, proj.BoardID, opts)
+	if err != nil {
+		return nil, err
+	}
+
+	const pageSize = 50
+	var tickets []Ticket
+	startAt := 0
+	for {
+		page, _, err := c.agile.Board.Issues(ctx, proj.BoardID, opts, startAt, pageSize)
+		if err != nil {
+			return nil, fmt.Errorf("jira: board %d issues: %w", proj.BoardID, err)
+		}
+		for _, issue := range page.Issues {
+			if !backlogKeys[issue.Key] {
+				tickets = append(tickets, issueToTicketV2(issue))
+			}
+		}
+		startAt += len(page.Issues)
+		if len(page.Issues) < pageSize {
+			break
+		}
+	}
+	return c.fetchParentDescriptions(ctx, tickets), nil
+}
+
+// fetchBoardBacklogKeys returns the set of issue keys that are in the board's backlog.
+func (c *Client) fetchBoardBacklogKeys(ctx context.Context, boardID int, opts *model.IssueOptionScheme) (map[string]bool, error) {
+	keys := make(map[string]bool)
+	const pageSize = 50
+	startAt := 0
+	for {
+		page, _, err := c.agile.Board.Backlog(ctx, boardID, opts, startAt, pageSize)
+		if err != nil {
+			return nil, fmt.Errorf("jira: board %d backlog: %w", boardID, err)
+		}
+		for _, issue := range page.Issues {
+			keys[issue.Key] = true
+		}
+		startAt += len(page.Issues)
+		if len(page.Issues) < pageSize {
+			break
+		}
+	}
+	return keys, nil
 }
 
 // FetchInProgressTickets fetches issues that are in a non-review "indeterminate" status,
@@ -177,6 +258,65 @@ func issueToTicket(issue *model.IssueScheme) Ticket {
 		if f.Comment != nil {
 			for _, c := range f.Comment.Comments {
 				t.Comments = append(t.Comments, commentToComment(c))
+			}
+		}
+		for _, link := range f.IssueLinks {
+			t.IssueLinks = append(t.IssueLinks, issueLinkToLink(issue.Key, link))
+		}
+		if f.Parent != nil {
+			t.ParentKey = f.Parent.Key
+			if f.Parent.Fields != nil {
+				t.ParentSummary = f.Parent.Fields.Summary
+			}
+		}
+	}
+	return t
+}
+
+// issueToTicketV2 maps a go-atlassian IssueSchemeV2 (Agile API) to a Ticket.
+// Description in V2 is a plain string, not ADF.
+func issueToTicketV2(issue *model.IssueSchemeV2) Ticket {
+	if issue == nil {
+		return Ticket{}
+	}
+	t := Ticket{Key: issue.Key}
+	if f := issue.Fields; f != nil {
+		t.Summary = f.Summary
+		t.Labels = f.Labels
+		if f.Description != "" {
+			t.Description = f.Description
+			t.AcceptanceCriteria = extractAcceptanceCriteria(t.Description)
+		}
+		if f.Status != nil {
+			t.Status = Status{
+				ID:   f.Status.ID,
+				Name: f.Status.Name,
+			}
+			if f.Status.StatusCategory != nil {
+				t.Status.CategoryKey = f.Status.StatusCategory.Key
+			}
+		}
+		if f.IssueType != nil {
+			t.IssueType = f.IssueType.Name
+		}
+		if f.Reporter != nil {
+			t.Reporter = f.Reporter.DisplayName
+		}
+		if f.Assignee != nil {
+			t.Assignee = f.Assignee.DisplayName
+		}
+		if f.Comment != nil {
+			for _, c := range f.Comment.Comments {
+				if c == nil {
+					continue
+				}
+				cm := Comment{ID: c.ID, Body: c.Body}
+				if c.Author != nil {
+					cm.Author = c.Author.DisplayName
+				}
+				cm.Created = parseJiraTime(c.Created)
+				cm.Updated = parseJiraTime(c.Updated)
+				t.Comments = append(t.Comments, cm)
 			}
 		}
 		for _, link := range f.IssueLinks {
