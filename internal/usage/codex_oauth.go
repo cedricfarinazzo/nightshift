@@ -113,16 +113,16 @@ func writeCredentials(path string, creds *CodexCredentials) error {
 
 	if _, err := tmp.Write(data); err != nil {
 		tmp.Close()
-		os.Remove(tmpPath)
+		_ = os.Remove(tmpPath)
 		return fmt.Errorf("codex: write temp auth file: %w", err)
 	}
 	if err := tmp.Close(); err != nil {
-		os.Remove(tmpPath)
+		_ = os.Remove(tmpPath)
 		return fmt.Errorf("codex: close temp auth file: %w", err)
 	}
 
 	if err := os.Rename(tmpPath, path); err != nil {
-		os.Remove(tmpPath)
+		_ = os.Remove(tmpPath)
 		return fmt.Errorf("codex: rename auth file: %w", err)
 	}
 
