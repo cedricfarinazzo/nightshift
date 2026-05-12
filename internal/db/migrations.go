@@ -45,7 +45,16 @@ var migrations = []Migration{
 		Description: "add jira run history tables: jira_runs, jira_ticket_results, jira_phase_logs",
 		SQL:         migration006SQL,
 	},
+	{
+		Version:     7,
+		Description: "add source column to snapshots",
+		SQL:         migration007SQL,
+	},
 }
+
+const migration007SQL = `
+ALTER TABLE snapshots ADD COLUMN source TEXT NOT NULL DEFAULT 'file';
+`
 
 const migration002SQL = `
 ALTER TABLE snapshots ADD COLUMN session_reset_time TEXT;

@@ -12,6 +12,7 @@ import (
 
 	"github.com/marcus/nightshift/internal/db"
 	"github.com/marcus/nightshift/internal/tmux"
+	"github.com/marcus/nightshift/internal/usage"
 )
 
 // UsageScraper defines tmux usage scraping behavior.
@@ -38,6 +39,21 @@ type CopilotUsage interface {
 	GetWeeklyTokens() (int64, error)
 }
 
+// AnthropicAPIClient fetches usage quotas from the Anthropic API.
+type AnthropicAPIClient interface {
+	FetchQuotas(ctx context.Context) (usage.AnthropicQuotaResponse, error)
+}
+
+// CodexAPIClient fetches usage data from the Codex/OpenAI API.
+type CodexAPIClient interface {
+	FetchUsage(ctx context.Context) (*usage.CodexUsageResponse, error)
+}
+
+// CopilotAPIClient fetches quota data from the GitHub Copilot API.
+type CopilotAPIClient interface {
+	FetchQuotas(ctx context.Context) (*usage.CopilotUserResponse, error)
+}
+
 // Snapshot represents a stored usage snapshot.
 type Snapshot struct {
 	ID               int64
@@ -54,6 +70,7 @@ type Snapshot struct {
 	Year             int
 	SessionResetTime string // scraped reset time for current session/5h window
 	WeeklyResetTime  string // scraped reset time for weekly window
+	Source           string // "api", "file", or "tmux"
 	ScrapeErr        error  `json:"-"` // not persisted; for CLI diagnostics
 }
 
@@ -71,12 +88,38 @@ type Collector struct {
 	copilot      CopilotUsage
 	scraper      UsageScraper
 	weekStartDay time.Weekday
+	trackingMode string // "passive" | "active" | "hybrid"
+	anthropicAPI AnthropicAPIClient
+	codexAPI     CodexAPIClient
+	copilotAPI   CopilotAPIClient
 }
 
-// NewCollector creates a snapshot collector.
+// NewCollector creates a snapshot collector in passive mode (existing behavior).
 func NewCollector(database *db.DB, claude ClaudeUsage, codex CodexUsage, copilot CopilotUsage, scraper UsageScraper, weekStartDay time.Weekday) *Collector {
+	return NewCollectorWithAPIs(database, claude, codex, copilot, scraper, weekStartDay, "passive", nil, nil, nil)
+}
+
+// NewCollectorWithAPIs creates a snapshot collector with optional API clients.
+// trackingMode must be "passive", "active", or "hybrid".
+func NewCollectorWithAPIs(
+	database *db.DB,
+	claude ClaudeUsage,
+	codex CodexUsage,
+	copilot CopilotUsage,
+	scraper UsageScraper,
+	weekStartDay time.Weekday,
+	trackingMode string,
+	anthropicAPI AnthropicAPIClient,
+	codexAPI CodexAPIClient,
+	copilotAPI CopilotAPIClient,
+) *Collector {
 	if weekStartDay < time.Sunday || weekStartDay > time.Saturday {
 		weekStartDay = time.Monday
+	}
+	switch trackingMode {
+	case "active", "hybrid":
+	default:
+		trackingMode = "passive"
 	}
 	return &Collector{
 		db:           database,
@@ -85,6 +128,10 @@ func NewCollector(database *db.DB, claude ClaudeUsage, codex CodexUsage, copilot
 		copilot:      copilot,
 		scraper:      scraper,
 		weekStartDay: weekStartDay,
+		trackingMode: trackingMode,
+		anthropicAPI: anthropicAPI,
+		codexAPI:     codexAPI,
+		copilotAPI:   copilotAPI,
 	}
 }
 
@@ -102,63 +149,78 @@ func (c *Collector) TakeSnapshot(ctx context.Context, provider string) (Snapshot
 	var scrapedPct *float64
 	var scrapeErr error
 	var sessionResetTime, weeklyResetTime string
+	var source string
+
+	useAPI := c.trackingMode == "active" || c.trackingMode == "hybrid"
 
 	switch provider {
 	case "claude":
-		if c.claude == nil {
-			return Snapshot{}, errors.New("claude provider is nil")
-		}
-		localWeekly, err = c.claude.GetWeeklyUsage()
-		if err != nil {
-			return Snapshot{}, err
-		}
-		localDaily, err = c.claude.GetTodayUsage()
-		if err != nil {
-			return Snapshot{}, err
-		}
-		if c.scraper != nil {
-			result, sErr := c.scraper.ScrapeClaudeUsage(ctx)
-			if sErr != nil {
-				scrapeErr = sErr
-			} else {
-				if result.WeeklyPct >= 0 && result.WeeklyPct <= 100 {
-					pct := result.WeeklyPct
-					scrapedPct = &pct
+		if useAPI && c.anthropicAPI != nil {
+			localWeekly, localDaily, scrapedPct, sessionResetTime, weeklyResetTime, source, err = c.collectClaudeFromAPI(ctx)
+			if err != nil {
+				if c.trackingMode == "hybrid" {
+					// fallback to file/tmux
+					localWeekly, localDaily, scrapedPct, scrapeErr, sessionResetTime, weeklyResetTime, source, err = c.collectClaudeFromFile(ctx)
+					if err != nil {
+						return Snapshot{}, err
+					}
+				} else {
+					return Snapshot{}, fmt.Errorf("claude api: %w", err)
 				}
-				sessionResetTime = result.SessionResetTime
-				weeklyResetTime = result.WeeklyResetTime
+			}
+		} else {
+			if c.claude == nil {
+				return Snapshot{}, errors.New("claude provider is nil")
+			}
+			localWeekly, localDaily, scrapedPct, scrapeErr, sessionResetTime, weeklyResetTime, source, err = c.collectClaudeFromFile(ctx)
+			if err != nil {
+				return Snapshot{}, err
 			}
 		}
 	case "codex":
-		if c.codex == nil {
-			return Snapshot{}, errors.New("codex provider is nil")
-		}
-		localWeekly, localDaily, err = codexTokenTotals(c.codex)
-		if err != nil {
-			return Snapshot{}, err
-		}
-		if c.scraper != nil {
-			result, sErr := c.scraper.ScrapeCodexUsage(ctx)
-			if sErr != nil {
-				scrapeErr = sErr
-			} else {
-				if result.WeeklyPct >= 0 && result.WeeklyPct <= 100 {
-					pct := result.WeeklyPct
-					scrapedPct = &pct
+		if useAPI && c.codexAPI != nil {
+			localWeekly, localDaily, scrapedPct, sessionResetTime, weeklyResetTime, source, err = c.collectCodexFromAPI(ctx)
+			if err != nil {
+				if c.trackingMode == "hybrid" {
+					localWeekly, localDaily, scrapedPct, scrapeErr, sessionResetTime, weeklyResetTime, source, err = c.collectCodexFromFile(ctx)
+					if err != nil {
+						return Snapshot{}, err
+					}
+				} else {
+					return Snapshot{}, fmt.Errorf("codex api: %w", err)
 				}
-				sessionResetTime = result.SessionResetTime
-				weeklyResetTime = result.WeeklyResetTime
+			}
+		} else {
+			if c.codex == nil {
+				return Snapshot{}, errors.New("codex provider is nil")
+			}
+			localWeekly, localDaily, scrapedPct, scrapeErr, sessionResetTime, weeklyResetTime, source, err = c.collectCodexFromFile(ctx)
+			if err != nil {
+				return Snapshot{}, err
 			}
 		}
 	case "copilot":
-		if c.copilot == nil {
-			return Snapshot{}, errors.New("copilot provider is nil")
+		if useAPI && c.copilotAPI != nil {
+			localWeekly, localDaily, scrapedPct, sessionResetTime, weeklyResetTime, source, err = c.collectCopilotFromAPI(ctx)
+			if err != nil {
+				if c.trackingMode == "hybrid" {
+					localWeekly, localDaily, scrapedPct, scrapeErr, sessionResetTime, weeklyResetTime, source, err = c.collectCopilotFromFile()
+					if err != nil {
+						return Snapshot{}, err
+					}
+				} else {
+					return Snapshot{}, fmt.Errorf("copilot api: %w", err)
+				}
+			}
+		} else {
+			if c.copilot == nil {
+				return Snapshot{}, errors.New("copilot provider is nil")
+			}
+			localWeekly, localDaily, scrapedPct, scrapeErr, sessionResetTime, weeklyResetTime, source, err = c.collectCopilotFromFile()
+			if err != nil {
+				return Snapshot{}, err
+			}
 		}
-		localWeekly, localDaily, err = copilotTokenTotals(c.copilot)
-		if err != nil {
-			return Snapshot{}, err
-		}
-		// Note: Copilot doesn't support tmux scraping yet
 	default:
 		return Snapshot{}, fmt.Errorf("unknown provider: %s", provider)
 	}
@@ -175,8 +237,8 @@ func (c *Collector) TakeSnapshot(ctx context.Context, provider string) (Snapshot
 	}
 
 	result, err := c.db.SQL().Exec(
-		`INSERT INTO snapshots (provider, timestamp, week_start, local_tokens, local_daily, scraped_pct, inferred_budget, day_of_week, hour_of_day, week_number, year, session_reset_time, weekly_reset_time)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO snapshots (provider, timestamp, week_start, local_tokens, local_daily, scraped_pct, inferred_budget, day_of_week, hour_of_day, week_number, year, session_reset_time, weekly_reset_time, source)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		provider,
 		now,
 		weekStart,
@@ -190,6 +252,7 @@ func (c *Collector) TakeSnapshot(ctx context.Context, provider string) (Snapshot
 		year,
 		nullString(sessionResetTime),
 		nullString(weeklyResetTime),
+		source,
 	)
 	if err != nil {
 		return Snapshot{}, fmt.Errorf("insert snapshot: %w", err)
@@ -212,8 +275,149 @@ func (c *Collector) TakeSnapshot(ctx context.Context, provider string) (Snapshot
 		Year:             year,
 		SessionResetTime: sessionResetTime,
 		WeeklyResetTime:  weeklyResetTime,
+		Source:           source,
 		ScrapeErr:        scrapeErr,
 	}, nil
+}
+
+// collectClaudeFromAPI fetches Claude usage from the Anthropic API.
+func (c *Collector) collectClaudeFromAPI(ctx context.Context) (localWeekly, localDaily int64, scrapedPct *float64, sessionResetTime, weeklyResetTime, source string, err error) {
+	resp, err := c.anthropicAPI.FetchQuotas(ctx)
+	if err != nil {
+		return 0, 0, nil, "", "", "", err
+	}
+
+	if entry, ok := resp["seven_day"]; ok && entry.IsEnabled {
+		pct := entry.Utilization * 100
+		scrapedPct = &pct
+		if !entry.ResetsAt.IsZero() {
+			weeklyResetTime = entry.ResetsAt.Format(time.RFC3339)
+		} else if entry.ResetsAtRaw != "" {
+			weeklyResetTime = entry.ResetsAtRaw
+		}
+	}
+	if entry, ok := resp["five_hour"]; ok && entry.IsEnabled {
+		if !entry.ResetsAt.IsZero() {
+			sessionResetTime = entry.ResetsAt.Format(time.RFC3339)
+		} else if entry.ResetsAtRaw != "" {
+			sessionResetTime = entry.ResetsAtRaw
+		}
+	}
+
+	return 0, 0, scrapedPct, sessionResetTime, weeklyResetTime, "api", nil
+}
+
+// collectClaudeFromFile fetches Claude usage from local files and tmux.
+func (c *Collector) collectClaudeFromFile(ctx context.Context) (localWeekly, localDaily int64, scrapedPct *float64, scrapeErr error, sessionResetTime, weeklyResetTime, source string, err error) {
+	if c.claude == nil {
+		return 0, 0, nil, nil, "", "", "", errors.New("claude provider is nil")
+	}
+	localWeekly, err = c.claude.GetWeeklyUsage()
+	if err != nil {
+		return 0, 0, nil, nil, "", "", "", err
+	}
+	localDaily, err = c.claude.GetTodayUsage()
+	if err != nil {
+		return 0, 0, nil, nil, "", "", "", err
+	}
+	src := "file"
+	if c.scraper != nil {
+		result, sErr := c.scraper.ScrapeClaudeUsage(ctx)
+		if sErr != nil {
+			scrapeErr = sErr
+		} else {
+			if result.WeeklyPct >= 0 && result.WeeklyPct <= 100 {
+				pct := result.WeeklyPct
+				scrapedPct = &pct
+			}
+			sessionResetTime = result.SessionResetTime
+			weeklyResetTime = result.WeeklyResetTime
+			if scrapedPct != nil {
+				src = "tmux"
+			}
+		}
+	}
+	return localWeekly, localDaily, scrapedPct, scrapeErr, sessionResetTime, weeklyResetTime, src, nil
+}
+
+// collectCodexFromAPI fetches Codex usage from the OpenAI API.
+func (c *Collector) collectCodexFromAPI(ctx context.Context) (localWeekly, localDaily int64, scrapedPct *float64, sessionResetTime, weeklyResetTime, source string, err error) {
+	resp, err := c.codexAPI.FetchUsage(ctx)
+	if err != nil {
+		return 0, 0, nil, "", "", "", err
+	}
+
+	if resp.RateLimit != nil && resp.RateLimit.PrimaryWindow != nil {
+		pw := resp.RateLimit.PrimaryWindow
+		pct := pw.UsedPercent
+		scrapedPct = &pct
+		if !pw.ResetAt.IsZero() {
+			sessionResetTime = pw.ResetAt.Format(time.RFC3339)
+			weeklyResetTime = sessionResetTime
+		}
+	}
+
+	return 0, 0, scrapedPct, sessionResetTime, weeklyResetTime, "api", nil
+}
+
+// collectCodexFromFile fetches Codex usage from local files and tmux.
+func (c *Collector) collectCodexFromFile(ctx context.Context) (localWeekly, localDaily int64, scrapedPct *float64, scrapeErr error, sessionResetTime, weeklyResetTime, source string, err error) {
+	if c.codex == nil {
+		return 0, 0, nil, nil, "", "", "", errors.New("codex provider is nil")
+	}
+	localWeekly, localDaily, err = codexTokenTotals(c.codex)
+	if err != nil {
+		return 0, 0, nil, nil, "", "", "", err
+	}
+	src := "file"
+	if c.scraper != nil {
+		result, sErr := c.scraper.ScrapeCodexUsage(ctx)
+		if sErr != nil {
+			scrapeErr = sErr
+		} else {
+			if result.WeeklyPct >= 0 && result.WeeklyPct <= 100 {
+				pct := result.WeeklyPct
+				scrapedPct = &pct
+			}
+			sessionResetTime = result.SessionResetTime
+			weeklyResetTime = result.WeeklyResetTime
+			if scrapedPct != nil {
+				src = "tmux"
+			}
+		}
+	}
+	return localWeekly, localDaily, scrapedPct, scrapeErr, sessionResetTime, weeklyResetTime, src, nil
+}
+
+// collectCopilotFromAPI fetches Copilot usage from the GitHub API.
+func (c *Collector) collectCopilotFromAPI(ctx context.Context) (localWeekly, localDaily int64, scrapedPct *float64, sessionResetTime, weeklyResetTime, source string, err error) {
+	resp, err := c.copilotAPI.FetchQuotas(ctx)
+	if err != nil {
+		return 0, 0, nil, "", "", "", err
+	}
+
+	if quota, ok := resp.Quotas["premium_interactions"]; ok && !quota.Unlimited {
+		usedPct := 100.0 - quota.PercentRemaining
+		scrapedPct = &usedPct
+	}
+	if resp.QuotaResetDate != "" {
+		weeklyResetTime = resp.QuotaResetDate
+		sessionResetTime = resp.QuotaResetDate
+	}
+
+	return 0, 0, scrapedPct, sessionResetTime, weeklyResetTime, "api", nil
+}
+
+// collectCopilotFromFile fetches Copilot usage from local files.
+func (c *Collector) collectCopilotFromFile() (localWeekly, localDaily int64, scrapedPct *float64, scrapeErr error, sessionResetTime, weeklyResetTime, source string, err error) {
+	if c.copilot == nil {
+		return 0, 0, nil, nil, "", "", "", errors.New("copilot provider is nil")
+	}
+	localWeekly, localDaily, err = copilotTokenTotals(c.copilot)
+	if err != nil {
+		return 0, 0, nil, nil, "", "", "", err
+	}
+	return localWeekly, localDaily, nil, nil, "", "", "file", nil
 }
 
 // GetLatest returns the latest snapshots for a provider.
@@ -222,7 +426,7 @@ func (c *Collector) GetLatest(provider string, n int) ([]Snapshot, error) {
 		return []Snapshot{}, nil
 	}
 	rows, err := c.db.SQL().Query(
-		`SELECT id, provider, timestamp, week_start, local_tokens, local_daily, scraped_pct, inferred_budget, day_of_week, hour_of_day, week_number, year, session_reset_time, weekly_reset_time
+		`SELECT id, provider, timestamp, week_start, local_tokens, local_daily, scraped_pct, inferred_budget, day_of_week, hour_of_day, week_number, year, session_reset_time, weekly_reset_time, source
 		 FROM snapshots
 		 WHERE provider = ?
 		 ORDER BY timestamp DESC
@@ -253,7 +457,7 @@ func (c *Collector) GetLatest(provider string, n int) ([]Snapshot, error) {
 func (c *Collector) GetSinceWeekStart(provider string) ([]Snapshot, error) {
 	weekStart := startOfWeek(time.Now(), c.weekStartDay)
 	rows, err := c.db.SQL().Query(
-		`SELECT id, provider, timestamp, week_start, local_tokens, local_daily, scraped_pct, inferred_budget, day_of_week, hour_of_day, week_number, year, session_reset_time, weekly_reset_time
+		`SELECT id, provider, timestamp, week_start, local_tokens, local_daily, scraped_pct, inferred_budget, day_of_week, hour_of_day, week_number, year, session_reset_time, weekly_reset_time, source
 		 FROM snapshots
 		 WHERE provider = ? AND week_start = ?
 		 ORDER BY timestamp ASC`,
@@ -335,6 +539,7 @@ func scanSnapshot(rows *sql.Rows) (Snapshot, error) {
 	var scraped sql.NullFloat64
 	var inferred sql.NullInt64
 	var sessionReset, weeklyReset sql.NullString
+	var source sql.NullString
 	if err := rows.Scan(
 		&snapshot.ID,
 		&snapshot.Provider,
@@ -350,6 +555,7 @@ func scanSnapshot(rows *sql.Rows) (Snapshot, error) {
 		&snapshot.Year,
 		&sessionReset,
 		&weeklyReset,
+		&source,
 	); err != nil {
 		return Snapshot{}, fmt.Errorf("scan snapshot: %w", err)
 	}
@@ -365,6 +571,11 @@ func scanSnapshot(rows *sql.Rows) (Snapshot, error) {
 	}
 	if weeklyReset.Valid {
 		snapshot.WeeklyResetTime = weeklyReset.String
+	}
+	if source.Valid {
+		snapshot.Source = source.String
+	} else {
+		snapshot.Source = "file"
 	}
 	return snapshot, nil
 }

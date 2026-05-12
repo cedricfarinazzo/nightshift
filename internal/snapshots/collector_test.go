@@ -2,12 +2,14 @@ package snapshots
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/marcus/nightshift/internal/db"
 	"github.com/marcus/nightshift/internal/tmux"
+	"github.com/marcus/nightshift/internal/usage"
 )
 
 type fakeClaude struct {
@@ -206,6 +208,263 @@ func TestCodexTokenTotalsPropagatesErrors(t *testing.T) {
 		t.Fatal("expected error from codexTokenTotals")
 	}
 }
+
+// --- API client stubs ---
+
+type fakeAnthropicAPI struct {
+	resp usage.AnthropicQuotaResponse
+	err  error
+}
+
+func (f fakeAnthropicAPI) FetchQuotas(_ context.Context) (usage.AnthropicQuotaResponse, error) {
+	return f.resp, f.err
+}
+
+type fakeCodexAPI struct {
+	resp *usage.CodexUsageResponse
+	err  error
+}
+
+func (f fakeCodexAPI) FetchUsage(_ context.Context) (*usage.CodexUsageResponse, error) {
+	return f.resp, f.err
+}
+
+type fakeCopilotAPI struct {
+	resp *usage.CopilotUserResponse
+	err  error
+}
+
+func (f fakeCopilotAPI) FetchQuotas(_ context.Context) (*usage.CopilotUserResponse, error) {
+	return f.resp, f.err
+}
+
+func openTestDB(t *testing.T) *db.DB {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	database, err := db.Open(filepath.Join(home, "nightshift.db"))
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+	return database
+}
+
+// --- Passive mode tests ---
+
+func TestPassiveModeSourceIsFile(t *testing.T) {
+	database := openTestDB(t)
+	collector := NewCollector(database, fakeClaude{weekly: 100, daily: 10}, nil, nil, nil, time.Monday)
+	snap, err := collector.TakeSnapshot(context.Background(), "claude")
+	if err != nil {
+		t.Fatalf("take snapshot: %v", err)
+	}
+	if snap.Source != "file" {
+		t.Fatalf("source = %q, want file", snap.Source)
+	}
+}
+
+// --- Active mode tests ---
+
+func TestActiveModeClaudeAPISuccess(t *testing.T) {
+	database := openTestDB(t)
+	resetAt := time.Now().Add(time.Hour)
+	apiResp := usage.AnthropicQuotaResponse{
+		"seven_day": {Utilization: 0.42, ResetsAt: resetAt, IsEnabled: true},
+		"five_hour":  {Utilization: 0.10, ResetsAt: resetAt, IsEnabled: true},
+	}
+	collector := NewCollectorWithAPIs(database, nil, nil, nil, nil, time.Monday, "active",
+		fakeAnthropicAPI{resp: apiResp}, nil, nil)
+	snap, err := collector.TakeSnapshot(context.Background(), "claude")
+	if err != nil {
+		t.Fatalf("take snapshot: %v", err)
+	}
+	if snap.Source != "api" {
+		t.Fatalf("source = %q, want api", snap.Source)
+	}
+	if snap.ScrapedPct == nil || *snap.ScrapedPct < 41.9 || *snap.ScrapedPct > 42.1 {
+		t.Fatalf("scraped pct = %v, want ~42", snap.ScrapedPct)
+	}
+}
+
+func TestActiveModeClaudeAPIFail_ReturnsError(t *testing.T) {
+	database := openTestDB(t)
+	collector := NewCollectorWithAPIs(database, nil, nil, nil, nil, time.Monday, "active",
+		fakeAnthropicAPI{err: errors.New("api down")}, nil, nil)
+	_, err := collector.TakeSnapshot(context.Background(), "claude")
+	if err == nil {
+		t.Fatal("expected error in active mode on API failure")
+	}
+}
+
+func TestActiveModeCodexAPISuccess(t *testing.T) {
+	database := openTestDB(t)
+	resetAt := usage.UnixTime{Time: time.Now().Add(time.Hour)}
+	apiResp := &usage.CodexUsageResponse{
+		RateLimit: &usage.CodexAPIRateLimit{
+			PrimaryWindow: &usage.CodexWindow{
+				UsedPercent: 55.0,
+				ResetAt:     resetAt,
+			},
+		},
+	}
+	collector := NewCollectorWithAPIs(database, nil, nil, nil, nil, time.Monday, "active",
+		nil, fakeCodexAPI{resp: apiResp}, nil)
+	snap, err := collector.TakeSnapshot(context.Background(), "codex")
+	if err != nil {
+		t.Fatalf("take snapshot: %v", err)
+	}
+	if snap.Source != "api" {
+		t.Fatalf("source = %q, want api", snap.Source)
+	}
+	if snap.ScrapedPct == nil || *snap.ScrapedPct != 55.0 {
+		t.Fatalf("scraped pct = %v, want 55", snap.ScrapedPct)
+	}
+}
+
+func TestActiveModeCodexAPIFail_ReturnsError(t *testing.T) {
+	database := openTestDB(t)
+	collector := NewCollectorWithAPIs(database, nil, nil, nil, nil, time.Monday, "active",
+		nil, fakeCodexAPI{err: errors.New("api down")}, nil)
+	_, err := collector.TakeSnapshot(context.Background(), "codex")
+	if err == nil {
+		t.Fatal("expected error in active mode on API failure")
+	}
+}
+
+func TestActiveModeCopilotAPISuccess(t *testing.T) {
+	database := openTestDB(t)
+	apiResp := &usage.CopilotUserResponse{
+		QuotaResetDate: "2026-05-20",
+		Quotas: usage.CopilotQuotaMap{
+			"premium_interactions": {PercentRemaining: 30.0, Unlimited: false},
+		},
+	}
+	collector := NewCollectorWithAPIs(database, nil, nil, nil, nil, time.Monday, "active",
+		nil, nil, fakeCopilotAPI{resp: apiResp})
+	snap, err := collector.TakeSnapshot(context.Background(), "copilot")
+	if err != nil {
+		t.Fatalf("take snapshot: %v", err)
+	}
+	if snap.Source != "api" {
+		t.Fatalf("source = %q, want api", snap.Source)
+	}
+	// 100 - 30 = 70% used
+	if snap.ScrapedPct == nil || *snap.ScrapedPct != 70.0 {
+		t.Fatalf("scraped pct = %v, want 70", snap.ScrapedPct)
+	}
+	if snap.WeeklyResetTime != "2026-05-20" {
+		t.Fatalf("weekly reset = %q, want 2026-05-20", snap.WeeklyResetTime)
+	}
+}
+
+func TestActiveModeCopilotAPIFail_ReturnsError(t *testing.T) {
+	database := openTestDB(t)
+	collector := NewCollectorWithAPIs(database, nil, nil, nil, nil, time.Monday, "active",
+		nil, nil, fakeCopilotAPI{err: errors.New("api down")})
+	_, err := collector.TakeSnapshot(context.Background(), "copilot")
+	if err == nil {
+		t.Fatal("expected error in active mode on API failure")
+	}
+}
+
+// --- Hybrid mode tests ---
+
+func TestHybridModeAPISuccess_SourceAPI(t *testing.T) {
+	database := openTestDB(t)
+	apiResp := usage.AnthropicQuotaResponse{
+		"seven_day": {Utilization: 0.60, IsEnabled: true},
+	}
+	collector := NewCollectorWithAPIs(database, fakeClaude{weekly: 100, daily: 10}, nil, nil, nil, time.Monday, "hybrid",
+		fakeAnthropicAPI{resp: apiResp}, nil, nil)
+	snap, err := collector.TakeSnapshot(context.Background(), "claude")
+	if err != nil {
+		t.Fatalf("take snapshot: %v", err)
+	}
+	if snap.Source != "api" {
+		t.Fatalf("source = %q, want api", snap.Source)
+	}
+}
+
+func TestHybridModeAPIFail_FallsBackToFile(t *testing.T) {
+	database := openTestDB(t)
+	collector := NewCollectorWithAPIs(database, fakeClaude{weekly: 200, daily: 20}, nil, nil, nil, time.Monday, "hybrid",
+		fakeAnthropicAPI{err: errors.New("api down")}, nil, nil)
+	snap, err := collector.TakeSnapshot(context.Background(), "claude")
+	if err != nil {
+		t.Fatalf("hybrid fallback should not error: %v", err)
+	}
+	if snap.Source != "file" {
+		t.Fatalf("source = %q, want file after fallback", snap.Source)
+	}
+	if snap.LocalTokens != 200 {
+		t.Fatalf("local tokens = %d, want 200", snap.LocalTokens)
+	}
+}
+
+func TestHybridModeCodexAPIFail_FallsBackToFile(t *testing.T) {
+	database := openTestDB(t)
+	collector := NewCollectorWithAPIs(database, nil, fakeCodex{weeklyTokens: 500, dailyTokens: 50}, nil, nil, time.Monday, "hybrid",
+		nil, fakeCodexAPI{err: errors.New("api down")}, nil)
+	snap, err := collector.TakeSnapshot(context.Background(), "codex")
+	if err != nil {
+		t.Fatalf("hybrid fallback should not error: %v", err)
+	}
+	if snap.Source != "file" {
+		t.Fatalf("source = %q, want file after fallback", snap.Source)
+	}
+}
+
+func TestHybridModeCopilotAPIFail_FallsBackToFile(t *testing.T) {
+	database := openTestDB(t)
+	copilot := fakeCopilotUsage{weekly: 100, daily: 10}
+	collector := NewCollectorWithAPIs(database, nil, nil, copilot, nil, time.Monday, "hybrid",
+		nil, nil, fakeCopilotAPI{err: errors.New("api down")})
+	snap, err := collector.TakeSnapshot(context.Background(), "copilot")
+	if err != nil {
+		t.Fatalf("hybrid fallback should not error: %v", err)
+	}
+	if snap.Source != "file" {
+		t.Fatalf("source = %q, want file after fallback", snap.Source)
+	}
+}
+
+// --- Source persisted and read back ---
+
+func TestSourcePersistedAndReadBack(t *testing.T) {
+	database := openTestDB(t)
+	apiResp := usage.AnthropicQuotaResponse{
+		"seven_day": {Utilization: 0.30, IsEnabled: true},
+	}
+	collector := NewCollectorWithAPIs(database, nil, nil, nil, nil, time.Monday, "active",
+		fakeAnthropicAPI{resp: apiResp}, nil, nil)
+	_, err := collector.TakeSnapshot(context.Background(), "claude")
+	if err != nil {
+		t.Fatalf("take snapshot: %v", err)
+	}
+	snaps, err := collector.GetLatest("claude", 1)
+	if err != nil {
+		t.Fatalf("get latest: %v", err)
+	}
+	if len(snaps) != 1 {
+		t.Fatalf("expected 1 snapshot")
+	}
+	if snaps[0].Source != "api" {
+		t.Fatalf("source = %q, want api", snaps[0].Source)
+	}
+}
+
+// fakeCopilotUsage implements CopilotUsage for tests.
+type fakeCopilotUsage struct {
+	weekly int64
+	daily  int64
+	err    error
+}
+
+func (f fakeCopilotUsage) GetWeeklyTokens() (int64, error) { return f.weekly, f.err }
+func (f fakeCopilotUsage) GetTodayTokens() (int64, error)  { return f.daily, f.err }
+
+// --- Original tests below ---
 
 func TestTakeSnapshotStoresResetTimes(t *testing.T) {
 	home := t.TempDir()
