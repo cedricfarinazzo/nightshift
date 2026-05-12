@@ -283,13 +283,12 @@ func NewManagerWithTracking(
 		return NewManager(cfg, passiveClaude, passiveCodex, passiveCopilot, opts...)
 	}
 
-	var claudeP ClaudeUsageProvider = passiveClaude
 	var codexP CodexUsageProvider = passiveCodex
 	var copilotP CopilotUsageProvider = passiveCopilot
 
 	// Anthropic client — never fails at construction; credentials read at call time.
 	anthropicClient := usage.NewAnthropicClient()
-	claudeP = &anthropicActiveProvider{
+	claudeP := &anthropicActiveProvider{
 		client:  anthropicClient,
 		passive: passiveClaude,
 		hybrid:  mode == "hybrid", // suppress warnings for expected fallback in hybrid mode
