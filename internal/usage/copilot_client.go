@@ -12,8 +12,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/marcus/nightshift/cmd/nightshift/commands"
 )
+
+// Version is injected by the caller at startup to populate User-Agent headers.
+// Defaults to "unknown" if not set.
+var Version = "unknown"
 
 const (
 	defaultCopilotAPIURL = "https://api.github.com/copilot_internal/user"
@@ -46,7 +49,7 @@ func NewCopilotClient() (*CopilotClient, error) {
 	c := &CopilotClient{
 		httpClient: &http.Client{Timeout: copilotTimeout},
 		baseURL:    defaultCopilotAPIURL,
-		userAgent:  "nightshift/" + commands.Version,
+		userAgent:  "nightshift/" + Version,
 		ghExec:     defaultGHExec,
 	}
 	token, err := c.discoverToken(context.Background())
@@ -62,7 +65,7 @@ func newCopilotClientWithExec(ghExec func(args ...string) ([]byte, error)) (*Cop
 	c := &CopilotClient{
 		httpClient: &http.Client{Timeout: copilotTimeout},
 		baseURL:    defaultCopilotAPIURL,
-		userAgent:  "nightshift/" + commands.Version,
+		userAgent:  "nightshift/" + Version,
 		ghExec:     ghExec,
 	}
 	token, err := c.discoverToken(context.Background())
@@ -73,13 +76,24 @@ func newCopilotClientWithExec(ghExec func(args ...string) ([]byte, error)) (*Cop
 	return c, nil
 }
 
+// CopilotOption configures a CopilotClient.
+type CopilotOption func(*CopilotClient)
+
+// WithCopilotGHExec overrides the gh executor (useful for tests).
+func WithCopilotGHExec(fn func(args ...string) ([]byte, error)) CopilotOption {
+	return func(c *CopilotClient) { c.ghExec = fn }
+}
+
 // NewCopilotClientWithBaseURL constructs a client with a custom API base URL (useful for GitHub Enterprise or tests).
-func NewCopilotClientWithBaseURL(baseURL string) (*CopilotClient, error) {
+func NewCopilotClientWithBaseURL(baseURL string, opts ...CopilotOption) (*CopilotClient, error) {
 	c := &CopilotClient{
 		httpClient: &http.Client{Timeout: copilotTimeout},
 		baseURL:    baseURL,
-		userAgent:  "nightshift/" + commands.Version,
+		userAgent:  "nightshift/" + Version,
 		ghExec:     defaultGHExec,
+	}
+	for _, opt := range opts {
+		opt(c)
 	}
 	token, err := c.discoverToken(context.Background())
 	if err != nil {

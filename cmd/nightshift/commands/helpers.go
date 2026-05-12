@@ -119,6 +119,6 @@ func newBudgetManager(cfg *config.Config, database *db.DB) *budget.Manager {
 	copilotProvider := providers.NewCopilotWithPath(cfg.ExpandedProviderPath("copilot"))
 	cal := calibrator.New(database, cfg)
 	trend := trends.NewAnalyzer(database, cfg.Budget.SnapshotRetentionDays)
-	return budget.NewManagerFromProviders(cfg, claudeProvider, codexProvider, copilotProvider,
+	return budget.NewManagerWithTrackingFromProviders(cfg, claudeProvider, codexProvider, copilotProvider,
 		budget.WithBudgetSource(cal), budget.WithTrendAnalyzer(trend))
 }
