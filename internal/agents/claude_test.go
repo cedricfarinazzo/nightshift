@@ -188,7 +188,7 @@ func TestClaudeAgent_Execute_UsesParentDeadline(t *testing.T) {
 	if result.ExitCode != -1 {
 		t.Errorf("ExitCode = %d, want -1", result.ExitCode)
 	}
-	if strings.Contains(result.Error, "10s") || strings.Contains(result.Error, "5m") {
+	if strings.Contains(result.Error, "timeout after 10s") || strings.Contains(result.Error, "timeout after 5m") {
 		t.Errorf("Error = %q, want parent deadline to win", result.Error)
 	}
 	if !strings.Contains(result.Error, "timeout after") {
