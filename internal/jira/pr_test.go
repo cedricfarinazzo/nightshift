@@ -366,6 +366,7 @@ func TestFetchPRReviewComments_ReviewThreadsError(t *testing.T) {
 		"state": "OPEN",
 		"reviewDecision": "",
 		"number": 7,
+		"headRefOid": "abc123def456",
 		"reviews": [],
 		"comments": [
 			{"author": {"login": "alice"}, "body": "top-level comment", "createdAt": "2026-04-07T10:00:00Z"}
@@ -417,5 +418,149 @@ func TestFetchPRReviewComments_ReviewThreadsError(t *testing.T) {
 	}
 	if !strings.Contains(logOutput, "#7") {
 		t.Errorf("expected warning log containing PR number, got: %s", logOutput)
+	}
+}
+
+// ── parseCheckRuns ────────────────────────────────────────────────────────────
+
+func TestParseCheckRuns_ValidFailing(t *testing.T) {
+	raw := `{
+		"check_runs": [
+			{"name": "go-lint", "status": "completed", "conclusion": "failure", "details_url": "https://github.com/org/repo/runs/1"},
+			{"name": "go-test", "status": "completed", "conclusion": "timed_out", "details_url": "https://github.com/org/repo/runs/2"},
+			{"name": "security-scan", "status": "completed", "conclusion": "action_required", "details_url": "https://github.com/org/repo/runs/3"}
+		]
+	}`
+	runs, err := parseCheckRuns(raw)
+	if err != nil {
+		t.Fatalf("parseCheckRuns: %v", err)
+	}
+	if len(runs) != 3 {
+		t.Fatalf("len(runs) = %d, want 3", len(runs))
+	}
+	if runs[0].Name != "go-lint" || runs[0].Conclusion != "failure" {
+		t.Errorf("runs[0] = {%q, %q}, want {go-lint, failure}", runs[0].Name, runs[0].Conclusion)
+	}
+	if runs[1].Conclusion != "timed_out" {
+		t.Errorf("runs[1].Conclusion = %q, want timed_out", runs[1].Conclusion)
+	}
+	if runs[2].Conclusion != "action_required" {
+		t.Errorf("runs[2].Conclusion = %q, want action_required", runs[2].Conclusion)
+	}
+}
+
+func TestParseCheckRuns_SkipNonFailing(t *testing.T) {
+	raw := `{
+		"check_runs": [
+			{"name": "lint", "status": "completed", "conclusion": "success", "details_url": "https://github.com/org/repo/runs/1"},
+			{"name": "test", "status": "completed", "conclusion": "neutral", "details_url": "https://github.com/org/repo/runs/2"},
+			{"name": "skip", "status": "completed", "conclusion": "skipped", "details_url": "https://github.com/org/repo/runs/3"}
+		]
+	}`
+	runs, err := parseCheckRuns(raw)
+	if err != nil {
+		t.Fatalf("parseCheckRuns: %v", err)
+	}
+	if len(runs) != 0 {
+		t.Errorf("len(runs) = %d, want 0 (success/neutral/skipped should be filtered)", len(runs))
+	}
+}
+
+func TestParseCheckRuns_SkipIncompleted(t *testing.T) {
+	raw := `{
+		"check_runs": [
+			{"name": "pending", "status": "in_progress", "conclusion": "failure", "details_url": "https://github.com/org/repo/runs/1"},
+			{"name": "queued", "status": "queued", "conclusion": "", "details_url": "https://github.com/org/repo/runs/2"},
+			{"name": "completed-fail", "status": "completed", "conclusion": "failure", "details_url": "https://github.com/org/repo/runs/3"}
+		]
+	}`
+	runs, err := parseCheckRuns(raw)
+	if err != nil {
+		t.Fatalf("parseCheckRuns: %v", err)
+	}
+	if len(runs) != 1 {
+		t.Errorf("len(runs) = %d, want 1 (only completed+failing counted)", len(runs))
+	}
+	if runs[0].Name != "completed-fail" {
+		t.Errorf("runs[0].Name = %q, want completed-fail", runs[0].Name)
+	}
+}
+
+func TestParseCheckRuns_MixedResults(t *testing.T) {
+	raw := `{
+		"check_runs": [
+			{"name": "success", "status": "completed", "conclusion": "success", "details_url": "https://github.com/org/repo/runs/1"},
+			{"name": "fail", "status": "completed", "conclusion": "failure", "details_url": "https://github.com/org/repo/runs/2"},
+			{"name": "timeout", "status": "completed", "conclusion": "timed_out", "details_url": "https://github.com/org/repo/runs/3"},
+			{"name": "pending", "status": "in_progress", "conclusion": "failure", "details_url": "https://github.com/org/repo/runs/4"},
+			{"name": "cancel", "status": "completed", "conclusion": "cancelled", "details_url": "https://github.com/org/repo/runs/5"}
+		]
+	}`
+	runs, err := parseCheckRuns(raw)
+	if err != nil {
+		t.Fatalf("parseCheckRuns: %v", err)
+	}
+	if len(runs) != 3 {
+		t.Errorf("len(runs) = %d, want 3 (fail, timeout, cancel)", len(runs))
+	}
+	conclusions := make([]string, len(runs))
+	for i, r := range runs {
+		conclusions[i] = r.Conclusion
+	}
+	expected := []string{"failure", "timed_out", "cancelled"}
+	for i, exp := range expected {
+		if i >= len(conclusions) || conclusions[i] != exp {
+			t.Errorf("conclusions[%d] = %q, want %q", i, conclusions[i], exp)
+		}
+	}
+}
+
+func TestParseCheckRuns_Empty(t *testing.T) {
+	raw := `{"check_runs": []}`
+	runs, err := parseCheckRuns(raw)
+	if err != nil {
+		t.Fatalf("parseCheckRuns: %v", err)
+	}
+	if len(runs) != 0 {
+		t.Errorf("len(runs) = %d, want 0", len(runs))
+	}
+	if runs == nil {
+		t.Error("expected empty slice, got nil")
+	}
+}
+
+func TestParseCheckRuns_InvalidJSON(t *testing.T) {
+	raw := `not json`
+	_, err := parseCheckRuns(raw)
+	if err == nil {
+		t.Error("expected error for invalid JSON, got nil")
+	}
+}
+
+func TestParseCheckRuns_MissingFields(t *testing.T) {
+	// Minimal valid JSON — missing optional fields should not error.
+	raw := `{"check_runs": [{"name": "test"}]}`
+	runs, err := parseCheckRuns(raw)
+	if err != nil {
+		t.Fatalf("parseCheckRuns with minimal JSON: %v", err)
+	}
+	// Missing conclusion and status means it won't be included (status not "completed")
+	if len(runs) != 0 {
+		t.Errorf("len(runs) = %d, want 0 (missing status/conclusion)", len(runs))
+	}
+}
+
+func TestParseCheckRuns_PreservesURLs(t *testing.T) {
+	raw := `{
+		"check_runs": [
+			{"name": "ci", "status": "completed", "conclusion": "failure", "details_url": "https://example.com/run/123"}
+		]
+	}`
+	runs, err := parseCheckRuns(raw)
+	if err != nil {
+		t.Fatalf("parseCheckRuns: %v", err)
+	}
+	if runs[0].LogsURL != "https://example.com/run/123" {
+		t.Errorf("LogsURL = %q, want https://example.com/run/123", runs[0].LogsURL)
 	}
 }
