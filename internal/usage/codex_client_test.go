@@ -59,7 +59,7 @@ func newClient(primary, fallback, oauth string, creds *CodexCredentials) *CodexC
 func TestFetchUsage_success(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(sampleUsageJSON(1234.56)))
+		_, _ = w.Write([]byte(sampleUsageJSON(1234.56)))
 	}))
 	defer srv.Close()
 
@@ -92,7 +92,7 @@ func TestFetchUsage_fallback404(t *testing.T) {
 	fallbackSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fallbackCalled.Store(true)
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(sampleUsageJSON(0)))
+		_, _ = w.Write([]byte(sampleUsageJSON(0)))
 	}))
 	defer fallbackSrv.Close()
 
@@ -135,7 +135,7 @@ func TestFetchUsage_tokenRefreshOn401(t *testing.T) {
 	var refreshed atomic.Bool
 	oauthSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		refreshed.Store(true)
-		json.NewEncoder(w).Encode(oauthTokenResponse{
+		_ = json.NewEncoder(w).Encode(oauthTokenResponse{
 			AccessToken:  "newtoken",
 			RefreshToken: "newrefresh",
 			ExpiresIn:    3600,
@@ -151,7 +151,7 @@ func TestFetchUsage_tokenRefreshOn401(t *testing.T) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(sampleUsageJSON(0)))
+		_, _ = w.Write([]byte(sampleUsageJSON(0)))
 	}))
 	defer apiSrv.Close()
 
@@ -238,7 +238,9 @@ func TestLoadCredentials_authJson(t *testing.T) {
 	af.Tokens.RefreshToken = "file-refresh"
 	af.Tokens.IDToken = jwt
 	data, _ := json.Marshal(af)
-	os.WriteFile(filepath.Join(dir, "auth.json"), data, 0600)
+	if err := os.WriteFile(filepath.Join(dir, "auth.json"), data, 0600); err != nil {
+		t.Fatalf("writing auth.json: %v", err)
+	}
 
 	t.Setenv("CODEX_HOME", dir)
 	t.Setenv("CODEX_TOKEN", "") // ensure env var path not taken
@@ -278,15 +280,20 @@ func TestRefreshToken_rotation(t *testing.T) {
 	initial.Tokens.AccessToken = "old-access"
 	initial.Tokens.RefreshToken = "old-refresh"
 	data, _ := json.Marshal(initial)
-	os.WriteFile(authPath, data, 0600)
+	if err := os.WriteFile(authPath, data, 0600); err != nil {
+		t.Fatalf("writing auth.json: %v", err)
+	}
 
 	oauthSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		r.ParseForm()
+		if err := r.ParseForm(); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
 		if r.FormValue("refresh_token") != "old-refresh" {
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
-		json.NewEncoder(w).Encode(oauthTokenResponse{
+		_ = json.NewEncoder(w).Encode(oauthTokenResponse{
 			AccessToken:  "new-access",
 			RefreshToken: "new-refresh",
 			ExpiresIn:    3600,
@@ -314,7 +321,7 @@ func TestRefreshToken_rotation(t *testing.T) {
 	// Verify file written.
 	written, _ := os.ReadFile(authPath)
 	var af authFileShape
-	json.Unmarshal(written, &af)
+	_ = json.Unmarshal(written, &af)
 	if af.Tokens.AccessToken != "new-access" {
 		t.Errorf("file access_token = %q, want new-access", af.Tokens.AccessToken)
 	}
