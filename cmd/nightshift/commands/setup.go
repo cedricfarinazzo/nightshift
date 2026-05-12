@@ -113,9 +113,10 @@ var claudeModels = []modelOption{
 
 // codexModels lists available Codex/GPT models (static fallback).
 // Updated at runtime via FetchOpenAIModels when OPENAI_API_KEY is set.
-// Source: https://platform.openai.com/docs/models
+// Source: https://developers.openai.com/api/docs/models
 var codexModels = []modelOption{
 	{label: "default", value: ""},
+	{label: "gpt-5.5", value: "gpt-5.5"},
 	{label: "gpt-5.4", value: "gpt-5.4"},
 	{label: "gpt-5.4-mini", value: "gpt-5.4-mini"},
 	{label: "gpt-5.4-nano", value: "gpt-5.4-nano"},
