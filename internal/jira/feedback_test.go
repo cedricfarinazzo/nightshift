@@ -482,6 +482,123 @@ func TestProcessFeedback_FindPRError(t *testing.T) {
 	}
 }
 
+// TestProcessFeedback_StatusCheckTrigger verifies the 4 combinations of failing checks /
+// review comments that determine whether the rework agent is spawned.
+func TestProcessFeedback_StatusCheckTrigger(t *testing.T) {
+	failingCheck := CheckRun{Name: "go-test", Status: "completed", Conclusion: "failure", LogsURL: "https://github.com/runs/1"}
+
+	tests := []struct {
+		name          string
+		failingChecks []CheckRun
+		reviews       []Review
+		wantAgentRun  bool
+	}{
+		{
+			name:          "all-green and no comments — skip",
+			failingChecks: nil,
+			reviews:       nil,
+			wantAgentRun:  false,
+		},
+		{
+			name:          "failing checks and no comments — run",
+			failingChecks: []CheckRun{failingCheck},
+			reviews:       nil,
+			wantAgentRun:  true,
+		},
+		{
+			name:          "green and review comments — run",
+			failingChecks: nil,
+			reviews:       []Review{{Author: "alice", State: "CHANGES_REQUESTED", Body: "fix it"}},
+			wantAgentRun:  true,
+		},
+		{
+			name:          "failing checks and review comments — run",
+			failingChecks: []CheckRun{failingCheck},
+			reviews:       []Review{{Author: "alice", State: "CHANGES_REQUESTED", Body: "fix it"}},
+			wantAgentRun:  true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sc := &stubJiraClient{}
+			ra := &stubAgent{name: "fix", output: "done"}
+
+			reviewDecision := "APPROVED"
+			if len(tt.reviews) > 0 {
+				reviewDecision = "CHANGES_REQUESTED"
+			}
+			fnFindPR := func(_ context.Context, _, _ string) (*PRInfo, error) {
+				return &PRInfo{URL: "https://github.com/org/repo/pull/1", Number: 1}, nil
+			}
+			fnFetchReviews := func(_ context.Context, _, _ string) (*PRReviewState, error) {
+				return &PRReviewState{
+					URL:            "https://github.com/org/repo/pull/1",
+					ReviewDecision: reviewDecision,
+					Reviews:        tt.reviews,
+					FailingChecks:  tt.failingChecks,
+				}, nil
+			}
+
+			o := newFeedbackOrchestrator(sc, ra, fnFindPR, fnFetchReviews, noCommit, noPRComment)
+
+			ws := &Workspace{
+				TicketKey: "X-1",
+				Repos:     []RepoWorkspace{{Name: "repo", Path: "/tmp/repo", Branch: "feature/X-1"}},
+			}
+			_, err := o.ProcessFeedback(context.Background(), Ticket{Key: "X-1"}, ws)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			// capturedOpts.Prompt is non-empty only when the agent was actually called.
+			agentCalled := ra.capturedOpts.Prompt != ""
+			if agentCalled != tt.wantAgentRun {
+				t.Errorf("agentCalled = %v, want %v", agentCalled, tt.wantAgentRun)
+			}
+		})
+	}
+}
+
+// TestBuildReworkPrompt_FailingChecks verifies the failing checks section appears in the prompt.
+func TestBuildReworkPrompt_FailingChecks(t *testing.T) {
+	ticket := Ticket{Key: "VC-62", Summary: "status checks"}
+	review := &PRReviewState{
+		URL: "https://github.com/org/repo/pull/7",
+		FailingChecks: []CheckRun{
+			{Name: "go-lint", Conclusion: "failure", LogsURL: "https://github.com/runs/1"},
+			{Name: "go-test", Conclusion: "timed_out", LogsURL: ""},
+		},
+	}
+	repo := RepoWorkspace{Name: "nightshift", Branch: "feature/VC-62"}
+
+	prompt := buildReworkPrompt(ticket, review, repo)
+
+	for _, want := range []string{
+		"Failing CI Checks",
+		"go-lint",
+		"failure",
+		"https://github.com/runs/1",
+		"go-test",
+		"timed_out",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("prompt missing %q", want)
+		}
+	}
+}
+
+func TestBuildReworkPrompt_NoFailingChecks(t *testing.T) {
+	ticket := Ticket{Key: "VC-62", Summary: "status checks"}
+	review := &PRReviewState{URL: "https://github.com/org/repo/pull/7"}
+	repo := RepoWorkspace{Name: "nightshift", Branch: "feature/VC-62"}
+
+	prompt := buildReworkPrompt(ticket, review, repo)
+
+	if strings.Contains(prompt, "Failing CI Checks") {
+		t.Error("prompt should not include Failing CI Checks section when no checks are failing")
+	}
+}
+
 // TestProcessFeedback_OnlyFnHasChangesSet_NoPanic reproduces VC-52: if fnHasChanges is
 // overridden but fnCommitAndPush is left nil, ProcessFeedback must not panic.
 func TestProcessFeedback_OnlyFnHasChangesSet_NoPanic(t *testing.T) {

@@ -689,6 +689,91 @@ func TestE2E_VC8_NewOrchestrator_Defaults(t *testing.T) {
 	}
 }
 
+// ── VC-62: GitHub status checks in fix-review workflow ──────────────────────
+
+func TestE2E_VC62_FetchPRCheckRuns(t *testing.T) {
+	e2eGHAvailable(t)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// Fetch review state for the test PR — this also populates FailingChecks.
+	rs, err := FetchPRReviewComments(ctx, ".", e2eTestPRURL())
+	if err != nil {
+		t.Skipf("FetchPRReviewComments: %v (gh CLI may not be authenticated)", err)
+	}
+
+	t.Logf("PR %s: failingChecks=%d", e2eTestPRURL(), len(rs.FailingChecks))
+	for _, cr := range rs.FailingChecks {
+		t.Logf("  failing check: name=%q conclusion=%q url=%s", cr.Name, cr.Conclusion, cr.LogsURL)
+	}
+
+	// Directly call FetchPRCheckRuns to verify it works standalone.
+	checks, err := FetchPRCheckRuns(ctx, ".", rs.Number)
+	if err != nil {
+		t.Logf("FetchPRCheckRuns: %v (may have no check-runs)", err)
+	} else {
+		t.Logf("FetchPRCheckRuns returned %d failing check-run(s)", len(checks))
+		for _, cr := range checks {
+			if cr.Name == "" {
+				t.Error("check-run has empty Name")
+			}
+			if cr.Status != "completed" {
+				t.Errorf("check-run %q: Status = %q, want 'completed'", cr.Name, cr.Status)
+			}
+		}
+	}
+}
+
+func TestE2E_VC62_ProcessFeedback_ChecksInPrompt(t *testing.T) {
+	client := e2eClient(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	failingCheck := CheckRun{Name: "go-test", Status: "completed", Conclusion: "failure", LogsURL: "https://github.com/runs/1"}
+
+	ra := &stubAgent{name: "e2e-fix", output: "done"}
+	o := &Orchestrator{
+		client:          &noMutationJiraClient{real: client},
+		cfg:             client.cfg,
+		reviewFixAgent:  ra,
+		implAgent:       ra,
+		validationAgent: ra,
+		fnHasChanges:    func(_ context.Context, _ string) (bool, error) { return false, nil },
+		fnCommitAndPush: func(_ context.Context, _, _ string) error { return nil },
+		fnFindPR: func(_ context.Context, _, _ string) (*PRInfo, error) {
+			return &PRInfo{URL: "https://github.com/org/repo/pull/1", Number: 1}, nil
+		},
+		fnFetchReviews: func(_ context.Context, _, _ string) (*PRReviewState, error) {
+			return &PRReviewState{
+				URL:           "https://github.com/org/repo/pull/1",
+				FailingChecks: []CheckRun{failingCheck},
+			}, nil
+		},
+		fnPostPRComment: func(_ context.Context, _, _, _ string) error { return nil },
+	}
+
+	ws := &Workspace{
+		TicketKey: "VC-62",
+		Repos:     []RepoWorkspace{{Name: "nightshift", Path: ".", Branch: "feature/VC-62"}},
+	}
+	_, err := o.ProcessFeedback(ctx, Ticket{Key: "VC-62", Summary: "status checks"}, ws)
+	if err != nil {
+		t.Fatalf("ProcessFeedback: %v", err)
+	}
+
+	// Agent must have been called — failing checks alone trigger rework.
+	if ra.capturedOpts.Prompt == "" {
+		t.Error("expected rework agent to be called for failing CI checks, but prompt was empty")
+	}
+	if !strings.Contains(ra.capturedOpts.Prompt, "go-test") {
+		t.Error("rework prompt missing failing check name 'go-test'")
+	}
+	if !strings.Contains(ra.capturedOpts.Prompt, "failure") {
+		t.Error("rework prompt missing failing check conclusion 'failure'")
+	}
+}
+
 func statusNames(ss []Status) []string {
 	names := make([]string, len(ss))
 	for i, s := range ss {

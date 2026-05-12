@@ -21,6 +21,14 @@ type PRInfo struct {
 	IsNew      bool
 }
 
+// CheckRun represents a single GitHub Actions / check-run result for a commit.
+type CheckRun struct {
+	Name       string
+	Status     string // "completed", "in_progress", "queued"
+	Conclusion string // "failure", "timed_out", "cancelled", "success", "neutral", "skipped", ""
+	LogsURL    string
+}
+
 // PRReviewState captures the current review state of a pull request.
 type PRReviewState struct {
 	URL            string
@@ -29,6 +37,7 @@ type PRReviewState struct {
 	ReviewDecision string
 	Reviews        []Review
 	Comments       []PRComment
+	FailingChecks  []CheckRun // check-runs with a failing conclusion (populated by FetchPRReviewComments)
 }
 
 // Review represents a single pull request review.
@@ -159,6 +168,7 @@ func buildPRBody(ticket Ticket, jiraSite string) string {
 
 // FetchPRReviewComments fetches the current review state for a PR using `gh pr view --json`
 // and appends inline review thread comments (with resolved status) via the GitHub GraphQL API.
+// It also populates FailingChecks with any failing GitHub status checks on the PR head commit.
 func FetchPRReviewComments(ctx context.Context, repoPath, prURL string) (*PRReviewState, error) {
 	out, err := ghExec(ctx, repoPath, "pr", "view", prURL,
 		"--json", "url,state,reviewDecision,reviews,comments,number")
@@ -178,7 +188,74 @@ func FetchPRReviewComments(ctx context.Context, repoPath, prURL string) (*PRRevi
 	if err == nil {
 		rs.Comments = append(rs.Comments, inline...)
 	}
+
+	// Fetch failing GitHub status checks — non-fatal; log and continue on error.
+	checks, err := FetchPRCheckRuns(ctx, repoPath, rs.Number)
+	if err != nil {
+		logging.Get().Warnf("jira: pr: fetch check-runs for PR #%d (%s) in repo %s: %v", rs.Number, prURL, repoPath, err)
+	} else {
+		rs.FailingChecks = checks
+	}
+
 	return rs, nil
+}
+
+// FetchPRCheckRuns fetches GitHub check-run results for the head commit of a PR and returns
+// only those that completed with a failing conclusion (failure, timed_out, or cancelled).
+func FetchPRCheckRuns(ctx context.Context, repoPath string, prNumber int) ([]CheckRun, error) {
+	if prNumber == 0 {
+		return nil, nil
+	}
+	// Resolve the head commit SHA for this PR.
+	shaOut, err := ghExec(ctx, repoPath, "pr", "view", fmt.Sprintf("%d", prNumber),
+		"--json", "headRefOid", "--jq", ".headRefOid")
+	if err != nil {
+		return nil, fmt.Errorf("gh pr view headRefOid: %w", err)
+	}
+	sha := strings.TrimSpace(shaOut)
+	if sha == "" {
+		return nil, fmt.Errorf("empty head SHA for PR #%d", prNumber)
+	}
+
+	out, err := ghExec(ctx, repoPath, "api",
+		fmt.Sprintf("repos/{owner}/{repo}/commits/%s/check-runs?per_page=100", sha))
+	if err != nil {
+		return nil, fmt.Errorf("gh api check-runs: %w", err)
+	}
+	return parseCheckRuns(out)
+}
+
+// parseCheckRuns decodes the GitHub check-runs API response and returns only entries
+// that completed with a failing conclusion.
+func parseCheckRuns(raw string) ([]CheckRun, error) {
+	var v struct {
+		CheckRuns []struct {
+			Name       string `json:"name"`
+			Status     string `json:"status"`
+			Conclusion string `json:"conclusion"`
+			DetailsURL string `json:"details_url"`
+		} `json:"check_runs"`
+	}
+	if err := json.Unmarshal([]byte(raw), &v); err != nil {
+		return nil, fmt.Errorf("parse check-runs: %w", err)
+	}
+	failingConclusions := map[string]bool{
+		"failure":   true,
+		"timed_out": true,
+		"cancelled": true,
+	}
+	var runs []CheckRun
+	for _, cr := range v.CheckRuns {
+		if cr.Status == "completed" && failingConclusions[cr.Conclusion] {
+			runs = append(runs, CheckRun{
+				Name:       cr.Name,
+				Status:     cr.Status,
+				Conclusion: cr.Conclusion,
+				LogsURL:    cr.DetailsURL,
+			})
+		}
+	}
+	return runs, nil
 }
 
 // fetchReviewThreads fetches per-line review thread comments via the GitHub GraphQL API.
