@@ -41,7 +41,7 @@ func FetchAnthropicModels(ctx context.Context, apiKey string) ([]string, error) 
 		}
 
 		if resp.StatusCode != http.StatusOK {
-			resp.Body.Close()
+			_ = resp.Body.Close()
 			return nil, fmt.Errorf("anthropic models API status %d", resp.StatusCode)
 		}
 
@@ -51,10 +51,10 @@ func FetchAnthropicModels(ctx context.Context, apiKey string) ([]string, error) 
 			LastID  string                            `json:"last_id"`
 		}
 		if err := json.NewDecoder(resp.Body).Decode(&page); err != nil {
-			resp.Body.Close()
+			_ = resp.Body.Close()
 			return nil, fmt.Errorf("decode anthropic models: %w", err)
 		}
-		resp.Body.Close()
+		_ = resp.Body.Close()
 
 		for _, m := range page.Data {
 			if m.ID != "" {
@@ -86,7 +86,7 @@ func FetchOpenAIModels(ctx context.Context, apiKey string) ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("fetch openai models: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("openai models API status %d", resp.StatusCode)
