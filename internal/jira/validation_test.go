@@ -94,6 +94,31 @@ func TestCompressText(t *testing.T) {
 			input: "",
 			want:  "",
 		},
+		{
+			name:  "code fence: triple backticks toggle",
+			input: "Explain this:\n```\ndo this in order to succeed\n```\nAnd basically that works.",
+			want:  "Explain this:\n```\ndo this in order to succeed\n```\nAnd that works.",
+		},
+		{
+			name:  "code fence: triple tilde toggle",
+			input: "Run:\n~~~go\nrun in order to test\n~~~\nThen basically done.",
+			want:  "Run:\n~~~go\nrun in order to test\n~~~\nThen done.",
+		},
+		{
+			name:  "indented block preserved with leading spaces",
+			input: "instructions:\n    go test ./...\n    in order to verify",
+			want:  "instructions:\n    go test ./...\n    in order to verify",
+		},
+		{
+			name:  "indented block with tab preserved",
+			input: "code:\n\trun this in order to test",
+			want:  "code:\n\trun this in order to test",
+		},
+		{
+			name:  "code fence prevents compression inside",
+			input: "Before:\nbasically nothing\n```python\nbasically not compressed\n```\nAfter:\nbasically done",
+			want:  "Before:\nnothing\n```python\nbasically not compressed\n```\nAfter:\ndone",
+		},
 	}
 
 	for _, tt := range tests {

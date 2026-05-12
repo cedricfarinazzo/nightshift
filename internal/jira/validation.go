@@ -44,10 +44,41 @@ func ValidateTicket(ctx context.Context, agent agents.Agent, ticket Ticket) (*Va
 
 // compressText strips common filler words/phrases from dynamic content before
 // injection into agent prompts (~40-60% word reduction on typical Jira prose).
-// Safe for natural-language fields; does NOT strip articles to avoid mangling
-// technical phrases or breaking substring checks in tests.
+// Preserves code blocks (fenced with ``` or ~~~), indented lines, and inline backticks.
+// All replacements use spaces as word boundaries to avoid mangling technical terms.
 func compressText(s string) string {
-	// Longer phrases first to prevent partial matches.
+	lines := strings.Split(s, "\n")
+	var result []string
+	var inCodeFence bool
+
+	for _, line := range lines {
+		trimmed := strings.TrimLeft(line, " \t")
+
+		// Toggle code fence (``` or ~~~)
+		if strings.HasPrefix(trimmed, "```") || strings.HasPrefix(trimmed, "~~~") {
+			inCodeFence = !inCodeFence
+			result = append(result, line)
+			continue
+		}
+
+		// Preserve lines inside code fences or indented blocks (likely code)
+		if inCodeFence || (len(line) > 0 && (line[0] == ' ' || line[0] == '\t')) {
+			result = append(result, line)
+			continue
+		}
+
+		// Compress non-code lines
+		compressed := compressLine(line)
+		result = append(result, compressed)
+	}
+
+	return strings.Join(result, "\n")
+}
+
+// compressLine applies filler word removal to a single line.
+// All patterns use word boundaries (trailing spaces) to prevent mangling.
+func compressLine(line string) string {
+	// Ordered replacements: longer phrases first to prevent partial matches.
 	r := strings.NewReplacer(
 		"in order to", "to",
 		"make sure to", "ensure",
@@ -64,13 +95,9 @@ func compressText(s string) string {
 		"essentially ", "",
 		"a lot of ", "many ",
 	)
-	out := r.Replace(s)
-	// Collapse extra whitespace created by deletions (per-field only, preserves newlines).
-	lines := strings.Split(out, "\n")
-	for i, l := range lines {
-		lines[i] = strings.Join(strings.Fields(l), " ")
-	}
-	return strings.Join(lines, "\n")
+	compressed := r.Replace(line)
+	// Collapse extra spaces created by deletions
+	return strings.Join(strings.Fields(compressed), " ")
 }
 
 // buildValidationPrompt constructs the prompt sent to the LLM validator.
@@ -88,9 +115,10 @@ Title: %s
 Description: %s
 Acceptance Criteria: %s
 Comments:
-%sCriteria: CLEAR OBJECTIVE, SUFFICIENT CONTEXT, ACCEPTANCE CRITERIA, SCOPE, NO AMBIGUITY
+%s
+Criteria: CLEAR OBJECTIVE, SUFFICIENT CONTEXT, ACCEPTANCE CRITERIA, SCOPE, NO AMBIGUITY
 
-Respond JSON only (no markdown, no code fences):
+Respond in JSON only (no markdown, no code fences):
 {"valid": bool, "score": 1-10, "issues": [...], "missing": [...], "suggestions": [...]}
 
 Valid if score >= 6 and no critical issues.`,
