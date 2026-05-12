@@ -174,7 +174,7 @@ func TestFetchUsage_creditsStringFloat(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		// balance as quoted string
-		w.Write([]byte(sampleUsageJSON("999.99")))
+		_, _ = w.Write([]byte(sampleUsageJSON("999.99")))
 	}))
 	defer srv.Close()
 
@@ -196,7 +196,7 @@ func TestFetchUsage_creditsStringFloat(t *testing.T) {
 func TestFetchUsage_creditsNumericFloat(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(sampleUsageJSON(500.0)))
+		_, _ = w.Write([]byte(sampleUsageJSON(500.0)))
 	}))
 	defer srv.Close()
 
