@@ -97,7 +97,7 @@ func renderJiraPreviewText(result *jiraPreviewResult, opts jiraPreviewTextOption
 				if t.ValidationMsg != "" {
 					scoreStyle = styles.Warn
 				}
-				fmt.Fprintf(b, "     Validation: %s\n", scoreStyle.Render(fmt.Sprintf("score %d/10", *t.ValidationScore)))
+				fmt.Fprintf(b, "     Validation: %s\n", scoreStyle.Render(fmt.Sprintf("score %.1f/10", *t.ValidationScore)))
 			}
 			if len(t.Dependencies) > 0 {
 				fmt.Fprintf(b, "     Blocked by: %s\n", strings.Join(t.Dependencies, ", "))
