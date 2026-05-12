@@ -26,6 +26,86 @@ func (s *stubAgent) Execute(_ context.Context, opts agents.ExecuteOptions) (*age
 	return &agents.ExecuteResult{Output: s.output}, nil
 }
 
+// ── compressText ──────────────────────────────────────────────────────────
+
+func TestCompressText(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{
+			name:  "phrase: in order to",
+			input: "Do this in order to succeed.",
+			want:  "Do this to succeed.",
+		},
+		{
+			name:  "phrase: make sure to",
+			input: "make sure to run tests.",
+			want:  "ensure run tests.",
+		},
+		{
+			name:  "phrase: please make sure",
+			input: "please make sure all tests pass.",
+			want:  "ensure all tests pass.",
+		},
+		{
+			name:  "phrase: please note that",
+			input: "please note that this is important.",
+			want:  "note: this is important.",
+		},
+		{
+			name:  "word: basically",
+			input: "basically rewrite the function.",
+			want:  "rewrite the function.",
+		},
+		{
+			name:  "word: actually",
+			input: "actually this is wrong.",
+			want:  "this is wrong.",
+		},
+		{
+			name:  "word: just",
+			input: "just run go test.",
+			want:  "run go test.",
+		},
+		{
+			name:  "phrase: a lot of",
+			input: "there are a lot of issues.",
+			want:  "there are many issues.",
+		},
+		{
+			name:  "technical terms preserved",
+			input: "run golangci-lint run ./... and go test ./...",
+			want:  "run golangci-lint run ./... and go test ./...",
+		},
+		{
+			name:  "multi-space collapse per line",
+			input: "you should  fix this",
+			want:  "fix this",
+		},
+		{
+			name:  "multiline preserved",
+			input: "line one\nbasically line two\nline three",
+			want:  "line one\nline two\nline three",
+		},
+		{
+			name:  "empty string",
+			input: "",
+			want:  "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := compressText(tt.input)
+			if got != tt.want {
+				t.Errorf("compressText(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
 // ── parseValidationResponse ────────────────────────────────────────────────
 
 func TestParseValidationResponse(t *testing.T) {
