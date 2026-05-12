@@ -26,14 +26,14 @@ func sampleUsageJSON(creditsBalance interface{}) string {
 		"plan_type": "pro",
 		"rate_limit": map[string]interface{}{
 			"primary_window": map[string]interface{}{
-				"used_percent":          42.5,
-				"reset_at":              time.Now().Add(time.Hour).Format(time.RFC3339),
-				"limit_window_seconds":  18000,
+				"used_percent":         42.5,
+				"reset_at":             time.Now().Add(time.Hour).Unix(),
+				"limit_window_seconds": 18000,
 			},
 			"secondary_window": map[string]interface{}{
-				"used_percent":          10.0,
-				"reset_at":              time.Now().Add(7 * 24 * time.Hour).Format(time.RFC3339),
-				"limit_window_seconds":  604800,
+				"used_percent":         10.0,
+				"reset_at":             time.Now().Add(7 * 24 * time.Hour).Unix(),
+				"limit_window_seconds": 604800,
 			},
 		},
 		"credits": map[string]interface{}{

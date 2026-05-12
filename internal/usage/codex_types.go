@@ -31,8 +31,20 @@ type CodexAPIRateLimit struct {
 // CodexWindow represents a single rate limit window.
 type CodexWindow struct {
 	UsedPercent        float64   `json:"used_percent"`
-	ResetAt            time.Time `json:"reset_at"`
+	ResetAt            UnixTime  `json:"reset_at"`
 	LimitWindowSeconds int64     `json:"limit_window_seconds"`
+}
+
+// UnixTime unmarshals a Unix timestamp integer as time.Time.
+type UnixTime struct{ time.Time }
+
+func (u *UnixTime) UnmarshalJSON(data []byte) error {
+	var ts int64
+	if err := json.Unmarshal(data, &ts); err != nil {
+		return fmt.Errorf("codex reset_at: %w", err)
+	}
+	u.Time = time.Unix(ts, 0)
+	return nil
 }
 
 // CodexCredits holds the credits balance, which the API may encode as float or string.
