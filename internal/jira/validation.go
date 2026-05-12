@@ -37,7 +37,7 @@ func ValidateTicket(ctx context.Context, agent agents.Agent, ticket Ticket) (*Va
 	}
 	vr, err := parseValidationResponse(result.Output)
 	if err != nil {
-		return nil, fmt.Errorf("jira: parse validation response for %s: %w", ticket.Key, err)
+		return nil, fmt.Errorf("jira: parse validation response for %s: %w\nraw output:\n%s", ticket.Key, err, result.Output)
 	}
 	return vr, nil
 }
