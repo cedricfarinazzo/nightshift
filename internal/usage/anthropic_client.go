@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"os/exec"
+	"strings"
 	"time"
 )
 
@@ -18,7 +19,7 @@ const (
 	anthropicBetaHeader     = "oauth-2025-04-20"
 	bodyLimitBytes          = 64 * 1024 // 64KB
 	requestTimeout          = 30 * time.Second
-	versionedUserAgent      = "nightshift/0.3.4"
+	fallbackUserAgent       = "claude-code/2.1.140"
 )
 
 // Sentinel errors for HTTP status mapping.
@@ -74,7 +75,7 @@ func NewAnthropicClient(opts ...Option) *AnthropicClient {
 	c := &AnthropicClient{
 		baseURL:    defaultAnthropicBaseURL,
 		httpClient: &http.Client{Timeout: requestTimeout},
-		userAgent:  versionedUserAgent,
+		userAgent:  claudeCodeUserAgent(),
 	}
 	c.store = NewTokenDiscovery(&ExecKeychainRunner{})
 
@@ -166,6 +167,24 @@ func parseQuotaResponse(body []byte) (AnthropicQuotaResponse, error) {
 	}
 
 	return result, nil
+}
+
+// claudeCodeUserAgent returns "claude-code/<version>" using the installed claude
+// binary version, falling back to a hardcoded string. Anthropic rate-limits
+// requests with unknown User-Agent values more aggressively.
+func claudeCodeUserAgent() string {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "claude", "--version").Output()
+	if err != nil {
+		return fallbackUserAgent
+	}
+	// output: "2.1.140 (Claude Code)" — first token is the version
+	fields := strings.Fields(strings.TrimSpace(string(out)))
+	if len(fields) == 0 {
+		return fallbackUserAgent
+	}
+	return "claude-code/" + fields[0]
 }
 
 func truncateBody(b []byte) string {
