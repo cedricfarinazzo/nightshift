@@ -303,9 +303,7 @@ func buildReworkPrompt(ticket Ticket, review *PRReviewState, repo RepoWorkspace)
 		b.WriteString("\nFix all CI failures before push.\n\n")
 	}
 	if review.HasConflict {
-		b.WriteString("### Merge Conflict\n\n")
-		b.WriteString("This PR has a merge conflict with the base branch (main).\n")
-		b.WriteString("Resolve all conflicts by rebasing or merging main into this branch before push.\n\n")
+		b.WriteString("### Merge Conflict\nResolve conflicts with base branch before push.\n\n")
 	}
 	b.WriteString("### Instructions\n")
 	b.WriteString("Address ALL reviewer feedback. For each comment:\n")
