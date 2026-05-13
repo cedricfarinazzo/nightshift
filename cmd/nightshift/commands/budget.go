@@ -136,7 +136,7 @@ func runBudget(opts budgetOptions) error {
 	fmt.Println(strings.Repeat("=", len(header)))
 	fmt.Println()
 
-	snapCollector := snapshots.NewCollector(database, nil, nil, nil, weekStartDayFromConfig(cfg))
+	snapCollector := snapshots.NewCollector(database, weekStartDayFromConfig(cfg))
 
 	for _, provName := range providerList {
 		if err := printProviderBudgetActive(cfg, provName, mgr, snapCollector, codex, opts); err != nil {
@@ -312,7 +312,7 @@ func runBudgetHistory(filterProvider string, n int) error {
 		return nil
 	}
 
-	collector := snapshots.NewCollector(database, nil, nil, nil, weekStartDayFromConfig(cfg))
+	collector := snapshots.NewCollector(database, weekStartDayFromConfig(cfg))
 
 	for _, provider := range providerList {
 		history, err := collector.GetLatest(provider, n)

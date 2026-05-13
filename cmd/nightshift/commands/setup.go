@@ -2036,9 +2036,6 @@ func runSnapshot(cfg *config.Config) (string, error) {
 
 	collector := snapshots.NewCollectorWithAPIs(
 		database,
-		providers.NewClaudeWithPath(cfg.ExpandedProviderPath("claude")),
-		providers.NewCodexWithPath(cfg.ExpandedProviderPath("codex")),
-		providers.NewCopilotWithPath(cfg.ExpandedProviderPath("copilot")),
 		weekStartDayFromConfig(cfg),
 		anthropicAPI,
 		codexAPI,

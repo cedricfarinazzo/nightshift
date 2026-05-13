@@ -7,49 +7,10 @@ import (
 	"net/http/httptest"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/marcus/nightshift/internal/config"
 	"github.com/marcus/nightshift/internal/usage"
 )
-
-// --- fake passive providers ---
-
-type fakeClaudeProvider struct {
-	pct float64
-	err error
-	src string
-}
-
-func (f *fakeClaudeProvider) Name() string { return "claude" }
-func (f *fakeClaudeProvider) GetUsedPercent(_ string, _ int64) (float64, error) {
-	return f.pct, f.err
-}
-func (f *fakeClaudeProvider) LastUsedPercentSource() string { return f.src }
-
-type fakeCodexProvider struct {
-	pct   float64
-	err   error
-	reset time.Time
-}
-
-func (f *fakeCodexProvider) Name() string { return "codex" }
-func (f *fakeCodexProvider) GetUsedPercent(_ string, _ int64) (float64, error) {
-	return f.pct, f.err
-}
-func (f *fakeCodexProvider) GetResetTime(_ string) (time.Time, error) { return f.reset, nil }
-
-type fakeCopilotProvider struct {
-	pct   float64
-	err   error
-	reset time.Time
-}
-
-func (f *fakeCopilotProvider) Name() string { return "copilot" }
-func (f *fakeCopilotProvider) GetUsedPercent(_ string, _ int64) (float64, error) {
-	return f.pct, f.err
-}
-func (f *fakeCopilotProvider) GetResetTime(_ string) (time.Time, error) { return f.reset, nil }
 
 // --- helpers ---
 

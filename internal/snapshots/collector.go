@@ -14,24 +14,6 @@ import (
 	"github.com/marcus/nightshift/internal/usage"
 )
 
-// ClaudeUsage defines local usage access for Claude.
-type ClaudeUsage interface {
-	GetWeeklyUsage() (int64, error)
-	GetTodayUsage() (int64, error)
-}
-
-// CodexUsage defines local usage access for Codex.
-type CodexUsage interface {
-	GetTodayTokens() (int64, error)
-	GetWeeklyTokens() (int64, error)
-}
-
-// CopilotUsage defines local usage access for Copilot.
-type CopilotUsage interface {
-	GetTodayTokens() (int64, error)
-	GetWeeklyTokens() (int64, error)
-}
-
 // AnthropicAPIClient fetches usage quotas from the Anthropic API.
 type AnthropicAPIClient interface {
 	FetchQuotas(ctx context.Context) (usage.AnthropicQuotaResponse, error)
@@ -76,9 +58,6 @@ type HourlyAverage struct {
 // Collector gathers and stores usage snapshots.
 type Collector struct {
 	db           *db.DB
-	claude       ClaudeUsage
-	codex        CodexUsage
-	copilot      CopilotUsage
 	weekStartDay time.Weekday
 	anthropicAPI AnthropicAPIClient
 	codexAPI     CodexAPIClient
@@ -87,16 +66,13 @@ type Collector struct {
 
 // NewCollector creates a snapshot collector. API clients are optional; when nil,
 // TakeSnapshot will error for that provider. For history/query-only use, all clients may be nil.
-func NewCollector(database *db.DB, claude ClaudeUsage, codex CodexUsage, copilot CopilotUsage, weekStartDay time.Weekday) *Collector {
-	return NewCollectorWithAPIs(database, claude, codex, copilot, weekStartDay, nil, nil, nil)
+func NewCollector(database *db.DB, weekStartDay time.Weekday) *Collector {
+	return NewCollectorWithAPIs(database, weekStartDay, nil, nil, nil)
 }
 
 // NewCollectorWithAPIs creates a snapshot collector with API clients for active tracking.
 func NewCollectorWithAPIs(
 	database *db.DB,
-	claude ClaudeUsage,
-	codex CodexUsage,
-	copilot CopilotUsage,
 	weekStartDay time.Weekday,
 	anthropicAPI AnthropicAPIClient,
 	codexAPI CodexAPIClient,
@@ -107,9 +83,6 @@ func NewCollectorWithAPIs(
 	}
 	return &Collector{
 		db:           database,
-		claude:       claude,
-		codex:        codex,
-		copilot:      copilot,
 		weekStartDay: weekStartDay,
 		anthropicAPI: anthropicAPI,
 		codexAPI:     codexAPI,
@@ -239,12 +212,7 @@ func (c *Collector) collectClaudeFromAPI(ctx context.Context) (localWeekly, loca
 		}
 	}
 
-	if c.claude != nil {
-		localWeekly, _ = c.claude.GetWeeklyUsage()
-		localDaily, _ = c.claude.GetTodayUsage()
-	}
-
-	return localWeekly, localDaily, scrapedPct, sessionResetTime, weeklyResetTime, "api", nil
+	return 0, 0, scrapedPct, sessionResetTime, weeklyResetTime, "api", nil
 }
 
 // collectCodexFromAPI fetches Codex usage from the OpenAI API.
@@ -264,12 +232,7 @@ func (c *Collector) collectCodexFromAPI(ctx context.Context) (localWeekly, local
 		}
 	}
 
-	if c.codex != nil {
-		localWeekly, _ = c.codex.GetWeeklyTokens()
-		localDaily, _ = c.codex.GetTodayTokens()
-	}
-
-	return localWeekly, localDaily, scrapedPct, sessionResetTime, weeklyResetTime, "api", nil
+	return 0, 0, scrapedPct, sessionResetTime, weeklyResetTime, "api", nil
 }
 
 // collectCopilotFromAPI fetches Copilot usage from the GitHub API.
@@ -291,14 +254,7 @@ func (c *Collector) collectCopilotFromAPI(ctx context.Context) (localWeekly, loc
 		sessionResetTime = resp.QuotaResetDate
 	}
 
-	// Attempt to populate local usage if available (for budget inference).
-	// Note: Copilot provider may not support local token tracking like Claude/Codex.
-	if c.copilot != nil {
-		localWeekly, _ = c.copilot.GetWeeklyTokens()
-		localDaily, _ = c.copilot.GetTodayTokens()
-	}
-
-	return localWeekly, localDaily, scrapedPct, sessionResetTime, weeklyResetTime, "api", nil
+	return 0, 0, scrapedPct, sessionResetTime, weeklyResetTime, "api", nil
 }
 
 // GetLatest returns the latest snapshots for a provider.

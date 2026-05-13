@@ -277,7 +277,7 @@ func checkBudget(cfg *config.Config, database *db.DB, claudeProvider *providers.
 }
 
 func checkSnapshots(cfg *config.Config, database *db.DB, add func(string, checkStatus, string)) {
-	collector := snapshots.NewCollector(database, nil, nil, nil, weekStartDayFromConfig(cfg))
+	collector := snapshots.NewCollector(database, weekStartDayFromConfig(cfg))
 
 	for _, provider := range []string{"claude", "codex", "copilot"} {
 		if provider == "claude" && !cfg.Providers.Claude.Enabled {

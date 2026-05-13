@@ -560,9 +560,6 @@ func takeSnapshot(ctx context.Context, cfg *config.Config, database *db.DB, log 
 
 	collector := snapshots.NewCollectorWithAPIs(
 		database,
-		providers.NewClaudeWithPath(cfg.ExpandedProviderPath("claude")),
-		providers.NewCodexWithPath(cfg.ExpandedProviderPath("codex")),
-		providers.NewCopilotWithPath(cfg.ExpandedProviderPath("copilot")),
 		weekStartDayFromConfig(cfg),
 		anthropicAPI,
 		codexAPI,
@@ -604,7 +601,7 @@ func takeSnapshot(ctx context.Context, cfg *config.Config, database *db.DB, log 
 }
 
 func pruneSnapshots(ctx context.Context, cfg *config.Config, database *db.DB, log *logging.Logger) {
-	collector := snapshots.NewCollector(database, nil, nil, nil, weekStartDayFromConfig(cfg))
+	collector := snapshots.NewCollector(database, weekStartDayFromConfig(cfg))
 	deleted, err := collector.Prune(cfg.Budget.SnapshotRetentionDays)
 	if err != nil {
 		log.Warnf("snapshot prune: %v", err)

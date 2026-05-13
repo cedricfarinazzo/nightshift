@@ -11,24 +11,6 @@ import (
 	"github.com/marcus/nightshift/internal/usage"
 )
 
-type fakeClaude struct {
-	weekly int64
-	daily  int64
-	err    error
-}
-
-func (f fakeClaude) GetWeeklyUsage() (int64, error) { return f.weekly, f.err }
-func (f fakeClaude) GetTodayUsage() (int64, error)  { return f.daily, f.err }
-
-type fakeCodex struct {
-	dailyTokens  int64
-	weeklyTokens int64
-	err          error
-}
-
-func (f fakeCodex) GetTodayTokens() (int64, error)  { return f.dailyTokens, f.err }
-func (f fakeCodex) GetWeeklyTokens() (int64, error) { return f.weeklyTokens, f.err }
-
 // --- API client stubs ---
 
 type fakeAnthropicAPI struct {
@@ -79,8 +61,7 @@ func TestActiveModeClaudeAPISuccess(t *testing.T) {
 		"seven_day": {Utilization: 0.42, ResetsAt: resetAt, IsEnabled: true},
 		"five_hour": {Utilization: 0.10, ResetsAt: resetAt, IsEnabled: true},
 	}
-	collector := NewCollectorWithAPIs(database, fakeClaude{weekly: 500, daily: 80}, nil, nil, time.Monday,
-		fakeAnthropicAPI{resp: apiResp}, nil, nil)
+	collector := NewCollectorWithAPIs(database, time.Monday, fakeAnthropicAPI{resp: apiResp}, nil, nil)
 	snap, err := collector.TakeSnapshot(context.Background(), "claude")
 	if err != nil {
 		t.Fatalf("take snapshot: %v", err)
@@ -91,18 +72,11 @@ func TestActiveModeClaudeAPISuccess(t *testing.T) {
 	if snap.ScrapedPct == nil || *snap.ScrapedPct < 41.9 || *snap.ScrapedPct > 42.1 {
 		t.Fatalf("scraped pct = %v, want ~42", snap.ScrapedPct)
 	}
-	if snap.LocalTokens != 500 {
-		t.Fatalf("local tokens = %d, want 500", snap.LocalTokens)
-	}
-	if snap.InferredBudget == nil {
-		t.Fatalf("inferred budget = nil, want computed value")
-	}
 }
 
 func TestActiveModeClaudeAPIFail_ReturnsError(t *testing.T) {
 	database := openTestDB(t)
-	collector := NewCollectorWithAPIs(database, nil, nil, nil, time.Monday,
-		fakeAnthropicAPI{err: errors.New("api down")}, nil, nil)
+	collector := NewCollectorWithAPIs(database, time.Monday, fakeAnthropicAPI{err: errors.New("api down")}, nil, nil)
 	_, err := collector.TakeSnapshot(context.Background(), "claude")
 	if err == nil {
 		t.Fatal("expected error on API failure")
@@ -111,7 +85,7 @@ func TestActiveModeClaudeAPIFail_ReturnsError(t *testing.T) {
 
 func TestActiveModeClaudeNilClient_ReturnsError(t *testing.T) {
 	database := openTestDB(t)
-	collector := NewCollector(database, nil, nil, nil, time.Monday)
+	collector := NewCollector(database, time.Monday)
 	_, err := collector.TakeSnapshot(context.Background(), "claude")
 	if err == nil {
 		t.Fatal("expected error when API client is nil")
@@ -129,8 +103,7 @@ func TestActiveModeCodexAPISuccess(t *testing.T) {
 			},
 		},
 	}
-	collector := NewCollectorWithAPIs(database, nil, fakeCodex{weeklyTokens: 1000, dailyTokens: 100}, nil, time.Monday,
-		nil, fakeCodexAPI{resp: apiResp}, nil)
+	collector := NewCollectorWithAPIs(database, time.Monday, nil, fakeCodexAPI{resp: apiResp}, nil)
 	snap, err := collector.TakeSnapshot(context.Background(), "codex")
 	if err != nil {
 		t.Fatalf("take snapshot: %v", err)
@@ -141,18 +114,11 @@ func TestActiveModeCodexAPISuccess(t *testing.T) {
 	if snap.ScrapedPct == nil || *snap.ScrapedPct != 55.0 {
 		t.Fatalf("scraped pct = %v, want 55", snap.ScrapedPct)
 	}
-	if snap.LocalTokens != 1000 {
-		t.Fatalf("local tokens = %d, want 1000", snap.LocalTokens)
-	}
-	if snap.InferredBudget == nil {
-		t.Fatalf("inferred budget = nil, want computed value")
-	}
 }
 
 func TestActiveModeCodexAPIFail_ReturnsError(t *testing.T) {
 	database := openTestDB(t)
-	collector := NewCollectorWithAPIs(database, nil, nil, nil, time.Monday,
-		nil, fakeCodexAPI{err: errors.New("api down")}, nil)
+	collector := NewCollectorWithAPIs(database, time.Monday, nil, fakeCodexAPI{err: errors.New("api down")}, nil)
 	_, err := collector.TakeSnapshot(context.Background(), "codex")
 	if err == nil {
 		t.Fatal("expected error on API failure")
@@ -167,8 +133,7 @@ func TestActiveModeCopilotAPISuccess(t *testing.T) {
 			"premium_interactions": {PercentRemaining: 30.0, Unlimited: false},
 		},
 	}
-	collector := NewCollectorWithAPIs(database, nil, nil, nil, time.Monday,
-		nil, nil, fakeCopilotAPI{resp: apiResp})
+	collector := NewCollectorWithAPIs(database, time.Monday, nil, nil, fakeCopilotAPI{resp: apiResp})
 	snap, err := collector.TakeSnapshot(context.Background(), "copilot")
 	if err != nil {
 		t.Fatalf("take snapshot: %v", err)
@@ -186,8 +151,7 @@ func TestActiveModeCopilotAPISuccess(t *testing.T) {
 
 func TestActiveModeCopilotAPIFail_ReturnsError(t *testing.T) {
 	database := openTestDB(t)
-	collector := NewCollectorWithAPIs(database, nil, nil, nil, time.Monday,
-		nil, nil, fakeCopilotAPI{err: errors.New("api down")})
+	collector := NewCollectorWithAPIs(database, time.Monday, nil, nil, fakeCopilotAPI{err: errors.New("api down")})
 	_, err := collector.TakeSnapshot(context.Background(), "copilot")
 	if err == nil {
 		t.Fatal("expected error on API failure")
@@ -196,8 +160,7 @@ func TestActiveModeCopilotAPIFail_ReturnsError(t *testing.T) {
 
 func TestActiveModeCopilotNilResponse_ReturnsError(t *testing.T) {
 	database := openTestDB(t)
-	collector := NewCollectorWithAPIs(database, nil, nil, nil, time.Monday,
-		nil, nil, fakeCopilotAPI{resp: nil})
+	collector := NewCollectorWithAPIs(database, time.Monday, nil, nil, fakeCopilotAPI{resp: nil})
 	_, err := collector.TakeSnapshot(context.Background(), "copilot")
 	if err == nil {
 		t.Fatal("expected error when copilot API returns nil response")
@@ -224,8 +187,7 @@ func TestSourcePersistedAndReadBack(t *testing.T) {
 	apiResp := usage.AnthropicQuotaResponse{
 		"seven_day": {Utilization: 0.30, IsEnabled: true},
 	}
-	collector := NewCollectorWithAPIs(database, nil, nil, nil, time.Monday,
-		fakeAnthropicAPI{resp: apiResp}, nil, nil)
+	collector := NewCollectorWithAPIs(database, time.Monday, fakeAnthropicAPI{resp: apiResp}, nil, nil)
 	_, err := collector.TakeSnapshot(context.Background(), "claude")
 	if err != nil {
 		t.Fatalf("take snapshot: %v", err)
@@ -253,7 +215,7 @@ func TestPruneSnapshots(t *testing.T) {
 	}
 	defer func() { _ = database.Close() }()
 
-	collector := NewCollector(database, nil, nil, nil, time.Monday)
+	collector := NewCollector(database, time.Monday)
 
 	oldTime := time.Now().AddDate(0, 0, -3)
 	weekStart := startOfWeek(oldTime, time.Monday)
