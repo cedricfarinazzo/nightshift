@@ -50,7 +50,16 @@ var migrations = []Migration{
 		Description: "add cost_snapshots table for monetary cost tracking",
 		SQL:         migration007SQL,
 	},
+	{
+		Version:     8,
+		Description: "add source column to snapshots",
+		SQL:         migration008SQL,
+	},
 }
+
+const migration008SQL = `
+ALTER TABLE snapshots ADD COLUMN source TEXT NOT NULL DEFAULT 'file';
+`
 
 const migration002SQL = `
 ALTER TABLE snapshots ADD COLUMN session_reset_time TEXT;
