@@ -358,8 +358,8 @@ func formatCompactDuration(d time.Duration) string {
 }
 
 func maxFloat(a, b float64) float64 {
-	if a > b {
-		return a
+	if b > a {
+		return b
 	}
-	return b
+	return a
 }
