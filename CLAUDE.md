@@ -172,8 +172,8 @@ docs/                   # Internal developer docs (NOT user-facing)
     run-lifecycle.md           # End-to-end run lifecycle (daemon → scheduler → orchestrator → agent)
     adding-tasks.md            # How to add a new built-in or custom task type
     tasks-internals.md         # CostTier, RiskLevel, TaskCategory, selector scoring formula
-    budget-internals.md        # Budget modes, reserve, calibration, Manager interfaces
-    state-and-snapshots.md     # RunRecord, staleness, Snapshot, Calibrator algorithm
+    budget-internals.md        # Budget modes, reserve, active tracking, Manager interfaces
+    state-and-snapshots.md     # RunRecord, staleness, Snapshot, snapshot retention
     scheduling.md              # Cron vs interval config, daemon mode, time windows
     orchestrator-internals.md  # Task orchestrator state machine, Jira phase lifecycle, ghExec
     jira-pipeline.md           # Jira autonomous pipeline deep dive

@@ -569,7 +569,7 @@ func takeSnapshot(ctx context.Context, cfg *config.Config, database *db.DB, log 
 		copilotAPI,
 	)
 
-	if cfg.Providers.Claude.Enabled && anthropicAPI != nil {
+	if cfg.Providers.Claude.Enabled {
 		snapshot, err := collector.TakeSnapshot(ctx, "claude")
 		if err != nil {
 			log.Warnf("snapshot claude: %v", err)
@@ -580,7 +580,7 @@ func takeSnapshot(ctx context.Context, cfg *config.Config, database *db.DB, log 
 		}
 	}
 
-	if cfg.Providers.Codex.Enabled && codexAPI != nil {
+	if cfg.Providers.Codex.Enabled {
 		snapshot, err := collector.TakeSnapshot(ctx, "codex")
 		if err != nil {
 			log.Warnf("snapshot codex: %v", err)
@@ -591,7 +591,7 @@ func takeSnapshot(ctx context.Context, cfg *config.Config, database *db.DB, log 
 		}
 	}
 
-	if cfg.Providers.Copilot.Enabled && copilotAPI != nil {
+	if cfg.Providers.Copilot.Enabled {
 		snapshot, err := collector.TakeSnapshot(ctx, "copilot")
 		if err != nil {
 			log.Warnf("snapshot copilot: %v", err)

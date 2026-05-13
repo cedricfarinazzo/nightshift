@@ -259,9 +259,9 @@ func (p *copilotActiveProvider) setSource(s string) {
 	p.mu.Unlock()
 }
 
-// NewManagerWithTracking builds a Manager respecting cfg.Budget.Tracking.
-// For "passive" mode it delegates to NewManager with no change.
-// Always uses active (API-first) tracking with passive fallback on error.
+// NewManagerWithTracking builds a Manager using active (API-first) tracking.
+// Attempts to create API clients for Claude, Codex, and Copilot providers.
+// Falls back to passive fallback providers when API clients fail to initialize.
 // Returns the same *Manager type so call sites require no changes.
 func NewManagerWithTracking(
 	cfg *config.Config,

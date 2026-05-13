@@ -2056,7 +2056,7 @@ func runSnapshot(cfg *config.Config) (string, error) {
 
 	var lines []string
 	ctx := context.Background()
-	if cfg.Providers.Claude.Enabled && anthropicAPI != nil {
+	if cfg.Providers.Claude.Enabled {
 		snapshot, err := collector.TakeSnapshot(ctx, "claude")
 		if err != nil {
 			lines = append(lines, fmt.Sprintf("claude: error: %v", err))
@@ -2064,7 +2064,7 @@ func runSnapshot(cfg *config.Config) (string, error) {
 			lines = append(lines, formatSnapshotLine(snapshot))
 		}
 	}
-	if cfg.Providers.Codex.Enabled && codexAPI != nil {
+	if cfg.Providers.Codex.Enabled {
 		snapshot, err := collector.TakeSnapshot(ctx, "codex")
 		if err != nil {
 			lines = append(lines, fmt.Sprintf("codex: error: %v", err))
@@ -2072,7 +2072,7 @@ func runSnapshot(cfg *config.Config) (string, error) {
 			lines = append(lines, formatSnapshotLine(snapshot))
 		}
 	}
-	if cfg.Providers.Copilot.Enabled && copilotAPI != nil {
+	if cfg.Providers.Copilot.Enabled {
 		snapshot, err := collector.TakeSnapshot(ctx, "copilot")
 		if err != nil {
 			lines = append(lines, fmt.Sprintf("copilot: error: %v", err))

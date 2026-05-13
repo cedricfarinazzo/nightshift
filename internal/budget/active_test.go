@@ -53,7 +53,7 @@ func (f *fakeCopilotProvider) GetResetTime(_ string) (time.Time, error) { return
 
 // --- helpers ---
 
-func makeConfig(_ string) *config.Config {
+func makeConfig() *config.Config {
 	return &config.Config{
 		Budget: config.BudgetConfig{
 			Mode:         "weekly",
@@ -85,10 +85,7 @@ func anthropicErrorServer() *httptest.Server {
 	}))
 }
 
-// --- passive mode ---
-
-
-// --- active mode: anthropic adapter ---
+// --- active mode: anthropic provider ---
 
 func TestAnthropicActiveProvider_APISuccess(t *testing.T) {
 	srv := anthropicTestServer(0.6) // 60% utilization
@@ -234,7 +231,7 @@ func TestHybridMode_ConstructsActiveWrappersViaNewManagerWithTracking(t *testing
 	passiveCodex := &fakeCodexProvider{pct: 50.0}
 	passiveCopilot := &fakeCopilotProvider{pct: 30.0}
 
-	cfg := makeConfig("hybrid")
+	cfg := makeConfig()
 	// NewManagerWithTracking creates AnthropicClient and wraps all providers.
 	// Construction succeeds even without real credentials (errors occur at API call time).
 	mgr := NewManagerWithTracking(cfg, passiveClaude, passiveCodex, passiveCopilot)
@@ -270,7 +267,7 @@ func TestHybridMode_MixedCredentials(t *testing.T) {
 	claudeP := &anthropicActiveProvider{client: apiClient, passive: passiveClaude}
 	codexP := &codexActiveProvider{client: nil, passive: passiveCodex}
 
-	cfg := makeConfig("hybrid")
+	cfg := makeConfig()
 	mgr := NewManager(cfg, claudeP, codexP, nil)
 
 	pct, err := mgr.GetUsedPercent("claude")

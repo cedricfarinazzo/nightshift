@@ -291,7 +291,14 @@ func (c *Collector) collectCopilotFromAPI(ctx context.Context) (localWeekly, loc
 		sessionResetTime = resp.QuotaResetDate
 	}
 
-	return 0, 0, scrapedPct, sessionResetTime, weeklyResetTime, "api", nil
+	// Attempt to populate local usage if available (for budget inference).
+	// Note: Copilot provider may not support local token tracking like Claude/Codex.
+	if c.copilot != nil {
+		localWeekly, _ = c.copilot.GetWeeklyTokens()
+		localDaily, _ = c.copilot.GetTodayTokens()
+	}
+
+	return localWeekly, localDaily, scrapedPct, sessionResetTime, weeklyResetTime, "api", nil
 }
 
 // GetLatest returns the latest snapshots for a provider.

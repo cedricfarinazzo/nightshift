@@ -27,11 +27,9 @@ var budgetCmd = &cobra.Command{
 Shows spending across all providers or a specific provider.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		provider, _ := cmd.Flags().GetString("provider")
-		live, _ := cmd.Flags().GetBool("live")
 		jsonOut, _ := cmd.Flags().GetBool("json")
 		return runBudget(budgetOptions{
 			provider: provider,
-			live:     live,
 			jsonOut:  jsonOut,
 		})
 	},
@@ -50,7 +48,6 @@ var budgetHistoryCmd = &cobra.Command{
 
 func init() {
 	budgetCmd.Flags().StringP("provider", "p", "", "Show specific provider status (claude, codex, copilot)")
-	budgetCmd.Flags().BoolP("live", "l", false, "Force fresh API fetch (bypass cache)")
 	budgetCmd.Flags().Bool("json", false, "Output JSON for scripting")
 	rootCmd.AddCommand(budgetCmd)
 
@@ -61,7 +58,6 @@ func init() {
 
 type budgetOptions struct {
 	provider string
-	live     bool
 	jsonOut  bool
 }
 
@@ -127,7 +123,7 @@ func runBudget(opts budgetOptions) error {
 	}
 
 	if opts.jsonOut {
-		return printBudgetJSON(cfg, providerList, mgr, opts.live)
+		return printBudgetJSON(cfg, providerList, mgr)
 	}
 
 	mode := cfg.Budget.Mode
@@ -223,7 +219,7 @@ func printCopilotPlan(ctx context.Context) {
 	// Silently skip if unavailable
 }
 
-func printBudgetJSON(cfg *config.Config, providerList []string, mgr *budget.Manager, live bool) error {
+func printBudgetJSON(cfg *config.Config, providerList []string, mgr *budget.Manager) error {
 	ctx := context.Background()
 	now := time.Now()
 
