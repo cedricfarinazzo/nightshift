@@ -163,7 +163,7 @@ func printProviderBudgetActive(
 
 	pu := fetchProviderUsageFn(ctx, provName)
 
-	result, passiveErr := mgr.CalculateAllowance(provName)
+	result, allowanceErr := mgr.CalculateAllowance(provName)
 
 	srcLabel := strings.ToUpper(pu.Source)
 	if pu.Source == "none" || pu.Source == "" {
@@ -187,7 +187,7 @@ func printProviderBudgetActive(
 			}
 			fmt.Printf("  %-8s %s %4s%s\n", label, bar, pct, resetStr)
 		}
-	} else if passiveErr == nil {
+	} else if allowanceErr == nil {
 		bar := unicodeProgressBar(result.UsedPercent, 25)
 		pct := fmt.Sprintf("%.0f%%", result.UsedPercent)
 		resetStr := ""

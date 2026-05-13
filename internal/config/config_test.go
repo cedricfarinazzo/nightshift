@@ -158,16 +158,11 @@ func TestGetProviderBudget(t *testing.T) {
 func TestNormalizeBudgetConfig(t *testing.T) {
 	cfg := &Config{
 		Budget: BudgetConfig{
-			BillingMode:      "api",
-			CalibrateEnabled: true,
+			BillingMode: "api",
 		},
 	}
-
+	// normalizeBudgetConfig must not panic with api billing mode.
 	normalizeBudgetConfig(cfg)
-
-	if cfg.Budget.CalibrateEnabled {
-		t.Errorf("expected CalibrateEnabled=false for api billing mode")
-	}
 }
 
 func TestIsTaskEnabled(t *testing.T) {

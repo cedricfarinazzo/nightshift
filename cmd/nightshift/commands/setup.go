@@ -1274,10 +1274,8 @@ func (m *setupModel) budgetFieldValue() string {
 	case 3:
 		return m.cfg.Budget.BillingMode
 	case 4:
-		return strconv.FormatBool(m.cfg.Budget.CalibrateEnabled)
-	case 5:
 		return m.cfg.Budget.SnapshotInterval
-	case 6:
+	case 5:
 		return m.cfg.Budget.WeekStartDay
 	default:
 		return ""
@@ -1310,17 +1308,11 @@ func (m *setupModel) applyBudgetEdit() error {
 		}
 		m.cfg.Budget.BillingMode = value
 	case 4:
-		v, err := strconv.ParseBool(value)
-		if err != nil {
-			return fmt.Errorf("calibrate_enabled must be true or false")
-		}
-		m.cfg.Budget.CalibrateEnabled = v
-	case 5:
 		if _, err := time.ParseDuration(value); err != nil {
 			return fmt.Errorf("snapshot_interval must be duration (e.g., 30m)")
 		}
 		m.cfg.Budget.SnapshotInterval = value
-	case 6:
+	case 5:
 		if value != "monday" && value != "sunday" {
 			return fmt.Errorf("week_start_day must be monday or sunday")
 		}
@@ -1801,7 +1793,6 @@ func renderBudgetFields(b *strings.Builder, m *setupModel) {
 		fmt.Sprintf("Max percent: %d", m.cfg.Budget.MaxPercent),
 		fmt.Sprintf("Reserve percent: %d", m.cfg.Budget.ReservePercent),
 		fmt.Sprintf("Billing mode: %s", m.cfg.Budget.BillingMode),
-		fmt.Sprintf("Calibrate enabled: %t", m.cfg.Budget.CalibrateEnabled),
 		fmt.Sprintf("Snapshot interval: %s", m.cfg.Budget.SnapshotInterval),
 		fmt.Sprintf("Week start day: %s", m.cfg.Budget.WeekStartDay),
 	}
@@ -2310,7 +2301,6 @@ func writeGlobalConfigToPath(cfg *config.Config, configPath string) error {
 	v.Set("budget.reserve_percent", cfg.Budget.ReservePercent)
 	v.Set("budget.weekly_tokens", cfg.Budget.WeeklyTokens)
 	v.Set("budget.billing_mode", cfg.Budget.BillingMode)
-	v.Set("budget.calibrate_enabled", cfg.Budget.CalibrateEnabled)
 	v.Set("budget.snapshot_interval", cfg.Budget.SnapshotInterval)
 	v.Set("budget.snapshot_retention_days", cfg.Budget.SnapshotRetentionDays)
 	v.Set("budget.week_start_day", cfg.Budget.WeekStartDay)

@@ -54,7 +54,6 @@ type BudgetConfig struct {
 	WeeklyTokens          int            `json:"weekly_tokens" yaml:"weekly_tokens" mapstructure:"weekly_tokens"`           // Fallback weekly budget
 	PerProvider           map[string]int `json:"per_provider" yaml:"per_provider" mapstructure:"per_provider"`            // Per-provider overrides
 	BillingMode           string         `json:"billing_mode" yaml:"billing_mode" mapstructure:"billing_mode"`            // subscription | api
-	CalibrateEnabled      bool           `json:"calibrate_enabled" yaml:"calibrate_enabled" mapstructure:"calibrate_enabled"`       // Enable budget calibration
 	SnapshotInterval      string         `json:"snapshot_interval" yaml:"snapshot_interval" mapstructure:"snapshot_interval"`       // Interval for snapshots
 	SnapshotRetentionDays int            `json:"snapshot_retention_days" yaml:"snapshot_retention_days" mapstructure:"snapshot_retention_days"` // Snapshot retention in days
 	WeekStartDay          string         `json:"week_start_day" yaml:"week_start_day" mapstructure:"week_start_day"`          // monday | sunday
@@ -253,7 +252,6 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("budget.weekly_tokens", DefaultWeeklyTokens)
 	v.SetDefault("budget.aggressive_end_of_week", false)
 	v.SetDefault("budget.billing_mode", DefaultBillingMode)
-	v.SetDefault("budget.calibrate_enabled", true)
 	v.SetDefault("budget.snapshot_interval", DefaultSnapshotInterval)
 	v.SetDefault("budget.snapshot_retention_days", DefaultSnapshotRetention)
 	v.SetDefault("budget.week_start_day", DefaultWeekStartDay)
@@ -508,9 +506,6 @@ func validateCustomTasks(tasks []CustomTaskConfig) error {
 func normalizeBudgetConfig(cfg *Config) {
 	if cfg == nil {
 		return
-	}
-	if strings.EqualFold(cfg.Budget.BillingMode, "api") {
-		cfg.Budget.CalibrateEnabled = false
 	}
 }
 

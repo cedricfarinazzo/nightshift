@@ -29,12 +29,11 @@ type ProviderUsage struct {
 	FetchedAt time.Time
 }
 
-// anthropicActiveProvider wraps AnthropicClient and falls back to a passive provider.
+// anthropicActiveProvider fetches usage from the Anthropic API.
 type anthropicActiveProvider struct {
-	client  *usage.AnthropicClient
-	passive ClaudeUsageProvider
-	mu      sync.Mutex
-	src     string
+	client *usage.AnthropicClient
+	mu     sync.Mutex
+	src    string
 }
 
 func (p *anthropicActiveProvider) Name() string { return "claude" }
@@ -49,20 +48,11 @@ func (p *anthropicActiveProvider) GetUsedPercent(mode string, weeklyBudget int64
 				log.Debug().Str("provider", "claude").Str("source", "api").Float64("used_pct", pct).Msg("budget: usage from api")
 				return pct, nil
 			}
-			// seven_day key absent — fall through to passive
 		} else {
-			log.Warn().Err(err).Str("provider", "claude").Msg("budget: api fetch failed, falling back to file")
+			log.Warn().Err(err).Str("provider", "claude").Msg("budget: api fetch failed")
 		}
 	}
-	if p.passive != nil {
-		pct, err := p.passive.GetUsedPercent(mode, weeklyBudget)
-		if err == nil {
-			p.setSource("file")
-			log.Debug().Str("provider", "claude").Str("source", "file").Float64("used_pct", pct).Msg("budget: usage from file")
-		}
-		return pct, err
-	}
-	p.setSource("file")
+	p.setSource("none")
 	return 0, nil
 }
 
@@ -78,17 +68,16 @@ func (p *anthropicActiveProvider) setSource(s string) {
 	p.mu.Unlock()
 }
 
-// codexActiveProvider wraps CodexClient and falls back to a passive provider.
+// codexActiveProvider fetches usage from the Codex/OpenAI API.
 type codexActiveProvider struct {
-	client  *usage.CodexClient
-	passive CodexUsageProvider
-	mu      sync.Mutex
-	src     string
+	client *usage.CodexClient
+	mu     sync.Mutex
+	src    string
 	// Cache last FetchUsage response to avoid duplicate API calls
 	// when both GetUsedPercent and GetResetTime are called for the same check.
-	cachedResp  *usage.CodexUsageResponse
-	cachedTime  time.Time
-	cacheTTL    time.Duration // default 1 minute
+	cachedResp *usage.CodexUsageResponse
+	cachedTime time.Time
+	cacheTTL   time.Duration // default 1 minute
 }
 
 func (p *codexActiveProvider) Name() string { return "codex" }
@@ -111,18 +100,10 @@ func (p *codexActiveProvider) GetUsedPercent(mode string, weeklyBudget int64) (f
 			return pct, nil
 		}
 		if err != nil {
-			log.Warn().Err(err).Str("provider", "codex").Msg("budget: api fetch failed, falling back to file")
+			log.Warn().Err(err).Str("provider", "codex").Msg("budget: api fetch failed")
 		}
 	}
-	if p.passive != nil {
-		pct, err := p.passive.GetUsedPercent(mode, weeklyBudget)
-		if err == nil {
-			p.setSource("file")
-			log.Debug().Str("provider", "codex").Str("source", "file").Float64("used_pct", pct).Msg("budget: usage from file")
-		}
-		return pct, err
-	}
-	p.setSource("file")
+	p.setSource("none")
 	return 0, nil
 }
 
@@ -143,9 +124,6 @@ func (p *codexActiveProvider) GetResetTime(mode string) (time.Time, error) {
 			return resp.RateLimit.SecondaryWindow.ResetAt.Time, nil
 		}
 	}
-	if p.passive != nil {
-		return p.passive.GetResetTime(mode)
-	}
 	return time.Time{}, nil
 }
 
@@ -161,17 +139,16 @@ func (p *codexActiveProvider) setSource(s string) {
 	p.mu.Unlock()
 }
 
-// copilotActiveProvider wraps CopilotClient and falls back to a passive provider.
+// copilotActiveProvider fetches usage from the GitHub Copilot API.
 type copilotActiveProvider struct {
-	client  *usage.CopilotClient
-	passive CopilotUsageProvider
-	mu      sync.Mutex
-	src     string
+	client *usage.CopilotClient
+	mu     sync.Mutex
+	src    string
 	// Cache last FetchQuotas response to avoid duplicate API calls
 	// when both GetUsedPercent and GetResetTime are called for the same check.
-	cachedResp  *usage.CopilotUserResponse
-	cachedTime  time.Time
-	cacheTTL    time.Duration // default 1 minute
+	cachedResp *usage.CopilotUserResponse
+	cachedTime time.Time
+	cacheTTL   time.Duration // default 1 minute
 }
 
 func (p *copilotActiveProvider) Name() string { return "copilot" }
@@ -201,18 +178,10 @@ func (p *copilotActiveProvider) GetUsedPercent(mode string, monthlyLimit int64) 
 			}
 		}
 		if err != nil {
-			log.Warn().Err(err).Str("provider", "copilot").Msg("budget: api fetch failed, falling back to file")
+			log.Warn().Err(err).Str("provider", "copilot").Msg("budget: api fetch failed")
 		}
 	}
-	if p.passive != nil {
-		pct, err := p.passive.GetUsedPercent(mode, monthlyLimit)
-		if err == nil {
-			p.setSource("file")
-			log.Debug().Str("provider", "copilot").Str("source", "file").Float64("used_pct", pct).Msg("budget: usage from file")
-		}
-		return pct, err
-	}
-	p.setSource("file")
+	p.setSource("none")
 	return 0, nil
 }
 
@@ -241,9 +210,6 @@ func (p *copilotActiveProvider) GetResetTime(mode string) (time.Time, error) {
 			log.Warn().Str("raw", resp.QuotaResetDate).Err(parseErr).Msg("budget: copilot reset date parse failed")
 		}
 	}
-	if p.passive != nil {
-		return p.passive.GetResetTime(mode)
-	}
 	return time.Time{}, nil
 }
 
@@ -259,70 +225,40 @@ func (p *copilotActiveProvider) setSource(s string) {
 	p.mu.Unlock()
 }
 
-// NewManagerWithTracking builds a Manager using active (API-first) tracking.
-// Attempts to create API clients for Claude, Codex, and Copilot providers.
-// Falls back to passive fallback providers when API clients fail to initialize.
-// Returns the same *Manager type so call sites require no changes.
-func NewManagerWithTracking(
-	cfg *config.Config,
-	passiveClaude ClaudeUsageProvider,
-	passiveCodex CodexUsageProvider,
-	passiveCopilot CopilotUsageProvider,
-	opts ...Option,
-) *Manager {
-	var codexP CodexUsageProvider = passiveCodex
-	var copilotP CopilotUsageProvider = passiveCopilot
+// NewManagerWithTracking builds a Manager using active (API-based) tracking.
+// If an API client fails to initialize, that provider returns 0% usage.
+func NewManagerWithTracking(cfg *config.Config, opts ...Option) *Manager {
+	claudeP := &anthropicActiveProvider{client: usage.NewAnthropicClient()}
 
-	anthropicClient := usage.NewAnthropicClient()
-	claudeP := &anthropicActiveProvider{
-		client:  anthropicClient,
-		passive: passiveClaude,
-	}
-
+	var codexP CodexUsageProvider = &codexActiveProvider{}
 	codexClient, err := usage.NewCodexClient("")
 	if err != nil {
-		log.Warn().Err(err).Msg("budget: codex api client unavailable, using passive fallback")
+		log.Warn().Err(err).Msg("budget: codex api client unavailable")
 	} else {
-		codexP = &codexActiveProvider{
-			client:  codexClient,
-			passive: passiveCodex,
-		}
+		codexP = &codexActiveProvider{client: codexClient}
 	}
 
+	var copilotP CopilotUsageProvider = &copilotActiveProvider{}
 	copilotClient, err := usage.NewCopilotClient()
 	if err != nil {
-		log.Warn().Err(err).Msg("budget: copilot api client unavailable, using passive fallback")
+		log.Warn().Err(err).Msg("budget: copilot api client unavailable")
 	} else {
-		copilotP = &copilotActiveProvider{
-			client:  copilotClient,
-			passive: passiveCopilot,
-		}
+		copilotP = &copilotActiveProvider{client: copilotClient}
 	}
 
 	return NewManager(cfg, claudeP, codexP, copilotP, opts...)
 }
 
-// NewManagerWithTrackingFromProviders is a convenience wrapper accepting concrete provider types.
+// NewManagerWithTrackingFromProviders is a convenience wrapper — providers param kept for
+// call-site compatibility but ignored; API clients are initialized internally.
 func NewManagerWithTrackingFromProviders(
 	cfg *config.Config,
-	claude *providers.Claude,
-	codex *providers.Codex,
-	copilot *providers.Copilot,
+	_ *providers.Claude,
+	_ *providers.Codex,
+	_ *providers.Copilot,
 	opts ...Option,
 ) *Manager {
-	var claudeP ClaudeUsageProvider
-	var codexP CodexUsageProvider
-	var copilotP CopilotUsageProvider
-	if claude != nil {
-		claudeP = claude
-	}
-	if codex != nil {
-		codexP = codex
-	}
-	if copilot != nil {
-		copilotP = copilot
-	}
-	return NewManagerWithTracking(cfg, claudeP, codexP, copilotP, opts...)
+	return NewManagerWithTracking(cfg, opts...)
 }
 
 // FetchProviderUsage fetches unified usage data for a named provider using API clients.
