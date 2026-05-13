@@ -151,8 +151,14 @@ func parseQuotaResponse(body []byte) (AnthropicQuotaResponse, error) {
 
 	result := make(AnthropicQuotaResponse, len(raw))
 	for key, entry := range raw {
+		// The API sometimes returns utilization as 0–100 instead of 0.0–1.0.
+		// Normalize to 0.0–1.0 so all callers can rely on the documented range.
+		util := entry.Utilization
+		if util > 1.0 {
+			util /= 100.0
+		}
 		parsed := AnthropicQuotaEntry{
-			Utilization:  entry.Utilization,
+			Utilization:  util,
 			IsEnabled:    entry.IsEnabled,
 			MonthlyLimit: entry.MonthlyLimit,
 			UsedCredits:  entry.UsedCredits,
