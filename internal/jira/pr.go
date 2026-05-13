@@ -39,6 +39,7 @@ type PRReviewState struct {
 	Comments       []PRComment
 	FailingChecks  []CheckRun // check-runs with a failing conclusion (populated by FetchPRReviewComments)
 	HeadRefOid     string     // head commit SHA; included in FetchPRReviewComments to avoid duplicate gh pr view calls
+	HasConflict    bool       // true when PR is CONFLICTING with base branch
 }
 
 // Review represents a single pull request review.
@@ -199,7 +200,26 @@ func FetchPRReviewComments(ctx context.Context, repoPath, prURL string) (*PRRevi
 		rs.FailingChecks = checks
 	}
 
+	// Detect merge conflicts — non-fatal; log and continue on error.
+	conflict, err := HasMergeConflict(ctx, repoPath, rs.Number)
+	if err != nil {
+		logging.Get().Warnf("jira: pr: fetch mergeable for PR #%d (%s) in repo %s: %v", rs.Number, prURL, repoPath, err)
+	} else {
+		rs.HasConflict = conflict
+	}
+
 	return rs, nil
+}
+
+// HasMergeConflict returns true when the PR's mergeable state is "CONFLICTING".
+// UNKNOWN (GitHub hasn't computed it yet) is treated as non-blocking and returns false.
+func HasMergeConflict(ctx context.Context, repoPath string, prNumber int) (bool, error) {
+	out, err := ghExec(ctx, repoPath, "pr", "view", fmt.Sprintf("%d", prNumber),
+		"--json", "mergeable", "--jq", ".mergeable")
+	if err != nil {
+		return false, fmt.Errorf("gh pr view mergeable: %w", err)
+	}
+	return strings.TrimSpace(out) == "CONFLICTING", nil
 }
 
 // FetchPRCheckRuns fetches GitHub check-run results for the head commit of a PR and returns
