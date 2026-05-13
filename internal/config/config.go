@@ -54,8 +54,6 @@ type BudgetConfig struct {
 	WeeklyTokens          int            `json:"weekly_tokens" yaml:"weekly_tokens" mapstructure:"weekly_tokens"`           // Fallback weekly budget
 	PerProvider           map[string]int `json:"per_provider" yaml:"per_provider" mapstructure:"per_provider"`            // Per-provider overrides
 	BillingMode           string         `json:"billing_mode" yaml:"billing_mode" mapstructure:"billing_mode"`            // subscription | api
-	SnapshotInterval      string         `json:"snapshot_interval" yaml:"snapshot_interval" mapstructure:"snapshot_interval"`       // Interval for snapshots
-	SnapshotRetentionDays int            `json:"snapshot_retention_days" yaml:"snapshot_retention_days" mapstructure:"snapshot_retention_days"` // Snapshot retention in days
 	WeekStartDay          string         `json:"week_start_day" yaml:"week_start_day" mapstructure:"week_start_day"`          // monday | sunday
 	DBPath                string         `json:"db_path" yaml:"db_path" mapstructure:"db_path"`                 // Override DB path
 }
@@ -151,8 +149,6 @@ const (
 	DefaultReservePercent    = 5
 	DefaultWeeklyTokens      = 700000
 	DefaultBillingMode       = "subscription"
-	DefaultSnapshotInterval  = "30m"
-	DefaultSnapshotRetention = 90
 	DefaultWeekStartDay      = "monday"
 	DefaultLogLevel          = "info"
 	DefaultLogFormat         = "json"
@@ -252,8 +248,6 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("budget.weekly_tokens", DefaultWeeklyTokens)
 	v.SetDefault("budget.aggressive_end_of_week", false)
 	v.SetDefault("budget.billing_mode", DefaultBillingMode)
-	v.SetDefault("budget.snapshot_interval", DefaultSnapshotInterval)
-	v.SetDefault("budget.snapshot_retention_days", DefaultSnapshotRetention)
 	v.SetDefault("budget.week_start_day", DefaultWeekStartDay)
 	v.SetDefault("budget.db_path", DefaultDBPath())
 
@@ -336,7 +330,6 @@ var (
 	ErrInvalidWeekStartDay      = errors.New("week_start_day must be 'monday' or 'sunday'")
 	ErrInvalidMaxPercent        = errors.New("max_percent must be between 1 and 100")
 	ErrInvalidReservePercent    = errors.New("reserve_percent must be between 0 and 100")
-	ErrInvalidSnapshotRetention = errors.New("snapshot_retention_days must be >= 0")
 	ErrInvalidLogLevel          = errors.New("log level must be debug, info, warn, or error")
 	ErrInvalidLogFormat         = errors.New("log format must be json or text")
 	ErrNoSchedule               = errors.New("either cron or interval must be specified")
@@ -391,9 +384,6 @@ func Validate(cfg *Config) error {
 		return ErrInvalidReservePercent
 	}
 
-	if cfg.Budget.SnapshotRetentionDays < 0 {
-		return ErrInvalidSnapshotRetention
-	}
 
 	// Log level validation
 	if cfg.Logging.Level != "" {
