@@ -335,31 +335,3 @@ func renderStatsHuman(result *stats.StatsResult) error {
 	return nil
 }
 
-func formatCompactDuration(d time.Duration) string {
-	if d <= 0 {
-		return "now"
-	}
-	if d < time.Minute {
-		return "<1m"
-	}
-
-	days := int(d.Hours()) / 24
-	hours := int(d.Hours()) % 24
-	mins := int(d.Minutes()) % 60
-
-	switch {
-	case days > 0:
-		return fmt.Sprintf("%dd %dh", days, hours)
-	case hours > 0:
-		return fmt.Sprintf("%dh %dm", hours, mins)
-	default:
-		return fmt.Sprintf("%dm", mins)
-	}
-}
-
-func maxFloat(a, b float64) float64 {
-	if b > a {
-		return b
-	}
-	return a
-}
