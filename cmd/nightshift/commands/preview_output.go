@@ -261,10 +261,7 @@ func renderBudgetText(b *strings.Builder, allowance *budget.AllowanceResult, ind
 	}
 	b.WriteString(indent)
 	fmt.Fprintf(b, "Budget: %s available (%.1f%% used)\n", formatTokens64(allowance.Allowance), allowance.UsedPercent)
-	if allowance.UsedPercentSource == "jsonl-fallback" {
-		b.WriteString(indent)
-		b.WriteString("Used percent source: JSONL fallback (approximate)\n")
-	}
+
 	b.WriteString(indent)
 	fmt.Fprintf(b, "Budget calc: weekly=%s, base=%s, reserve=%s, predicted=%s\n",
 		formatTokens64(allowance.WeeklyBudget),

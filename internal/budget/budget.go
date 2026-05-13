@@ -113,7 +113,7 @@ type AllowanceResult struct {
 	BudgetBase         int64   // Base budget for reserve calculation (daily budget or per-run allowance)
 	RemainingBudget    int64   // Remaining weekly budget (weekly mode only)
 	UsedPercent        float64 // Current used percentage
-	UsedPercentSource  string  // Source of used percentage (e.g., stats-cache, jsonl-fallback)
+	UsedPercentSource  string  // Source of used percentage (e.g., "api", "none")
 	ReserveAmount      int64   // Tokens reserved
 	PredictedUsage     int64   // Predicted remaining usage today
 	Mode               string  // "daily" or "weekly"

@@ -438,7 +438,7 @@ func (s *Stats) computeProviderBudgetProjection(sqlDB *sql.DB, provider string, 
 		return BudgetProjection{}, false
 	}
 
-	// Latest calibrated snapshot for this provider.
+	// Latest snapshot with inferred budget for this provider.
 	row := sqlDB.QueryRow(
 		`SELECT CAST(timestamp AS TEXT), CAST(week_start AS TEXT), local_tokens, scraped_pct, inferred_budget, COALESCE(weekly_reset_time, '')
 		 FROM snapshots
