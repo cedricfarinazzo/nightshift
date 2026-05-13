@@ -273,7 +273,7 @@ func TestActiveModeClaudeAPISuccess(t *testing.T) {
 		"seven_day": {Utilization: 0.42, ResetsAt: resetAt, IsEnabled: true},
 		"five_hour":  {Utilization: 0.10, ResetsAt: resetAt, IsEnabled: true},
 	}
-	collector := NewCollectorWithAPIs(database, nil, nil, nil, nil, time.Monday, "active",
+	collector := NewCollectorWithAPIs(database, fakeClaude{weekly: 500, daily: 80}, nil, nil, nil, time.Monday, "active",
 		fakeAnthropicAPI{resp: apiResp}, nil, nil)
 	snap, err := collector.TakeSnapshot(context.Background(), "claude")
 	if err != nil {
@@ -284,6 +284,13 @@ func TestActiveModeClaudeAPISuccess(t *testing.T) {
 	}
 	if snap.ScrapedPct == nil || *snap.ScrapedPct < 41.9 || *snap.ScrapedPct > 42.1 {
 		t.Fatalf("scraped pct = %v, want ~42", snap.ScrapedPct)
+	}
+	// Local token totals populated from file provider so inferred_budget can be computed.
+	if snap.LocalTokens != 500 {
+		t.Fatalf("local tokens = %d, want 500", snap.LocalTokens)
+	}
+	if snap.InferredBudget == nil {
+		t.Fatalf("inferred budget = nil, want computed value")
 	}
 }
 
@@ -308,7 +315,7 @@ func TestActiveModeCodexAPISuccess(t *testing.T) {
 			},
 		},
 	}
-	collector := NewCollectorWithAPIs(database, nil, nil, nil, nil, time.Monday, "active",
+	collector := NewCollectorWithAPIs(database, nil, fakeCodex{weeklyTokens: 1000, dailyTokens: 100}, nil, nil, time.Monday, "active",
 		nil, fakeCodexAPI{resp: apiResp}, nil)
 	snap, err := collector.TakeSnapshot(context.Background(), "codex")
 	if err != nil {
@@ -319,6 +326,13 @@ func TestActiveModeCodexAPISuccess(t *testing.T) {
 	}
 	if snap.ScrapedPct == nil || *snap.ScrapedPct != 55.0 {
 		t.Fatalf("scraped pct = %v, want 55", snap.ScrapedPct)
+	}
+	// Local token totals populated from file provider so inferred_budget can be computed.
+	if snap.LocalTokens != 1000 {
+		t.Fatalf("local tokens = %d, want 1000", snap.LocalTokens)
+	}
+	if snap.InferredBudget == nil {
+		t.Fatalf("inferred budget = nil, want computed value")
 	}
 }
 
@@ -365,6 +379,31 @@ func TestActiveModeCopilotAPIFail_ReturnsError(t *testing.T) {
 	_, err := collector.TakeSnapshot(context.Background(), "copilot")
 	if err == nil {
 		t.Fatal("expected error in active mode on API failure")
+	}
+}
+
+func TestActiveModeCopilotNilResponse_ReturnsError(t *testing.T) {
+	database := openTestDB(t)
+	collector := NewCollectorWithAPIs(database, nil, nil, nil, nil, time.Monday, "active",
+		nil, nil, fakeCopilotAPI{resp: nil})
+	_, err := collector.TakeSnapshot(context.Background(), "copilot")
+	if err == nil {
+		t.Fatal("expected error when copilot API returns nil response")
+	}
+}
+
+func TestClampPct(t *testing.T) {
+	cases := []struct{ in, want float64 }{
+		{50.0, 50.0},
+		{0.0, 0.0},
+		{100.0, 100.0},
+		{-5.0, 0.0},
+		{105.0, 100.0},
+	}
+	for _, tc := range cases {
+		if got := clampPct(tc.in); got != tc.want {
+			t.Errorf("clampPct(%v) = %v, want %v", tc.in, got, tc.want)
+		}
 	}
 }
 

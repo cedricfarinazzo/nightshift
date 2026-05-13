@@ -281,6 +281,7 @@ func (c *Collector) TakeSnapshot(ctx context.Context, provider string) (Snapshot
 }
 
 // collectClaudeFromAPI fetches Claude usage from the Anthropic API.
+// Active mode only — returns error on API failure, no file fallback.
 func (c *Collector) collectClaudeFromAPI(ctx context.Context) (localWeekly, localDaily int64, scrapedPct *float64, sessionResetTime, weeklyResetTime, source string, err error) {
 	resp, err := c.anthropicAPI.FetchQuotas(ctx)
 	if err != nil {
@@ -288,7 +289,7 @@ func (c *Collector) collectClaudeFromAPI(ctx context.Context) (localWeekly, loca
 	}
 
 	if entry, ok := resp["seven_day"]; ok && entry.IsEnabled {
-		pct := entry.Utilization * 100
+		pct := clampPct(entry.Utilization * 100)
 		scrapedPct = &pct
 		if !entry.ResetsAt.IsZero() {
 			weeklyResetTime = entry.ResetsAt.Format(time.RFC3339)
@@ -304,7 +305,13 @@ func (c *Collector) collectClaudeFromAPI(ctx context.Context) (localWeekly, loca
 		}
 	}
 
-	return 0, 0, scrapedPct, sessionResetTime, weeklyResetTime, "api", nil
+	// Augment with local token totals so inferred_budget can be computed.
+	if c.claude != nil {
+		localWeekly, _ = c.claude.GetWeeklyUsage()
+		localDaily, _ = c.claude.GetTodayUsage()
+	}
+
+	return localWeekly, localDaily, scrapedPct, sessionResetTime, weeklyResetTime, "api", nil
 }
 
 // collectClaudeFromFile fetches Claude usage from local files and tmux.
@@ -341,6 +348,7 @@ func (c *Collector) collectClaudeFromFile(ctx context.Context) (localWeekly, loc
 }
 
 // collectCodexFromAPI fetches Codex usage from the OpenAI API.
+// Active mode only — returns error on API failure, no file fallback.
 func (c *Collector) collectCodexFromAPI(ctx context.Context) (localWeekly, localDaily int64, scrapedPct *float64, sessionResetTime, weeklyResetTime, source string, err error) {
 	resp, err := c.codexAPI.FetchUsage(ctx)
 	if err != nil {
@@ -349,7 +357,7 @@ func (c *Collector) collectCodexFromAPI(ctx context.Context) (localWeekly, local
 
 	if resp.RateLimit != nil && resp.RateLimit.PrimaryWindow != nil {
 		pw := resp.RateLimit.PrimaryWindow
-		pct := pw.UsedPercent
+		pct := clampPct(pw.UsedPercent)
 		scrapedPct = &pct
 		if !pw.ResetAt.IsZero() {
 			sessionResetTime = pw.ResetAt.Format(time.RFC3339)
@@ -357,7 +365,13 @@ func (c *Collector) collectCodexFromAPI(ctx context.Context) (localWeekly, local
 		}
 	}
 
-	return 0, 0, scrapedPct, sessionResetTime, weeklyResetTime, "api", nil
+	// Augment with local token totals so inferred_budget can be computed.
+	if c.codex != nil {
+		localWeekly, _ = c.codex.GetWeeklyTokens()
+		localDaily, _ = c.codex.GetTodayTokens()
+	}
+
+	return localWeekly, localDaily, scrapedPct, sessionResetTime, weeklyResetTime, "api", nil
 }
 
 // collectCodexFromFile fetches Codex usage from local files and tmux.
@@ -390,15 +404,19 @@ func (c *Collector) collectCodexFromFile(ctx context.Context) (localWeekly, loca
 }
 
 // collectCopilotFromAPI fetches Copilot usage from the GitHub API.
+// Active mode only — returns error on API failure, no file fallback.
 func (c *Collector) collectCopilotFromAPI(ctx context.Context) (localWeekly, localDaily int64, scrapedPct *float64, sessionResetTime, weeklyResetTime, source string, err error) {
 	resp, err := c.copilotAPI.FetchQuotas(ctx)
 	if err != nil {
 		return 0, 0, nil, "", "", "", err
 	}
+	if resp == nil {
+		return 0, 0, nil, "", "", "", errors.New("copilot api: nil response")
+	}
 
 	if quota, ok := resp.Quotas["premium_interactions"]; ok && !quota.Unlimited {
-		usedPct := 100.0 - quota.PercentRemaining
-		scrapedPct = &usedPct
+		pct := clampPct(100.0 - quota.PercentRemaining)
+		scrapedPct = &pct
 	}
 	if resp.QuotaResetDate != "" {
 		weeklyResetTime = resp.QuotaResetDate
@@ -622,6 +640,18 @@ func codexTokenTotals(codex CodexUsage) (int64, int64, error) {
 		return 0, 0, fmt.Errorf("get today tokens: %w", err)
 	}
 	return weekly, daily, nil
+}
+
+// clampPct clamps a percentage value to [0, 100] and returns nil-safe storage.
+// API responses may return values outside this range; inferred_budget would be wrong without clamping.
+func clampPct(pct float64) float64 {
+	if pct < 0 {
+		return 0
+	}
+	if pct > 100 {
+		return 100
+	}
+	return pct
 }
 
 // copilotTokenTotals returns weekly and daily token totals from Copilot usage files.
