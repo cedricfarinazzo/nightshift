@@ -40,7 +40,6 @@ cmd/
       stats.go          # `nightshift stats` — historical run stats
       status.go         # `nightshift status` — current run status
       report.go         # `nightshift report` — generate/show run reports
-      snapshot.go       # `nightshift snapshot` — manage usage snapshots
       daemon.go         # `nightshift daemon` — run as background scheduler
       setup.go          # `nightshift setup` — interactive onboarding wizard
       config.go         # `nightshift config` — show/edit config
@@ -57,7 +56,6 @@ cmd/
       jira_run.go       # `nightshift jira run` — autonomous Jira pipeline
       jira_preview.go   # `nightshift jira preview` — dry-run: shows tickets, deps, budget, phases
       jira_preview_output.go # TUI rendering for jira preview command
-  provider-calibration/ # Standalone utility: compare Claude/Codex session costs
 
 internal/
   agents/               # AI agent execution layer (spawns external CLI binaries)
@@ -75,9 +73,6 @@ internal/
   budget/               # Token budget calculation and allocation
     budget.go           # Core budget logic: daily/weekly modes, reserve, aggressive end-of-week;
                         # interfaces ClaudeUsageProvider, CodexUsageProvider
-
-  calibrator/           # Infers subscription budget from historical snapshots
-    calibrator.go       # Calibrator struct: uses DB snapshots to infer budget with confidence score
 
   config/               # YAML config loading and validation
     config.go           # Config struct (Schedule, Budget, Providers, Projects, Tasks, Integrations,
@@ -168,10 +163,6 @@ internal/
     register.go         # RegisterCustomTasksFromConfig(): config → TaskDefinition; rolls back on failure
     selector.go         # Task selection logic (budget-aware, staleness-aware)
 
-  tmux/                 # Tmux session scraping
-    tmux.go             # Tmux session detection
-    scraper.go          # Scrapes tmux pane output for agent context
-
   trends/               # Historical trend analysis
     analyzer.go         # Analyzes run history for trends and anomalies
 
@@ -196,9 +187,7 @@ docs/                   # Internal developer docs (NOT user-facing)
     testing.md                 # Test patterns, MockRunner, stubJiraClient, e2e tests
     contributing.md            # Dev setup, git conventions, PR checklist
     debugging.md               # Log locations, common errors + fixes
-    agent-tmux-integration.md  # Tmux session scraping for agent context
     codex-budget-tracking.md   # Codex-specific usage tracking
-    provider-calibration.md    # Provider cost calibration utility
     website.md                 # Docusaurus site development
   implemented/          # Design docs for completed features
   deprecated/           # Archived docs
@@ -262,9 +251,6 @@ make lint
 
 # Install binary to GOPATH/bin
 make install
-
-# Provider cost calibration
-make calibrate-providers
 ```
 
 ---

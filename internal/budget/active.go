@@ -35,7 +35,6 @@ type anthropicActiveProvider struct {
 	passive ClaudeUsageProvider
 	mu      sync.Mutex
 	src     string
-	hybrid  bool // if true, only warn at debug level on API errors (expected fallback)
 }
 
 func (p *anthropicActiveProvider) Name() string { return "claude" }
@@ -52,13 +51,7 @@ func (p *anthropicActiveProvider) GetUsedPercent(mode string, weeklyBudget int64
 			}
 			// seven_day key absent — fall through to passive
 		} else {
-			// In hybrid mode, API errors are expected (missing credentials); log at debug.
-			// In active mode, warn so user knows the fallback is happening.
-			if p.hybrid {
-				log.Debug().Err(err).Str("provider", "claude").Msg("budget: anthropic api unavailable, using passive fallback")
-			} else {
-				log.Warn().Err(err).Str("provider", "claude").Msg("budget: api fetch failed, falling back to file")
-			}
+			log.Warn().Err(err).Str("provider", "claude").Msg("budget: api fetch failed, falling back to file")
 		}
 	}
 	if p.passive != nil {
@@ -268,8 +261,7 @@ func (p *copilotActiveProvider) setSource(s string) {
 
 // NewManagerWithTracking builds a Manager respecting cfg.Budget.Tracking.
 // For "passive" mode it delegates to NewManager with no change.
-// For "active" and "hybrid" modes it wraps each provider with an API client
-// that falls back to the passive provider on error.
+// Always uses active (API-first) tracking with passive fallback on error.
 // Returns the same *Manager type so call sites require no changes.
 func NewManagerWithTracking(
 	cfg *config.Config,
@@ -278,30 +270,18 @@ func NewManagerWithTracking(
 	passiveCopilot CopilotUsageProvider,
 	opts ...Option,
 ) *Manager {
-	mode := cfg.Budget.Tracking
-	if mode == "" || mode == "passive" {
-		return NewManager(cfg, passiveClaude, passiveCodex, passiveCopilot, opts...)
-	}
-
 	var codexP CodexUsageProvider = passiveCodex
 	var copilotP CopilotUsageProvider = passiveCopilot
 
-	// Anthropic client — never fails at construction; credentials read at call time.
 	anthropicClient := usage.NewAnthropicClient()
 	claudeP := &anthropicActiveProvider{
 		client:  anthropicClient,
 		passive: passiveClaude,
-		hybrid:  mode == "hybrid", // suppress warnings for expected fallback in hybrid mode
 	}
 
-	// Codex client — fails at construction if no credentials.
-	// In hybrid mode, construction failure is expected and safe; active mode logs and falls back.
 	codexClient, err := usage.NewCodexClient("")
 	if err != nil {
-		if mode == "active" {
-			log.Warn().Err(err).Msg("budget: codex api client unavailable, using passive fallback")
-		}
-		// hybrid: passiveCodex already set; active: also fall back gracefully.
+		log.Warn().Err(err).Msg("budget: codex api client unavailable, using passive fallback")
 	} else {
 		codexP = &codexActiveProvider{
 			client:  codexClient,
@@ -309,12 +289,9 @@ func NewManagerWithTracking(
 		}
 	}
 
-	// Copilot client — fails at construction if no GitHub token.
 	copilotClient, err := usage.NewCopilotClient()
 	if err != nil {
-		if mode == "active" {
-			log.Warn().Err(err).Msg("budget: copilot api client unavailable, using passive fallback")
-		}
+		log.Warn().Err(err).Msg("budget: copilot api client unavailable, using passive fallback")
 	} else {
 		copilotP = &copilotActiveProvider{
 			client:  copilotClient,

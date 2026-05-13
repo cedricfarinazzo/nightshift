@@ -53,13 +53,12 @@ func (f *fakeCopilotProvider) GetResetTime(_ string) (time.Time, error) { return
 
 // --- helpers ---
 
-func makeConfig(tracking string) *config.Config {
+func makeConfig(_ string) *config.Config {
 	return &config.Config{
 		Budget: config.BudgetConfig{
 			Mode:         "weekly",
 			MaxPercent:   80,
 			WeeklyTokens: 1_000_000,
-			Tracking:     tracking,
 		},
 	}
 }
@@ -88,38 +87,6 @@ func anthropicErrorServer() *httptest.Server {
 
 // --- passive mode ---
 
-func TestPassiveMode_NeverCallsAPI(t *testing.T) {
-	passive := &fakeClaudeProvider{pct: 42.0}
-	cfg := makeConfig("passive")
-	mgr := NewManagerWithTracking(cfg, passive, nil, nil)
-
-	pct, err := mgr.GetUsedPercent("claude")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if pct != 42.0 {
-		t.Errorf("want 42.0, got %f", pct)
-	}
-	// In passive mode, the returned manager should use the exact passive provider passed in,
-	// not wrapped. Verify the provider is not an active wrapper.
-	if _, isActive := mgr.claude.(*anthropicActiveProvider); isActive {
-		t.Error("passive mode should not wrap provider in active adapter")
-	}
-}
-
-func TestEmptyTrackingMode_BehavesLikePassive(t *testing.T) {
-	passive := &fakeClaudeProvider{pct: 55.0}
-	cfg := makeConfig("")
-	mgr := NewManagerWithTracking(cfg, passive, nil, nil)
-
-	pct, err := mgr.GetUsedPercent("claude")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if pct != 55.0 {
-		t.Errorf("want 55.0, got %f", pct)
-	}
-}
 
 // --- active mode: anthropic adapter ---
 
@@ -300,7 +267,7 @@ func TestHybridMode_MixedCredentials(t *testing.T) {
 		usage.WithHTTPClient(srv.Client()),
 		usage.WithCredentialStore(&staticCred{token: "test-token"}),
 	)
-	claudeP := &anthropicActiveProvider{client: apiClient, passive: passiveClaude, hybrid: true}
+	claudeP := &anthropicActiveProvider{client: apiClient, passive: passiveClaude}
 	codexP := &codexActiveProvider{client: nil, passive: passiveCodex}
 
 	cfg := makeConfig("hybrid")

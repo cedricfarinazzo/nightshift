@@ -13,7 +13,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/marcus/nightshift/internal/budget"
-	"github.com/marcus/nightshift/internal/calibrator"
 	"github.com/marcus/nightshift/internal/config"
 	"github.com/marcus/nightshift/internal/db"
 	"github.com/marcus/nightshift/internal/providers"
@@ -95,7 +94,6 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	claudeProvider, codexProvider, copilotProvider := checkProviders(cfg, add)
 	checkBudget(cfg, database, claudeProvider, codexProvider, copilotProvider, add)
 	checkSnapshots(cfg, database, add)
-	checkTmux(cfg, add)
 
 	printDoctorResults(results)
 
@@ -258,9 +256,8 @@ func checkProviders(cfg *config.Config, add func(string, checkStatus, string)) (
 }
 
 func checkBudget(cfg *config.Config, database *db.DB, claudeProvider *providers.Claude, codexProvider *providers.Codex, copilotProvider *providers.Copilot, add func(string, checkStatus, string)) {
-	cal := calibrator.New(database, cfg)
 	trend := trends.NewAnalyzer(database, cfg.Budget.SnapshotRetentionDays)
-	budgetMgr := budget.NewManagerFromProviders(cfg, claudeProvider, codexProvider, copilotProvider, budget.WithBudgetSource(cal), budget.WithTrendAnalyzer(trend))
+	budgetMgr := budget.NewManagerFromProviders(cfg, claudeProvider, codexProvider, copilotProvider, budget.WithTrendAnalyzer(trend))
 
 	if cfg.Providers.Claude.Enabled {
 		if allowance, err := budgetMgr.CalculateAllowance("claude"); err != nil {
@@ -280,7 +277,7 @@ func checkBudget(cfg *config.Config, database *db.DB, claudeProvider *providers.
 }
 
 func checkSnapshots(cfg *config.Config, database *db.DB, add func(string, checkStatus, string)) {
-	collector := snapshots.NewCollector(database, nil, nil, nil, nil, weekStartDayFromConfig(cfg))
+	collector := snapshots.NewCollector(database, nil, nil, nil, weekStartDayFromConfig(cfg))
 
 	for _, provider := range []string{"claude", "codex", "copilot"} {
 		if provider == "claude" && !cfg.Providers.Claude.Enabled {
@@ -303,24 +300,8 @@ func checkSnapshots(cfg *config.Config, database *db.DB, add func(string, checkS
 		}
 		age := time.Since(latest[0].Timestamp)
 		msg := fmt.Sprintf("last snapshot %s ago", age.Truncate(time.Minute))
-		if latest[0].ScrapedPct == nil && cfg.Budget.CalibrateEnabled && strings.ToLower(cfg.Budget.BillingMode) != "api" {
-			add(fmt.Sprintf("snapshots.%s", provider), statusWarn, msg+" (local-only)")
-			continue
-		}
 		add(fmt.Sprintf("snapshots.%s", provider), statusOK, msg)
 	}
-}
-
-func checkTmux(cfg *config.Config, add func(string, checkStatus, string)) {
-	if !cfg.Budget.CalibrateEnabled || strings.EqualFold(cfg.Budget.BillingMode, "api") {
-		add("tmux", statusOK, "not required")
-		return
-	}
-	if _, err := exec.LookPath("tmux"); err != nil {
-		add("tmux", statusWarn, "tmux not found; calibration will be local-only")
-		return
-	}
-	add("tmux", statusOK, "available")
 }
 
 func printDoctorResults(results []checkResult) {

@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/marcus/nightshift/internal/budget"
-	"github.com/marcus/nightshift/internal/calibrator"
 	"github.com/marcus/nightshift/internal/config"
 	"github.com/marcus/nightshift/internal/db"
 	"github.com/marcus/nightshift/internal/logging"
@@ -25,8 +24,8 @@ import (
 	"github.com/marcus/nightshift/internal/snapshots"
 	"github.com/marcus/nightshift/internal/state"
 	"github.com/marcus/nightshift/internal/tasks"
-	"github.com/marcus/nightshift/internal/tmux"
 	"github.com/marcus/nightshift/internal/trends"
+	"github.com/marcus/nightshift/internal/usage"
 	"github.com/spf13/cobra"
 )
 
@@ -274,9 +273,8 @@ func runScheduledTasks(ctx context.Context, cfg *config.Config, database *db.DB,
 	copilotProvider := providers.NewCopilotWithPath(cfg.ExpandedProviderPath("copilot"))
 
 	// Initialize budget manager
-	cal := calibrator.New(database, cfg)
 	trend := trends.NewAnalyzer(database, cfg.Budget.SnapshotRetentionDays)
-	budgetMgr := budget.NewManagerFromProviders(cfg, claudeProvider, codexProvider, copilotProvider, budget.WithBudgetSource(cal), budget.WithTrendAnalyzer(trend))
+	budgetMgr := budget.NewManagerFromProviders(cfg, claudeProvider, codexProvider, copilotProvider, budget.WithTrendAnalyzer(trend))
 
 	report := newRunReport(time.Now(), calculateRunBudgetStart(cfg, budgetMgr, log))
 
@@ -500,18 +498,6 @@ func runScheduledTasks(ctx context.Context, cfg *config.Config, database *db.DB,
 	return nil
 }
 
-type tmuxScraper struct{}
-
-// ScrapeClaudeUsage delegates to tmux.ScrapeClaudeUsage.
-func (tmuxScraper) ScrapeClaudeUsage(ctx context.Context) (tmux.UsageResult, error) {
-	return tmux.ScrapeClaudeUsage(ctx)
-}
-
-// ScrapeCodexUsage delegates to tmux.ScrapeCodexUsage.
-func (tmuxScraper) ScrapeCodexUsage(ctx context.Context) (tmux.UsageResult, error) {
-	return tmux.ScrapeCodexUsage(ctx)
-}
-
 func startSnapshotLoop(ctx context.Context, cfg *config.Config, database *db.DB, log *logging.Logger) {
 	interval, err := time.ParseDuration(cfg.Budget.SnapshotInterval)
 	if err != nil || interval <= 0 {
@@ -552,45 +538,73 @@ func startSnapshotPruneLoop(ctx context.Context, cfg *config.Config, database *d
 }
 
 func takeSnapshot(ctx context.Context, cfg *config.Config, database *db.DB, log *logging.Logger) {
-	scraper := snapshots.UsageScraper(nil)
-	if cfg.Budget.CalibrateEnabled && strings.ToLower(cfg.Budget.BillingMode) != "api" {
-		scraper = tmuxScraper{}
+	var anthropicAPI snapshots.AnthropicAPIClient
+	var codexAPI snapshots.CodexAPIClient
+	var copilotAPI snapshots.CopilotAPIClient
+
+	if cfg.Providers.Claude.Enabled {
+		if client := usage.NewAnthropicClient(); client != nil {
+			anthropicAPI = client
+		}
+	}
+	if cfg.Providers.Codex.Enabled {
+		if client, err := usage.NewCodexClient(""); err == nil {
+			codexAPI = client
+		}
+	}
+	if cfg.Providers.Copilot.Enabled {
+		if client, err := usage.NewCopilotClient(); err == nil {
+			copilotAPI = client
+		}
 	}
 
-	collector := snapshots.NewCollector(
+	collector := snapshots.NewCollectorWithAPIs(
 		database,
 		providers.NewClaudeWithPath(cfg.ExpandedProviderPath("claude")),
 		providers.NewCodexWithPath(cfg.ExpandedProviderPath("codex")),
 		providers.NewCopilotWithPath(cfg.ExpandedProviderPath("copilot")),
-		scraper,
 		weekStartDayFromConfig(cfg),
+		anthropicAPI,
+		codexAPI,
+		copilotAPI,
 	)
 
-	if cfg.Providers.Claude.Enabled {
+	if cfg.Providers.Claude.Enabled && anthropicAPI != nil {
 		snapshot, err := collector.TakeSnapshot(ctx, "claude")
 		if err != nil {
 			log.Warnf("snapshot claude: %v", err)
 		} else if snapshot.ScrapedPct != nil {
 			log.Infof("snapshot claude: %.1f%%", *snapshot.ScrapedPct)
 		} else {
-			log.Info("snapshot claude: local-only")
+			log.Info("snapshot claude: no quota data")
 		}
 	}
 
-	if cfg.Providers.Codex.Enabled {
+	if cfg.Providers.Codex.Enabled && codexAPI != nil {
 		snapshot, err := collector.TakeSnapshot(ctx, "codex")
 		if err != nil {
 			log.Warnf("snapshot codex: %v", err)
 		} else if snapshot.ScrapedPct != nil {
 			log.Infof("snapshot codex: %.1f%%", *snapshot.ScrapedPct)
 		} else {
-			log.Info("snapshot codex: local-only")
+			log.Info("snapshot codex: no quota data")
+		}
+	}
+
+	if cfg.Providers.Copilot.Enabled && copilotAPI != nil {
+		snapshot, err := collector.TakeSnapshot(ctx, "copilot")
+		if err != nil {
+			log.Warnf("snapshot copilot: %v", err)
+		} else if snapshot.ScrapedPct != nil {
+			log.Infof("snapshot copilot: %.1f%%", *snapshot.ScrapedPct)
+		} else {
+			log.Info("snapshot copilot: no quota data")
 		}
 	}
 }
 
 func pruneSnapshots(ctx context.Context, cfg *config.Config, database *db.DB, log *logging.Logger) {
-	collector := snapshots.NewCollector(database, nil, nil, nil, nil, weekStartDayFromConfig(cfg))
+	collector := snapshots.NewCollector(database, nil, nil, nil, weekStartDayFromConfig(cfg))
 	deleted, err := collector.Prune(cfg.Budget.SnapshotRetentionDays)
 	if err != nil {
 		log.Warnf("snapshot prune: %v", err)

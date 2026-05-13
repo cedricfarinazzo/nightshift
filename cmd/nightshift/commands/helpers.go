@@ -7,7 +7,6 @@ import (
 
 	"github.com/marcus/nightshift/internal/agents"
 	"github.com/marcus/nightshift/internal/budget"
-	"github.com/marcus/nightshift/internal/calibrator"
 	"github.com/marcus/nightshift/internal/config"
 	"github.com/marcus/nightshift/internal/db"
 	"github.com/marcus/nightshift/internal/providers"
@@ -117,8 +116,7 @@ func newBudgetManager(cfg *config.Config, database *db.DB) *budget.Manager {
 	claudeProvider := providers.NewClaudeWithPath(cfg.ExpandedProviderPath("claude"))
 	codexProvider := providers.NewCodexWithPath(cfg.ExpandedProviderPath("codex"))
 	copilotProvider := providers.NewCopilotWithPath(cfg.ExpandedProviderPath("copilot"))
-	cal := calibrator.New(database, cfg)
 	trend := trends.NewAnalyzer(database, cfg.Budget.SnapshotRetentionDays)
 	return budget.NewManagerWithTrackingFromProviders(cfg, claudeProvider, codexProvider, copilotProvider,
-		budget.WithBudgetSource(cal), budget.WithTrendAnalyzer(trend))
+		budget.WithTrendAnalyzer(trend))
 }

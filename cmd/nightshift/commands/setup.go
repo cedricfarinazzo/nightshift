@@ -28,6 +28,7 @@ import (
 	"github.com/marcus/nightshift/internal/setup"
 	"github.com/marcus/nightshift/internal/snapshots"
 	"github.com/marcus/nightshift/internal/tasks"
+	"github.com/marcus/nightshift/internal/usage"
 )
 
 var setupCmd = &cobra.Command{
@@ -734,7 +735,7 @@ func (m *setupModel) View() string {
 		b.WriteString(styleAccent.Render("Snapshot step"))
 		b.WriteString("\n")
 		b.WriteString("We’ll take a quick usage snapshot so Nightshift can set safe budgets.\n")
-		b.WriteString("No tasks run yet. This just reads local usage (and optional tmux scrape).\n\n")
+		b.WriteString("No tasks run yet. This fetches live usage from provider APIs.\n\n")
 		if m.snapshotRunning {
 			b.WriteString(m.spinner.View() + "\n")
 		} else {
@@ -743,7 +744,7 @@ func (m *setupModel) View() string {
 			} else {
 				b.WriteString(m.snapshotOutput + "\n")
 			}
-			b.WriteString(styleNote.Render("If an estimate looks off, run `nightshift budget snapshot --provider codex` and `nightshift budget calibrate` later. Setup doesn’t change your budget math."))
+			b.WriteString(styleNote.Render("If an estimate looks off, run `nightshift budget history` later to review stored snapshots. Setup doesn’t change your budget math."))
 			b.WriteString("\n")
 			b.WriteString("\nPress Enter to continue.\n")
 		}
@@ -1259,10 +1260,8 @@ func (m *setupModel) applyBudgetDefaults() {
 	if m.cfg.Budget.WeeklyTokens == 0 {
 		m.cfg.Budget.WeeklyTokens = config.DefaultWeeklyTokens
 	}
-	if m.cfg.Budget.Tracking == "" {
-		m.cfg.Budget.Tracking = config.DefaultTrackingMode
-	}
 }
+
 
 func (m *setupModel) budgetFieldValue() string {
 	switch m.budgetCursor {
@@ -1280,8 +1279,6 @@ func (m *setupModel) budgetFieldValue() string {
 		return m.cfg.Budget.SnapshotInterval
 	case 6:
 		return m.cfg.Budget.WeekStartDay
-	case 7:
-		return m.cfg.Budget.Tracking
 	default:
 		return ""
 	}
@@ -1328,11 +1325,6 @@ func (m *setupModel) applyBudgetEdit() error {
 			return fmt.Errorf("week_start_day must be monday or sunday")
 		}
 		m.cfg.Budget.WeekStartDay = value
-	case 7:
-		if value != "passive" && value != "active" && value != "hybrid" {
-			return fmt.Errorf("tracking must be passive, active, or hybrid")
-		}
-		m.cfg.Budget.Tracking = value
 	}
 	return nil
 }
@@ -1776,11 +1768,6 @@ func renderEnvChecks(cfg *config.Config) string {
 	} else {
 		fmt.Fprintf(&b, "  %s %s\n", styleOk.Render("OK:"), "nightshift is in PATH")
 	}
-	if _, err := execLookPath("tmux"); err != nil {
-		fmt.Fprintf(&b, "  %s %s\n", styleWarn.Render("Note:"), "tmux not found (calibration will be local-only)")
-	} else {
-		fmt.Fprintf(&b, "  %s %s\n", styleOk.Render("OK:"), "tmux available")
-	}
 	// Check for Copilot CLI (gh or copilot binary)
 	_, ghErr := execLookPath("gh")
 	_, copilotErr := execLookPath("copilot")
@@ -1817,7 +1804,6 @@ func renderBudgetFields(b *strings.Builder, m *setupModel) {
 		fmt.Sprintf("Calibrate enabled: %t", m.cfg.Budget.CalibrateEnabled),
 		fmt.Sprintf("Snapshot interval: %s", m.cfg.Budget.SnapshotInterval),
 		fmt.Sprintf("Week start day: %s", m.cfg.Budget.WeekStartDay),
-		fmt.Sprintf("Tracking: %s", m.cfg.Budget.Tracking),
 	}
 	for i, field := range fields {
 		cursor := " "
@@ -2037,23 +2023,40 @@ func runSnapshot(cfg *config.Config) (string, error) {
 	}
 	defer func() { _ = database.Close() }()
 
-	scraper := snapshots.UsageScraper(nil)
-	if cfg.Budget.CalibrateEnabled && strings.ToLower(cfg.Budget.BillingMode) != "api" {
-		scraper = tmuxScraper{}
+	var anthropicAPI snapshots.AnthropicAPIClient
+	var codexAPI snapshots.CodexAPIClient
+	var copilotAPI snapshots.CopilotAPIClient
+
+	if cfg.Providers.Claude.Enabled {
+		if client := usage.NewAnthropicClient(); client != nil {
+			anthropicAPI = client
+		}
+	}
+	if cfg.Providers.Codex.Enabled {
+		if client, err := usage.NewCodexClient(""); err == nil {
+			codexAPI = client
+		}
+	}
+	if cfg.Providers.Copilot.Enabled {
+		if client, err := usage.NewCopilotClient(); err == nil {
+			copilotAPI = client
+		}
 	}
 
-	collector := snapshots.NewCollector(
+	collector := snapshots.NewCollectorWithAPIs(
 		database,
 		providers.NewClaudeWithPath(cfg.ExpandedProviderPath("claude")),
 		providers.NewCodexWithPath(cfg.ExpandedProviderPath("codex")),
 		providers.NewCopilotWithPath(cfg.ExpandedProviderPath("copilot")),
-		scraper,
 		weekStartDayFromConfig(cfg),
+		anthropicAPI,
+		codexAPI,
+		copilotAPI,
 	)
 
 	var lines []string
 	ctx := context.Background()
-	if cfg.Providers.Claude.Enabled {
+	if cfg.Providers.Claude.Enabled && anthropicAPI != nil {
 		snapshot, err := collector.TakeSnapshot(ctx, "claude")
 		if err != nil {
 			lines = append(lines, fmt.Sprintf("claude: error: %v", err))
@@ -2061,7 +2064,7 @@ func runSnapshot(cfg *config.Config) (string, error) {
 			lines = append(lines, formatSnapshotLine(snapshot))
 		}
 	}
-	if cfg.Providers.Codex.Enabled {
+	if cfg.Providers.Codex.Enabled && codexAPI != nil {
 		snapshot, err := collector.TakeSnapshot(ctx, "codex")
 		if err != nil {
 			lines = append(lines, fmt.Sprintf("codex: error: %v", err))
@@ -2069,7 +2072,7 @@ func runSnapshot(cfg *config.Config) (string, error) {
 			lines = append(lines, formatSnapshotLine(snapshot))
 		}
 	}
-	if cfg.Providers.Copilot.Enabled {
+	if cfg.Providers.Copilot.Enabled && copilotAPI != nil {
 		snapshot, err := collector.TakeSnapshot(ctx, "copilot")
 		if err != nil {
 			lines = append(lines, fmt.Sprintf("copilot: error: %v", err))
@@ -2311,7 +2314,6 @@ func writeGlobalConfigToPath(cfg *config.Config, configPath string) error {
 	v.Set("budget.snapshot_interval", cfg.Budget.SnapshotInterval)
 	v.Set("budget.snapshot_retention_days", cfg.Budget.SnapshotRetentionDays)
 	v.Set("budget.week_start_day", cfg.Budget.WeekStartDay)
-	v.Set("budget.tracking", cfg.Budget.Tracking)
 
 	// Providers: set fields individually to match mapstructure tag names (fixes #20)
 	v.Set("providers.claude.enabled", cfg.Providers.Claude.Enabled)

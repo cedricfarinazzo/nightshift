@@ -58,8 +58,8 @@ func (r *runReport) finalizeWithDB(cfg *config.Config, log *logging.Logger, data
 	}
 	r.results.LogPath = logPath
 
-	// Fetch cost snapshots for active/hybrid tracking modes.
-	if cfg.Budget.Tracking != "" && cfg.Budget.Tracking != "passive" {
+	// Fetch cost snapshots via active tracking.
+	{
 		ctx := context.Background()
 		snapshots := budget.FetchAllCostSnapshots(ctx)
 		r.results.CostSnapshots = snapshots

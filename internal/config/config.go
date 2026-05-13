@@ -59,7 +59,6 @@ type BudgetConfig struct {
 	SnapshotRetentionDays int            `json:"snapshot_retention_days" yaml:"snapshot_retention_days" mapstructure:"snapshot_retention_days"` // Snapshot retention in days
 	WeekStartDay          string         `json:"week_start_day" yaml:"week_start_day" mapstructure:"week_start_day"`          // monday | sunday
 	DBPath                string         `json:"db_path" yaml:"db_path" mapstructure:"db_path"`                 // Override DB path
-	Tracking              string         `json:"tracking" yaml:"tracking" mapstructure:"tracking"`                // passive | active | hybrid
 }
 
 // ProvidersConfig defines AI provider settings.
@@ -156,7 +155,6 @@ const (
 	DefaultSnapshotInterval  = "30m"
 	DefaultSnapshotRetention = 90
 	DefaultWeekStartDay      = "monday"
-	DefaultTrackingMode      = "passive"
 	DefaultLogLevel          = "info"
 	DefaultLogFormat         = "json"
 	DefaultClaudeDataPath    = "~/.claude"
@@ -260,7 +258,6 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("budget.snapshot_retention_days", DefaultSnapshotRetention)
 	v.SetDefault("budget.week_start_day", DefaultWeekStartDay)
 	v.SetDefault("budget.db_path", DefaultDBPath())
-	v.SetDefault("budget.tracking", DefaultTrackingMode)
 
 	// Provider defaults
 	v.SetDefault("providers.preference", []string{"claude", "codex", "copilot"})
@@ -317,7 +314,6 @@ func bindEnvVars(v *viper.Viper) {
 	// Explicit bindings for nested config
 	_ = v.BindEnv("budget.max_percent", "NIGHTSHIFT_BUDGET_MAX_PERCENT")
 	_ = v.BindEnv("budget.mode", "NIGHTSHIFT_BUDGET_MODE")
-	_ = v.BindEnv("budget.tracking", "NIGHTSHIFT_BUDGET_TRACKING")
 	_ = v.BindEnv("logging.level", "NIGHTSHIFT_LOG_LEVEL")
 	_ = v.BindEnv("logging.path", "NIGHTSHIFT_LOG_PATH")
 }
@@ -346,7 +342,6 @@ var (
 	ErrInvalidLogLevel          = errors.New("log level must be debug, info, warn, or error")
 	ErrInvalidLogFormat         = errors.New("log format must be json or text")
 	ErrNoSchedule               = errors.New("either cron or interval must be specified")
-	ErrInvalidTrackingMode      = errors.New("tracking mode must be 'passive', 'active', or 'hybrid'")
 
 	ErrCustomTaskMissingType        = errors.New("custom task: type is required")
 	ErrCustomTaskMissingName        = errors.New("custom task: name is required")
@@ -370,14 +365,6 @@ func Validate(cfg *Config) error {
 	// Budget mode validation
 	if cfg.Budget.Mode != "" && cfg.Budget.Mode != "daily" && cfg.Budget.Mode != "weekly" {
 		return ErrInvalidBudgetMode
-	}
-
-	// Tracking mode validation
-	if cfg.Budget.Tracking != "" {
-		t := strings.ToLower(cfg.Budget.Tracking)
-		if t != "passive" && t != "active" && t != "hybrid" {
-			return ErrInvalidTrackingMode
-		}
 	}
 
 	// Billing mode validation

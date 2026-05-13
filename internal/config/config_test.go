@@ -46,20 +46,6 @@ func TestValidate_InvalidBillingMode(t *testing.T) {
 	}
 }
 
-func TestValidate_TrackingMode(t *testing.T) {
-	valid := []string{"passive", "active", "hybrid", ""}
-	for _, mode := range valid {
-		cfg := &Config{Budget: BudgetConfig{Tracking: mode}}
-		if err := Validate(cfg); err != nil {
-			t.Errorf("tracking=%q: expected nil, got %v", mode, err)
-		}
-	}
-
-	cfg := &Config{Budget: BudgetConfig{Tracking: "foobar"}}
-	if err := Validate(cfg); !errors.Is(err, ErrInvalidTrackingMode) {
-		t.Errorf("tracking=foobar: expected ErrInvalidTrackingMode, got %v", err)
-	}
-}
 
 func TestValidate_InvalidWeekStartDay(t *testing.T) {
 	cfg := &Config{
