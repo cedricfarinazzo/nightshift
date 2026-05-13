@@ -146,21 +146,22 @@ func (o *Orchestrator) ProcessFeedback(ctx context.Context, ticket Ticket, ws *W
 			// After filtering by lastReworkAt, if nothing remains → skip regardless
 			// of ReviewDecision (it stays CHANGES_REQUESTED until a re-review).
 			// On first run (lastReworkAt zero), fall back to the original heuristic.
-			// Failing CI checks are always current state and not filtered by lastReworkAt.
+			// Failing CI checks and merge conflicts are always current state; not filtered by lastReworkAt.
 			hasFailingChecks := len(reviewState.FailingChecks) > 0
+			hasConflict := reviewState.HasConflict
 			if !lastReworkAt.IsZero() {
-				if len(reviewState.Reviews) == 0 && !hasActionableComments(reviewState) && !hasFailingChecks {
-					o.log.Infof("ticket %s: skipping rework — no new content since lastReworkAt=%s",
-						ticket.Key, lastReworkAt.Format(time.RFC3339))
-					o.emit("  ✓ no new review comments or failing checks since last rework — skipping")
+				if len(reviewState.Reviews) == 0 && !hasActionableComments(reviewState) && !hasFailingChecks && !hasConflict {
+					o.log.Infof("ticket %s: skipping rework — no new content since lastReworkAt=%s conflicts=%v",
+						ticket.Key, lastReworkAt.Format(time.RFC3339), hasConflict)
+					o.emit("  ✓ no new review comments, failing checks, or merge conflicts since last rework — skipping")
 					continue
 				}
 			} else {
 				// No previous rework: proceed only when changes are explicitly requested,
-				// there are actionable inline comments, or CI checks are failing.
-				if reviewState.ReviewDecision != "CHANGES_REQUESTED" && !hasActionableComments(reviewState) && !hasFailingChecks {
-					o.log.Infof("ticket %s: skipping rework — no actionable comments or failing checks", ticket.Key)
-					o.emit("  ✓ no actionable review comments or failing checks — skipping")
+				// there are actionable inline comments, CI checks are failing, or there's a merge conflict.
+				if reviewState.ReviewDecision != "CHANGES_REQUESTED" && !hasActionableComments(reviewState) && !hasFailingChecks && !hasConflict {
+					o.log.Infof("ticket %s: skipping rework — no actionable comments, failing checks, or conflicts", ticket.Key)
+					o.emit("  ✓ no actionable review comments, failing checks, or merge conflicts — skipping")
 					continue
 				}
 			}
@@ -300,6 +301,11 @@ func buildReworkPrompt(ticket Ticket, review *PRReviewState, repo RepoWorkspace)
 			}
 		}
 		b.WriteString("\nFix all CI failures before push.\n\n")
+	}
+	if review.HasConflict {
+		b.WriteString("### Merge Conflict\n\n")
+		b.WriteString("This PR has a merge conflict with the base branch (main).\n")
+		b.WriteString("Resolve all conflicts by rebasing or merging main into this branch before push.\n\n")
 	}
 	b.WriteString("### Instructions\n")
 	b.WriteString("Address ALL reviewer feedback. For each comment:\n")
