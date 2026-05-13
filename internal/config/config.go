@@ -27,6 +27,14 @@ type Config struct {
 	Logging      LoggingConfig      `mapstructure:"logging"`
 	Reporting    ReportingConfig    `mapstructure:"reporting"`
 	Jira         jira.JiraConfig    `mapstructure:"jira"`
+	Systemd      SystemdConfig      `mapstructure:"systemd"`
+}
+
+// SystemdConfig defines systemd user service settings for nightshift jira run.
+type SystemdConfig struct {
+	Enabled    bool   `mapstructure:"enabled"`
+	Mode       string `mapstructure:"mode"`        // "schedule" | "continuous"
+	OnCalendar string `mapstructure:"on_calendar"` // e.g. "*-*-* 22:00:00"
 }
 
 // ScheduleConfig defines when nightshift runs.
@@ -280,6 +288,10 @@ func setDefaults(v *viper.Viper) {
 
 	// Jira defaults
 	v.SetDefault("jira.budget_enabled", true)
+
+	// Systemd defaults
+	v.SetDefault("systemd.mode", "schedule")
+	v.SetDefault("systemd.on_calendar", "*-*-* 22:00:00")
 }
 
 // loadConfigFile merges a YAML config file into viper.
@@ -333,6 +345,8 @@ var (
 	ErrInvalidLogLevel          = errors.New("log level must be debug, info, warn, or error")
 	ErrInvalidLogFormat         = errors.New("log format must be json or text")
 	ErrNoSchedule               = errors.New("either cron or interval must be specified")
+
+	ErrInvalidSystemdMode           = errors.New("systemd mode must be 'schedule' or 'continuous'")
 
 	ErrCustomTaskMissingType        = errors.New("custom task: type is required")
 	ErrCustomTaskMissingName        = errors.New("custom task: name is required")
@@ -428,6 +442,14 @@ func Validate(cfg *Config) error {
 	// Custom task validation
 	if err := validateCustomTasks(cfg.Tasks.Custom); err != nil {
 		return err
+	}
+
+	// Systemd mode validation
+	if cfg.Systemd.Enabled {
+		mode := strings.ToLower(cfg.Systemd.Mode)
+		if mode != "schedule" && mode != "continuous" {
+			return ErrInvalidSystemdMode
+		}
 	}
 
 	return nil

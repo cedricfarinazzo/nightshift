@@ -21,10 +21,12 @@ const (
 
 // File paths for installed services
 const (
-	launchdPlistName   = "com.nightshift.agent.plist"
-	systemdServiceName = "nightshift.service"
-	systemdTimerName   = "nightshift.timer"
-	cronMarker         = "# nightshift managed cron entry"
+	launchdPlistName       = "com.nightshift.agent.plist"
+	systemdServiceName     = "nightshift.service"
+	systemdTimerName       = "nightshift.timer"
+	systemdJiraServiceName = "nightshift-jira.service"
+	systemdJiraTimerName   = "nightshift-jira.timer"
+	cronMarker             = "# nightshift managed cron entry"
 )
 
 var installCmd = &cobra.Command{
@@ -49,13 +51,25 @@ var uninstallCmd = &cobra.Command{
 	RunE:  runUninstall,
 }
 
+var installSystemdJiraFlag bool
+
 func init() {
 	rootCmd.AddCommand(installCmd)
 	rootCmd.AddCommand(uninstallCmd)
+	installCmd.Flags().BoolVar(&installSystemdJiraFlag, "systemd", false, "Install systemd user service for nightshift jira run")
 }
 
 // runInstall implements the install command
 func runInstall(cmd *cobra.Command, args []string) error {
+	// Handle --systemd flag: install Jira-specific systemd unit
+	if installSystemdJiraFlag {
+		cfg, err := config.Load()
+		if err != nil {
+			cfg = &config.Config{}
+		}
+		return installSystemdJira(cfg)
+	}
+
 	// Determine service type
 	serviceType := ""
 	if len(args) > 0 {
@@ -545,6 +559,135 @@ func parseScheduleTime(cfg *config.Config) (hour, minute int) {
 	}
 
 	return
+}
+
+// systemdAvailable reports whether systemd is present on this system.
+func systemdAvailable() bool {
+	if _, err := os.Stat("/run/systemd/private"); err == nil {
+		return true
+	}
+	_, err := exec.LookPath("systemctl")
+	return err == nil
+}
+
+// execRunner is a function type for running external commands (testable).
+type execRunner func(name string, args ...string) error
+
+// defaultExecRunner runs the named command using os/exec.
+func defaultExecRunner(name string, args ...string) error {
+	return exec.Command(name, args...).Run()
+}
+
+// installSystemdJira writes nightshift-jira.service (and optionally .timer) to
+// ~/.config/systemd/user/ and runs systemctl --user daemon-reload.
+func installSystemdJira(cfg *config.Config) error {
+	return installSystemdJiraWithExec(cfg, defaultExecRunner)
+}
+
+// installSystemdJiraWithExec is the testable core of installSystemdJira.
+func installSystemdJiraWithExec(cfg *config.Config, run execRunner) error {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("getting home directory: %w", err)
+	}
+
+	systemdDir := filepath.Join(home, ".config", "systemd", "user")
+	if err := os.MkdirAll(systemdDir, 0755); err != nil {
+		return fmt.Errorf("creating systemd directory: %w", err)
+	}
+
+	// Write service unit (always — both schedule and continuous modes need it).
+	servicePath := filepath.Join(systemdDir, systemdJiraServiceName)
+	service := generateSystemdJiraService()
+	if err := os.WriteFile(servicePath, []byte(service), 0644); err != nil {
+		return fmt.Errorf("writing jira service file: %w", err)
+	}
+	fmt.Printf("Installed %s\n", servicePath)
+
+	// Write timer unit only in schedule mode.
+	mode := strings.ToLower(cfg.Systemd.Mode)
+	if mode == "" {
+		mode = "schedule"
+	}
+	if mode == "schedule" {
+		onCalendar := cfg.Systemd.OnCalendar
+		if onCalendar == "" {
+			onCalendar = "*-*-* 22:00:00"
+		}
+		timerPath := filepath.Join(systemdDir, systemdJiraTimerName)
+		timer := generateSystemdJiraTimer(onCalendar)
+		if err := os.WriteFile(timerPath, []byte(timer), 0644); err != nil {
+			return fmt.Errorf("writing jira timer file: %w", err)
+		}
+		fmt.Printf("Installed %s\n", timerPath)
+	}
+
+	// Reload systemd so it picks up the new units.
+	if err := run("systemctl", "--user", "daemon-reload"); err != nil {
+		return fmt.Errorf("reloading systemd: %w", err)
+	}
+
+	fmt.Println("systemd daemon reloaded.")
+	if mode == "schedule" {
+		fmt.Println("To enable and start:")
+		fmt.Println("  systemctl --user enable --now nightshift-jira.timer")
+	} else {
+		fmt.Println("To enable and start:")
+		fmt.Println("  systemctl --user enable --now nightshift-jira.service")
+	}
+	return nil
+}
+
+// generateSystemdJiraService returns the content of the nightshift-jira.service unit.
+// Uses %h so the unit is portable across home directories.
+func generateSystemdJiraService() string {
+	return `[Unit]
+Description=Nightshift Jira autonomous pipeline
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/nightshift jira run
+Restart=on-failure
+RestartSec=60s
+Environment=HOME=%h
+EnvironmentFile=-%h/.config/nightshift/env
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=nightshift-jira
+
+[Install]
+WantedBy=default.target
+`
+}
+
+// generateSystemdJiraTimer returns the content of the nightshift-jira.timer unit.
+func generateSystemdJiraTimer(onCalendar string) string {
+	return fmt.Sprintf(`[Unit]
+Description=Run Nightshift Jira pipeline on schedule
+
+[Timer]
+OnCalendar=%s
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+`, onCalendar)
+}
+
+// validateOnCalendar checks an OnCalendar expression via systemd-analyze calendar.
+// Returns nil if systemd-analyze is not found (treat as skip, not error).
+func validateOnCalendar(expr string) error {
+	path, err := exec.LookPath("systemd-analyze")
+	if err != nil {
+		return nil // not available — skip validation
+	}
+	out, err := exec.Command(path, "calendar", expr).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("invalid OnCalendar expression %q: %s", expr, strings.TrimSpace(string(out)))
+	}
+	return nil
 }
 
 // getLogPath returns the log file path for the specified type

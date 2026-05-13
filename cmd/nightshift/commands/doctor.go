@@ -142,6 +142,33 @@ func checkService(add func(string, checkStatus, string)) {
 		} else {
 			add("service.timer", statusWarn, "systemd timer missing")
 		}
+
+		// Check Jira-specific service unit.
+		jiraServicePath := filepath.Join(home, ".config", "systemd", "user", systemdJiraServiceName)
+		if _, err := os.Stat(jiraServicePath); err == nil {
+			out, _ := exec.Command("systemctl", "--user", "is-active", systemdJiraServiceName).Output()
+			status := strings.TrimSpace(string(out))
+			switch status {
+			case "active":
+				add("service.jira", statusOK, "nightshift-jira.service active")
+			case "inactive":
+				add("service.jira", statusWarn, "nightshift-jira.service installed but inactive")
+			default:
+				add("service.jira", statusWarn, fmt.Sprintf("nightshift-jira.service: %s", status))
+			}
+			jiraTimerPath := filepath.Join(home, ".config", "systemd", "user", systemdJiraTimerName)
+			if _, err := os.Stat(jiraTimerPath); err == nil {
+				out, _ := exec.Command("systemctl", "--user", "is-active", systemdJiraTimerName).Output()
+				timerStatus := strings.TrimSpace(string(out))
+				if timerStatus == "active" {
+					add("service.jira.timer", statusOK, "nightshift-jira.timer active")
+				} else {
+					add("service.jira.timer", statusWarn, fmt.Sprintf("nightshift-jira.timer: %s", timerStatus))
+				}
+			}
+		} else {
+			add("service.jira", statusWarn, "nightshift-jira.service not installed")
+		}
 	case ServiceCron:
 		out, err := exec.Command("crontab", "-l").CombinedOutput()
 		if err != nil {

@@ -63,6 +63,7 @@ const (
 	stepTaskSelect
 	stepSchedule
 	stepJira
+	stepSystemd
 	stepPreview
 	stepPath
 	stepDaemon
@@ -248,6 +249,14 @@ type setupModel struct {
 	jiraPingErr       string
 	jiraErr           string
 
+	// Systemd step state
+	systemdCursor     int // 0=yes, 1=no
+	systemdMode       string
+	systemdOnCalendar string
+	systemdSubStep    int // 0=enable prompt, 1=mode prompt, 2=oncalendar prompt
+	systemdInput      textinput.Model
+	systemdErr        string
+
 	spinner spinner.Model
 }
 
@@ -337,6 +346,9 @@ func newSetupModel() (*setupModel, error) {
 	jiraInput := textinput.New()
 	jiraInput.Prompt = "> "
 
+	systemdInput := textinput.New()
+	systemdInput.Prompt = "> "
+
 	spin := spinner.New()
 	spin.Spinner = spinner.MiniDot
 
@@ -389,6 +401,9 @@ func newSetupModel() (*setupModel, error) {
 		copilotModelIdx:   modelIndex(copilotModels, cfg.Providers.Copilot.Model),
 		jiraInput:         jiraInput,
 		jiraTokenEnv:      "JIRA_API_TOKEN",
+		systemdInput:      systemdInput,
+		systemdMode:       "schedule",
+		systemdOnCalendar: "*-*-* 22:00:00",
 		jiraLabel:         "nightshift",
 		jiraMaxTickets:    10,
 		jiraPhaseProvider: defaultJiraPhaseProviders(cfg.Providers.Preference),
@@ -502,6 +517,8 @@ func (m *setupModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.handleScheduleInput(msg)
 		case stepJira:
 			return m.handleJiraInput(msg)
+		case stepSystemd:
+			return m.handleSystemdInput(msg)
 		case stepPreview:
 			if !m.previewRunning && msg.String() == "enter" {
 				if m.nightshiftInPath {
@@ -711,6 +728,10 @@ func (m *setupModel) View() string {
 		b.WriteString(styleAccent.Render("Jira integration"))
 		b.WriteString("\n")
 		renderJiraStep(&b, m)
+	case stepSystemd:
+		b.WriteString(styleAccent.Render("Systemd service (Jira pipeline)"))
+		b.WriteString("\n")
+		renderSystemdStep(&b, m)
 	case stepPreview:
 		b.WriteString(styleAccent.Render("Preview step"))
 		b.WriteString("\n")
@@ -810,6 +831,12 @@ func (m *setupModel) setStep(step setupStep) tea.Cmd {
 		m.jiraErr = ""
 		m.jiraInput.SetValue("")
 		m.jiraInput.Blur()
+	case stepSystemd:
+		m.systemdSubStep = 0
+		m.systemdErr = ""
+		m.systemdCursor = 0
+		m.systemdInput.SetValue("")
+		m.systemdInput.Blur()
 	case stepPreview:
 		m.previewRunning = true
 		m.previewOutput = ""
@@ -2005,6 +2032,7 @@ func setupSteps(includePathStep bool) []setupStepInfo {
 		{step: stepTaskSelect, label: "Task selection"},
 		{step: stepSchedule, label: "Schedule"},
 		{step: stepJira, label: "Jira"},
+		{step: stepSystemd, label: "Systemd"},
 		{step: stepPreview, label: "Preview"},
 	}
 	if includePathStep {
@@ -2450,7 +2478,7 @@ func (m *setupModel) handleJiraEnableInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) 
 			m.jiraErr = err.Error()
 			return m, nil
 		}
-		return m, m.setStep(stepPreview)
+		return m, m.setStep(stepSystemd)
 	case "enter":
 		if m.jiraEnableCursor == 0 {
 			m.jiraEnabled = true
@@ -2464,7 +2492,7 @@ func (m *setupModel) handleJiraEnableInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) 
 				m.jiraErr = err.Error()
 				return m, nil
 			}
-			return m, m.setStep(stepPreview)
+			return m, m.setStep(stepSystemd)
 		}
 	}
 	return m, nil
@@ -2683,9 +2711,159 @@ func (m *setupModel) handleJiraPingInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.jiraErr = err.Error()
 			return m, nil
 		}
-		return m, m.setStep(stepPreview)
+		return m, m.setStep(stepSystemd)
 	}
 	return m, nil
+}
+
+// handleSystemdInput handles keyboard input for the systemd setup step.
+func (m *setupModel) handleSystemdInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// On non-Linux or no systemd, skip silently.
+	if !systemdAvailable() {
+		return m, m.setStep(stepPreview)
+	}
+
+	switch m.systemdSubStep {
+	case 0: // enable prompt
+		switch msg.String() {
+		case "up":
+			if m.systemdCursor > 0 {
+				m.systemdCursor--
+			}
+		case "down":
+			if m.systemdCursor < 1 {
+				m.systemdCursor++
+			}
+		case "y", "Y":
+			m.systemdCursor = 0
+			m.systemdSubStep = 1
+		case "n", "N":
+			m.cfg.Systemd.Enabled = false
+			if err := writeGlobalConfigToPath(m.cfg, m.configPath); err != nil {
+				m.systemdErr = err.Error()
+				return m, nil
+			}
+			return m, m.setStep(stepPreview)
+		case "enter":
+			if m.systemdCursor == 0 {
+				m.systemdSubStep = 1
+			} else {
+				m.cfg.Systemd.Enabled = false
+				if err := writeGlobalConfigToPath(m.cfg, m.configPath); err != nil {
+					m.systemdErr = err.Error()
+					return m, nil
+				}
+				return m, m.setStep(stepPreview)
+			}
+		}
+	case 1: // mode prompt: schedule vs continuous
+		switch msg.String() {
+		case "up":
+			if m.systemdCursor > 0 {
+				m.systemdCursor--
+			}
+		case "down":
+			if m.systemdCursor < 1 {
+				m.systemdCursor++
+			}
+		case "enter":
+			if m.systemdCursor == 0 {
+				m.systemdMode = "schedule"
+				m.systemdCursor = 0
+				m.systemdSubStep = 2
+				m.systemdInput.SetValue(m.systemdOnCalendar)
+				m.systemdInput.Placeholder = "*-*-* 22:00:00"
+				m.systemdInput.Focus()
+			} else {
+				m.systemdMode = "continuous"
+				return m, m.applyAndInstallSystemd()
+			}
+		}
+	case 2: // OnCalendar prompt
+		switch msg.String() {
+		case "esc":
+			m.systemdErr = ""
+			m.systemdInput.Blur()
+			m.systemdSubStep = 1
+			m.systemdCursor = 0
+		case "enter":
+			val := strings.TrimSpace(m.systemdInput.Value())
+			if val == "" {
+				val = "*-*-* 22:00:00"
+			}
+			if err := validateOnCalendar(val); err != nil {
+				m.systemdErr = err.Error()
+				return m, nil
+			}
+			m.systemdOnCalendar = val
+			return m, m.applyAndInstallSystemd()
+		default:
+			var cmd tea.Cmd
+			m.systemdInput, cmd = m.systemdInput.Update(msg)
+			return m, cmd
+		}
+	}
+	return m, nil
+}
+
+// applyAndInstallSystemd writes systemd config and installs units.
+func (m *setupModel) applyAndInstallSystemd() tea.Cmd {
+	m.cfg.Systemd.Enabled = true
+	m.cfg.Systemd.Mode = m.systemdMode
+	m.cfg.Systemd.OnCalendar = m.systemdOnCalendar
+	if err := writeGlobalConfigToPath(m.cfg, m.configPath); err != nil {
+		m.systemdErr = err.Error()
+		return nil
+	}
+	if err := installSystemdJira(m.cfg); err != nil {
+		m.systemdErr = err.Error()
+		return nil
+	}
+	return m.setStep(stepPreview)
+}
+
+// renderSystemdStep renders the systemd wizard step.
+func renderSystemdStep(b *strings.Builder, m *setupModel) {
+	if !systemdAvailable() {
+		b.WriteString(styleDim.Render("systemd not available on this system — skipping."))
+		b.WriteString("\n")
+		return
+	}
+
+	switch m.systemdSubStep {
+	case 0:
+		b.WriteString("Install systemd user service for Jira pipeline?\n\n")
+		options := []string{"Yes", "No"}
+		for i, opt := range options {
+			cursor := " "
+			if i == m.systemdCursor {
+				cursor = ">"
+			}
+			fmt.Fprintf(b, " %s %s\n", cursor, opt)
+		}
+		b.WriteString("\nUse ↑/↓ to select, Enter to confirm, or press y/n.\n")
+	case 1:
+		b.WriteString("Run mode:\n\n")
+		options := []string{"schedule (timer-based, recommended)", "continuous (always running)"}
+		for i, opt := range options {
+			cursor := " "
+			if i == m.systemdCursor {
+				cursor = ">"
+			}
+			fmt.Fprintf(b, " %s %s\n", cursor, opt)
+		}
+		b.WriteString("\nUse ↑/↓ to select, Enter to confirm.\n")
+	case 2:
+		b.WriteString("OnCalendar schedule:\n\n")
+		b.WriteString(m.systemdInput.View() + "\n")
+		if m.systemdErr != "" {
+			b.WriteString("Error: " + m.systemdErr + "\n")
+		}
+		b.WriteString("\nPress Enter to confirm, Esc to go back.\n")
+	}
+	if m.systemdErr != "" && m.systemdSubStep != 2 {
+		b.WriteString("\nError: " + m.systemdErr + "\n")
+	}
 }
 
 // applyJiraConfig populates cfg.Jira from wizard state.
