@@ -3,6 +3,7 @@ package usage
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 	"net/http"
 	"os/exec"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -20,7 +22,13 @@ const (
 	bodyLimitBytes          = 64 * 1024 // 64KB
 	requestTimeout          = 30 * time.Second
 	fallbackUserAgent       = "claude-code/2.1.140"
+	defaultCacheTTL         = 5 * time.Minute
 )
+
+type cacheEntry struct {
+	value    AnthropicQuotaResponse
+	storedAt time.Time
+}
 
 // Sentinel errors for HTTP status mapping.
 var (
@@ -37,6 +45,11 @@ type AnthropicClient struct {
 	httpClient *http.Client
 	store      CredentialStore
 	userAgent  string
+
+	cacheMu  sync.Mutex
+	cache    map[string]cacheEntry
+	cacheTTL time.Duration
+	clockFn  func() time.Time
 }
 
 // Option configures an AnthropicClient.
@@ -70,12 +83,29 @@ func WithUserAgent(ua string) Option {
 	}
 }
 
+// WithCacheTTL sets the cache TTL for FetchQuotas results.
+func WithCacheTTL(d time.Duration) Option {
+	return func(c *AnthropicClient) {
+		c.cacheTTL = d
+	}
+}
+
+// withClockFn sets an injectable clock for tests.
+func withClockFn(fn func() time.Time) Option {
+	return func(c *AnthropicClient) {
+		c.clockFn = fn
+	}
+}
+
 // NewAnthropicClient creates a client with optional configuration.
 func NewAnthropicClient(opts ...Option) *AnthropicClient {
 	c := &AnthropicClient{
 		baseURL:    defaultAnthropicBaseURL,
 		httpClient: &http.Client{Timeout: requestTimeout},
 		userAgent:  claudeCodeUserAgent(),
+		cache:      make(map[string]cacheEntry),
+		cacheTTL:   defaultCacheTTL,
+		clockFn:    time.Now,
 	}
 	c.store = NewTokenDiscovery(&ExecKeychainRunner{})
 
@@ -85,7 +115,28 @@ func NewAnthropicClient(opts ...Option) *AnthropicClient {
 	return c
 }
 
+// cacheKey returns a safe non-reversible key for the given token.
+func cacheKey(token string) string {
+	h := sha256.Sum256([]byte(token))
+	return fmt.Sprintf("%x", h[:8])
+}
+
+// Invalidate clears the cached entry for the current token.
+func (c *AnthropicClient) Invalidate(ctx context.Context) error {
+	token, err := c.store.ReadToken(ctx)
+	if err != nil {
+		return fmt.Errorf("reading token: %w", err)
+	}
+	key := cacheKey(token)
+	c.cacheMu.Lock()
+	delete(c.cache, key)
+	c.cacheMu.Unlock()
+	return nil
+}
+
 // FetchQuotas fetches current quota utilization from the Anthropic usage API.
+// Results are cached for cacheTTL. On HTTP 429, the last cached value is
+// returned if available; otherwise ErrRateLimited is surfaced.
 func (c *AnthropicClient) FetchQuotas(ctx context.Context) (AnthropicQuotaResponse, error) {
 	ctx, cancel := context.WithTimeout(ctx, requestTimeout)
 	defer cancel()
@@ -95,7 +146,35 @@ func (c *AnthropicClient) FetchQuotas(ctx context.Context) (AnthropicQuotaRespon
 		return nil, fmt.Errorf("reading token: %w", err)
 	}
 
-	return c.doRequest(ctx, accessToken)
+	key := cacheKey(accessToken)
+	now := c.clockFn()
+
+	c.cacheMu.Lock()
+	entry, hit := c.cache[key]
+	if hit && now.Before(entry.storedAt.Add(c.cacheTTL)) {
+		c.cacheMu.Unlock()
+		return entry.value, nil
+	}
+	c.cacheMu.Unlock()
+
+	result, err := c.doRequest(ctx, accessToken)
+	if err != nil {
+		if errors.Is(err, ErrRateLimited) {
+			c.cacheMu.Lock()
+			stale, hasCached := c.cache[key]
+			c.cacheMu.Unlock()
+			if hasCached {
+				return stale.value, nil
+			}
+		}
+		return nil, err
+	}
+
+	c.cacheMu.Lock()
+	c.cache[key] = cacheEntry{value: result, storedAt: now}
+	c.cacheMu.Unlock()
+
+	return result, nil
 }
 
 // doRequest performs the HTTP GET and parses the response.

@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -202,6 +204,192 @@ func TestParseQuotaResponse_InvalidJSON(t *testing.T) {
 	_, err := parseQuotaResponse([]byte("not json"))
 	if err == nil {
 		t.Fatal("expected error on invalid JSON")
+	}
+}
+
+func TestCache_DefaultTTL(t *testing.T) {
+	c := NewAnthropicClient()
+	if c.cacheTTL != defaultCacheTTL {
+		t.Errorf("cacheTTL = %v, want %v", c.cacheTTL, defaultCacheTTL)
+	}
+}
+
+func TestWithCacheTTL(t *testing.T) {
+	c := NewAnthropicClient(WithCacheTTL(10 * time.Minute))
+	if c.cacheTTL != 10*time.Minute {
+		t.Errorf("cacheTTL = %v, want 10m", c.cacheTTL)
+	}
+}
+
+func TestCache_Hit(t *testing.T) {
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(validQuotaBody())
+	}))
+	defer srv.Close()
+
+	client := NewAnthropicClient(
+		WithBaseURL(srv.URL),
+		WithCredentialStore(&mockStore{access: "tok_cache"}),
+		WithCacheTTL(5*time.Minute),
+	)
+
+	_, err := client.FetchQuotas(context.Background())
+	if err != nil {
+		t.Fatalf("first call: %v", err)
+	}
+	_, err = client.FetchQuotas(context.Background())
+	if err != nil {
+		t.Fatalf("second call: %v", err)
+	}
+	if calls.Load() != 1 {
+		t.Errorf("server called %d times, want 1", calls.Load())
+	}
+}
+
+func TestCache_Miss_AfterTTL(t *testing.T) {
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(validQuotaBody())
+	}))
+	defer srv.Close()
+
+	now := time.Now()
+	client := NewAnthropicClient(
+		WithBaseURL(srv.URL),
+		WithCredentialStore(&mockStore{access: "tok_ttl"}),
+		WithCacheTTL(1*time.Minute),
+		withClockFn(func() time.Time { return now }),
+	)
+
+	_, _ = client.FetchQuotas(context.Background())
+
+	// Advance clock past TTL.
+	now = now.Add(2 * time.Minute)
+
+	_, err := client.FetchQuotas(context.Background())
+	if err != nil {
+		t.Fatalf("second call: %v", err)
+	}
+	if calls.Load() != 2 {
+		t.Errorf("server called %d times, want 2", calls.Load())
+	}
+}
+
+func TestCache_429_FallbackToCached(t *testing.T) {
+	serve429 := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if serve429 {
+			w.WriteHeader(http.StatusTooManyRequests)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(validQuotaBody())
+	}))
+	defer srv.Close()
+
+	client := NewAnthropicClient(
+		WithBaseURL(srv.URL),
+		WithCredentialStore(&mockStore{access: "tok_429"}),
+		WithCacheTTL(5*time.Minute),
+	)
+
+	// Prime cache.
+	resp, err := client.FetchQuotas(context.Background())
+	if err != nil {
+		t.Fatalf("prime: %v", err)
+	}
+
+	// Now 429.
+	serve429 = true
+	resp2, err := client.FetchQuotas(context.Background())
+	if err != nil {
+		t.Fatalf("429 should return cached, got error: %v", err)
+	}
+	if len(resp2) != len(resp) {
+		t.Errorf("cached response length mismatch")
+	}
+}
+
+func TestCache_429_NoCacheEmpty(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusTooManyRequests)
+	}))
+	defer srv.Close()
+
+	client := NewAnthropicClient(
+		WithBaseURL(srv.URL),
+		WithCredentialStore(&mockStore{access: "tok_429_empty"}),
+	)
+
+	_, err := client.FetchQuotas(context.Background())
+	if !errors.Is(err, ErrRateLimited) {
+		t.Errorf("expected ErrRateLimited, got %v", err)
+	}
+}
+
+func TestCache_Invalidate(t *testing.T) {
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(validQuotaBody())
+	}))
+	defer srv.Close()
+
+	client := NewAnthropicClient(
+		WithBaseURL(srv.URL),
+		WithCredentialStore(&mockStore{access: "tok_inv"}),
+		WithCacheTTL(5*time.Minute),
+	)
+
+	_, _ = client.FetchQuotas(context.Background())
+
+	if err := client.Invalidate(context.Background()); err != nil {
+		t.Fatalf("invalidate: %v", err)
+	}
+
+	_, err := client.FetchQuotas(context.Background())
+	if err != nil {
+		t.Fatalf("after invalidate: %v", err)
+	}
+	if calls.Load() != 2 {
+		t.Errorf("server called %d times, want 2", calls.Load())
+	}
+}
+
+func TestCache_Concurrent(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(validQuotaBody())
+	}))
+	defer srv.Close()
+
+	client := NewAnthropicClient(
+		WithBaseURL(srv.URL),
+		WithCredentialStore(&mockStore{access: "tok_concurrent"}),
+		WithCacheTTL(5*time.Minute),
+	)
+
+	var wg sync.WaitGroup
+	const goroutines = 20
+	errs := make([]error, goroutines)
+	for i := 0; i < goroutines; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			_, errs[idx] = client.FetchQuotas(context.Background())
+		}(i)
+	}
+	wg.Wait()
+	for i, err := range errs {
+		if err != nil {
+			t.Errorf("goroutine %d: %v", i, err)
+		}
 	}
 }
 
