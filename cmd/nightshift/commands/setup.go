@@ -26,7 +26,6 @@ import (
 	"github.com/marcus/nightshift/internal/reporting"
 	"github.com/marcus/nightshift/internal/scheduler"
 	"github.com/marcus/nightshift/internal/setup"
-	"github.com/marcus/nightshift/internal/snapshots"
 	"github.com/marcus/nightshift/internal/tasks"
 )
 
@@ -35,7 +34,7 @@ var setupCmd = &cobra.Command{
 	Short: "Interactive onboarding wizard",
 	Long: `Interactive onboarding wizard that configures Nightshift end-to-end.
 
-Creates/updates the global config, validates providers, runs a snapshot, previews the next run,
+Creates/updates the global config, validates providers, previews the next run,
 and optionally installs/enables the daemon.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		model, err := newSetupModel()
@@ -64,7 +63,6 @@ const (
 	stepTaskSelect
 	stepSchedule
 	stepJira
-	stepSnapshot
 	stepPreview
 	stepPath
 	stepDaemon
@@ -207,10 +205,6 @@ type setupModel struct {
 	scheduleErr       string
 	scheduleWindowEnd string
 
-	snapshotRunning bool
-	snapshotOutput  string
-	snapshotErr     error
-
 	previewRunning bool
 	previewOutput  string
 	previewErr     error
@@ -266,11 +260,6 @@ type serviceState struct {
 	installed bool
 	running   bool
 	detail    string
-}
-
-type snapshotMsg struct {
-	output string
-	err    error
 }
 
 type previewMsg struct {
@@ -513,10 +502,6 @@ func (m *setupModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.handleScheduleInput(msg)
 		case stepJira:
 			return m.handleJiraInput(msg)
-		case stepSnapshot:
-			if !m.snapshotRunning && msg.String() == "enter" {
-				return m, m.setStep(stepPreview)
-			}
 		case stepPreview:
 			if !m.previewRunning && msg.String() == "enter" {
 				if m.nightshiftInPath {
@@ -533,10 +518,6 @@ func (m *setupModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, tea.Quit
 			}
 		}
-	case snapshotMsg:
-		m.snapshotRunning = false
-		m.snapshotOutput = msg.output
-		m.snapshotErr = msg.err
 	case previewMsg:
 		m.previewRunning = false
 		m.previewOutput = msg.output
@@ -730,23 +711,6 @@ func (m *setupModel) View() string {
 		b.WriteString(styleAccent.Render("Jira integration"))
 		b.WriteString("\n")
 		renderJiraStep(&b, m)
-	case stepSnapshot:
-		b.WriteString(styleAccent.Render("Snapshot step"))
-		b.WriteString("\n")
-		b.WriteString("We’ll take a quick usage snapshot so Nightshift can set safe budgets.\n")
-		b.WriteString("No tasks run yet. This just reads local usage (and optional tmux scrape).\n\n")
-		if m.snapshotRunning {
-			b.WriteString(m.spinner.View() + "\n")
-		} else {
-			if m.snapshotErr != nil {
-				b.WriteString("Snapshot error: " + m.snapshotErr.Error() + "\n")
-			} else {
-				b.WriteString(m.snapshotOutput + "\n")
-			}
-			b.WriteString(styleNote.Render("If an estimate looks off, run `nightshift budget snapshot --provider codex` and `nightshift budget calibrate` later. Setup doesn’t change your budget math."))
-			b.WriteString("\n")
-			b.WriteString("\nPress Enter to continue.\n")
-		}
 	case stepPreview:
 		b.WriteString(styleAccent.Render("Preview step"))
 		b.WriteString("\n")
@@ -846,11 +810,6 @@ func (m *setupModel) setStep(step setupStep) tea.Cmd {
 		m.jiraErr = ""
 		m.jiraInput.SetValue("")
 		m.jiraInput.Blur()
-	case stepSnapshot:
-		m.snapshotRunning = true
-		m.snapshotOutput = ""
-		m.snapshotErr = nil
-		return runSnapshotCmd(m.cfg)
 	case stepPreview:
 		m.previewRunning = true
 		m.previewOutput = ""
@@ -1250,19 +1209,14 @@ func (m *setupModel) applyBudgetDefaults() {
 	if m.cfg.Budget.BillingMode == "" {
 		m.cfg.Budget.BillingMode = config.DefaultBillingMode
 	}
-	if m.cfg.Budget.SnapshotInterval == "" {
-		m.cfg.Budget.SnapshotInterval = config.DefaultSnapshotInterval
-	}
 	if m.cfg.Budget.WeekStartDay == "" {
 		m.cfg.Budget.WeekStartDay = config.DefaultWeekStartDay
 	}
 	if m.cfg.Budget.WeeklyTokens == 0 {
 		m.cfg.Budget.WeeklyTokens = config.DefaultWeeklyTokens
 	}
-	if m.cfg.Budget.Tracking == "" {
-		m.cfg.Budget.Tracking = config.DefaultTrackingMode
-	}
 }
+
 
 func (m *setupModel) budgetFieldValue() string {
 	switch m.budgetCursor {
@@ -1275,13 +1229,7 @@ func (m *setupModel) budgetFieldValue() string {
 	case 3:
 		return m.cfg.Budget.BillingMode
 	case 4:
-		return strconv.FormatBool(m.cfg.Budget.CalibrateEnabled)
-	case 5:
-		return m.cfg.Budget.SnapshotInterval
-	case 6:
 		return m.cfg.Budget.WeekStartDay
-	case 7:
-		return m.cfg.Budget.Tracking
 	default:
 		return ""
 	}
@@ -1313,26 +1261,10 @@ func (m *setupModel) applyBudgetEdit() error {
 		}
 		m.cfg.Budget.BillingMode = value
 	case 4:
-		v, err := strconv.ParseBool(value)
-		if err != nil {
-			return fmt.Errorf("calibrate_enabled must be true or false")
-		}
-		m.cfg.Budget.CalibrateEnabled = v
-	case 5:
-		if _, err := time.ParseDuration(value); err != nil {
-			return fmt.Errorf("snapshot_interval must be duration (e.g., 30m)")
-		}
-		m.cfg.Budget.SnapshotInterval = value
-	case 6:
 		if value != "monday" && value != "sunday" {
 			return fmt.Errorf("week_start_day must be monday or sunday")
 		}
 		m.cfg.Budget.WeekStartDay = value
-	case 7:
-		if value != "passive" && value != "active" && value != "hybrid" {
-			return fmt.Errorf("tracking must be passive, active, or hybrid")
-		}
-		m.cfg.Budget.Tracking = value
 	}
 	return nil
 }
@@ -1776,11 +1708,6 @@ func renderEnvChecks(cfg *config.Config) string {
 	} else {
 		fmt.Fprintf(&b, "  %s %s\n", styleOk.Render("OK:"), "nightshift is in PATH")
 	}
-	if _, err := execLookPath("tmux"); err != nil {
-		fmt.Fprintf(&b, "  %s %s\n", styleWarn.Render("Note:"), "tmux not found (calibration will be local-only)")
-	} else {
-		fmt.Fprintf(&b, "  %s %s\n", styleOk.Render("OK:"), "tmux available")
-	}
 	// Check for Copilot CLI (gh or copilot binary)
 	_, ghErr := execLookPath("gh")
 	_, copilotErr := execLookPath("copilot")
@@ -1814,10 +1741,7 @@ func renderBudgetFields(b *strings.Builder, m *setupModel) {
 		fmt.Sprintf("Max percent: %d", m.cfg.Budget.MaxPercent),
 		fmt.Sprintf("Reserve percent: %d", m.cfg.Budget.ReservePercent),
 		fmt.Sprintf("Billing mode: %s", m.cfg.Budget.BillingMode),
-		fmt.Sprintf("Calibrate enabled: %t", m.cfg.Budget.CalibrateEnabled),
-		fmt.Sprintf("Snapshot interval: %s", m.cfg.Budget.SnapshotInterval),
 		fmt.Sprintf("Week start day: %s", m.cfg.Budget.WeekStartDay),
-		fmt.Sprintf("Tracking: %s", m.cfg.Budget.Tracking),
 	}
 	for i, field := range fields {
 		cursor := " "
@@ -2023,81 +1947,6 @@ func makeTaskItems(cfg *config.Config, projects []string, preset setup.Preset) [
 	return items
 }
 
-func runSnapshotCmd(cfg *config.Config) tea.Cmd {
-	return func() tea.Msg {
-		output, err := runSnapshot(cfg)
-		return snapshotMsg{output: output, err: err}
-	}
-}
-
-func runSnapshot(cfg *config.Config) (string, error) {
-	database, err := db.Open(cfg.ExpandedDBPath())
-	if err != nil {
-		return "", err
-	}
-	defer func() { _ = database.Close() }()
-
-	scraper := snapshots.UsageScraper(nil)
-	if cfg.Budget.CalibrateEnabled && strings.ToLower(cfg.Budget.BillingMode) != "api" {
-		scraper = tmuxScraper{}
-	}
-
-	collector := snapshots.NewCollector(
-		database,
-		providers.NewClaudeWithPath(cfg.ExpandedProviderPath("claude")),
-		providers.NewCodexWithPath(cfg.ExpandedProviderPath("codex")),
-		providers.NewCopilotWithPath(cfg.ExpandedProviderPath("copilot")),
-		scraper,
-		weekStartDayFromConfig(cfg),
-	)
-
-	var lines []string
-	ctx := context.Background()
-	if cfg.Providers.Claude.Enabled {
-		snapshot, err := collector.TakeSnapshot(ctx, "claude")
-		if err != nil {
-			lines = append(lines, fmt.Sprintf("claude: error: %v", err))
-		} else {
-			lines = append(lines, formatSnapshotLine(snapshot))
-		}
-	}
-	if cfg.Providers.Codex.Enabled {
-		snapshot, err := collector.TakeSnapshot(ctx, "codex")
-		if err != nil {
-			lines = append(lines, fmt.Sprintf("codex: error: %v", err))
-		} else {
-			lines = append(lines, formatSnapshotLine(snapshot))
-		}
-	}
-	if cfg.Providers.Copilot.Enabled {
-		snapshot, err := collector.TakeSnapshot(ctx, "copilot")
-		if err != nil {
-			lines = append(lines, fmt.Sprintf("copilot: error: %v", err))
-		} else {
-			lines = append(lines, formatSnapshotLine(snapshot))
-		}
-	}
-	return strings.Join(lines, "\n"), nil
-}
-
-func formatSnapshotLine(snapshot snapshots.Snapshot) string {
-	scraped := "n/a"
-	if snapshot.ScrapedPct != nil {
-		scraped = fmt.Sprintf("%.1f%%", *snapshot.ScrapedPct)
-	}
-	inferred := ""
-	if snapshot.InferredBudget != nil {
-		inferred = fmt.Sprintf(", budget est %s/wk", formatTokens64(*snapshot.InferredBudget))
-	}
-	return fmt.Sprintf(
-		"%s: weekly %s, daily %s, scraped %s%s",
-		snapshot.Provider,
-		formatTokens64(snapshot.LocalTokens),
-		formatTokens64(snapshot.LocalDaily),
-		scraped,
-		inferred,
-	)
-}
 
 func runPreviewCmd(cfg *config.Config, projects []string) tea.Cmd {
 	return func() tea.Msg {
@@ -2156,7 +2005,6 @@ func setupSteps(includePathStep bool) []setupStepInfo {
 		{step: stepTaskSelect, label: "Task selection"},
 		{step: stepSchedule, label: "Schedule"},
 		{step: stepJira, label: "Jira"},
-		{step: stepSnapshot, label: "Snapshot"},
 		{step: stepPreview, label: "Preview"},
 	}
 	if includePathStep {
@@ -2307,11 +2155,7 @@ func writeGlobalConfigToPath(cfg *config.Config, configPath string) error {
 	v.Set("budget.reserve_percent", cfg.Budget.ReservePercent)
 	v.Set("budget.weekly_tokens", cfg.Budget.WeeklyTokens)
 	v.Set("budget.billing_mode", cfg.Budget.BillingMode)
-	v.Set("budget.calibrate_enabled", cfg.Budget.CalibrateEnabled)
-	v.Set("budget.snapshot_interval", cfg.Budget.SnapshotInterval)
-	v.Set("budget.snapshot_retention_days", cfg.Budget.SnapshotRetentionDays)
 	v.Set("budget.week_start_day", cfg.Budget.WeekStartDay)
-	v.Set("budget.tracking", cfg.Budget.Tracking)
 
 	// Providers: set fields individually to match mapstructure tag names (fixes #20)
 	v.Set("providers.claude.enabled", cfg.Providers.Claude.Enabled)
@@ -2606,7 +2450,7 @@ func (m *setupModel) handleJiraEnableInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) 
 			m.jiraErr = err.Error()
 			return m, nil
 		}
-		return m, m.setStep(stepSnapshot)
+		return m, m.setStep(stepPreview)
 	case "enter":
 		if m.jiraEnableCursor == 0 {
 			m.jiraEnabled = true
@@ -2620,7 +2464,7 @@ func (m *setupModel) handleJiraEnableInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) 
 				m.jiraErr = err.Error()
 				return m, nil
 			}
-			return m, m.setStep(stepSnapshot)
+			return m, m.setStep(stepPreview)
 		}
 	}
 	return m, nil
@@ -2839,7 +2683,7 @@ func (m *setupModel) handleJiraPingInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.jiraErr = err.Error()
 			return m, nil
 		}
-		return m, m.setStep(stepSnapshot)
+		return m, m.setStep(stepPreview)
 	}
 	return m, nil
 }

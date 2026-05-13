@@ -211,8 +211,7 @@ func ParseSessionJSONL(path string) (*TokenUsage, error) {
 }
 
 // GetTodayUsage returns today's total token usage.
-// Primary source: stats-cache.json (dailyModelTokens) — this is the metric the
-// calibrator was trained against, so budget ratios stay consistent.
+// Primary source: stats-cache.json (dailyModelTokens).
 // Fallback: direct JSONL scanning if stats-cache is missing or has no entry for today.
 // Note: JSONL input_tokens+output_tokens ≠ dailyModelTokens (Claude Code uses its
 // own aggregation), so JSONL fallback is approximate.

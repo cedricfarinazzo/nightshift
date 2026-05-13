@@ -554,7 +554,6 @@ func (c *Codex) ListTodaySessionFiles() ([]string, error) {
 }
 
 // GetTodayTokens returns total tokens used across all sessions today.
-// Satisfies the snapshots.CodexUsage interface.
 func (c *Codex) GetTodayTokens() (int64, error) {
 	usage, err := c.GetTodayTokenUsage()
 	if err != nil {
@@ -567,7 +566,6 @@ func (c *Codex) GetTodayTokens() (int64, error) {
 }
 
 // GetWeeklyTokens returns total tokens used across all sessions in the last 7 days.
-// Satisfies the snapshots.CodexUsage interface.
 func (c *Codex) GetWeeklyTokens() (int64, error) {
 	usage, err := c.GetWeeklyTokenUsage()
 	if err != nil {

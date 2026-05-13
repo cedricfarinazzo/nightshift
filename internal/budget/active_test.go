@@ -7,59 +7,19 @@ import (
 	"net/http/httptest"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/marcus/nightshift/internal/config"
 	"github.com/marcus/nightshift/internal/usage"
 )
 
-// --- fake passive providers ---
-
-type fakeClaudeProvider struct {
-	pct float64
-	err error
-	src string
-}
-
-func (f *fakeClaudeProvider) Name() string { return "claude" }
-func (f *fakeClaudeProvider) GetUsedPercent(_ string, _ int64) (float64, error) {
-	return f.pct, f.err
-}
-func (f *fakeClaudeProvider) LastUsedPercentSource() string { return f.src }
-
-type fakeCodexProvider struct {
-	pct   float64
-	err   error
-	reset time.Time
-}
-
-func (f *fakeCodexProvider) Name() string { return "codex" }
-func (f *fakeCodexProvider) GetUsedPercent(_ string, _ int64) (float64, error) {
-	return f.pct, f.err
-}
-func (f *fakeCodexProvider) GetResetTime(_ string) (time.Time, error) { return f.reset, nil }
-
-type fakeCopilotProvider struct {
-	pct   float64
-	err   error
-	reset time.Time
-}
-
-func (f *fakeCopilotProvider) Name() string { return "copilot" }
-func (f *fakeCopilotProvider) GetUsedPercent(_ string, _ int64) (float64, error) {
-	return f.pct, f.err
-}
-func (f *fakeCopilotProvider) GetResetTime(_ string) (time.Time, error) { return f.reset, nil }
-
 // --- helpers ---
 
-func makeConfig(tracking string) *config.Config {
+func makeConfig() *config.Config {
 	return &config.Config{
 		Budget: config.BudgetConfig{
 			Mode:         "weekly",
 			MaxPercent:   80,
 			WeeklyTokens: 1_000_000,
-			Tracking:     tracking,
 		},
 	}
 }
@@ -86,55 +46,18 @@ func anthropicErrorServer() *httptest.Server {
 	}))
 }
 
-// --- passive mode ---
-
-func TestPassiveMode_NeverCallsAPI(t *testing.T) {
-	passive := &fakeClaudeProvider{pct: 42.0}
-	cfg := makeConfig("passive")
-	mgr := NewManagerWithTracking(cfg, passive, nil, nil)
-
-	pct, err := mgr.GetUsedPercent("claude")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if pct != 42.0 {
-		t.Errorf("want 42.0, got %f", pct)
-	}
-	// In passive mode, the returned manager should use the exact passive provider passed in,
-	// not wrapped. Verify the provider is not an active wrapper.
-	if _, isActive := mgr.claude.(*anthropicActiveProvider); isActive {
-		t.Error("passive mode should not wrap provider in active adapter")
-	}
-}
-
-func TestEmptyTrackingMode_BehavesLikePassive(t *testing.T) {
-	passive := &fakeClaudeProvider{pct: 55.0}
-	cfg := makeConfig("")
-	mgr := NewManagerWithTracking(cfg, passive, nil, nil)
-
-	pct, err := mgr.GetUsedPercent("claude")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if pct != 55.0 {
-		t.Errorf("want 55.0, got %f", pct)
-	}
-}
-
-// --- active mode: anthropic adapter ---
+// --- active mode: anthropic provider ---
 
 func TestAnthropicActiveProvider_APISuccess(t *testing.T) {
 	srv := anthropicTestServer(0.6) // 60% utilization
 	defer srv.Close()
 
-	passive := &fakeClaudeProvider{pct: 99.0}
 	apiClient := usage.NewAnthropicClient(
 		usage.WithBaseURL(srv.URL),
 		usage.WithHTTPClient(srv.Client()),
-		// Use a static credential store so no real credentials are needed.
 		usage.WithCredentialStore(&staticCred{token: "test-token"}),
 	)
-	p := &anthropicActiveProvider{client: apiClient, passive: passive}
+	p := &anthropicActiveProvider{client: apiClient}
 
 	pct, err := p.GetUsedPercent("weekly", 1_000_000)
 	if err != nil {
@@ -148,40 +71,38 @@ func TestAnthropicActiveProvider_APISuccess(t *testing.T) {
 	}
 }
 
-func TestAnthropicActiveProvider_APIError_FallsBackToPassive(t *testing.T) {
+func TestAnthropicActiveProvider_APIError_ReturnsZero(t *testing.T) {
 	srv := anthropicErrorServer()
 	defer srv.Close()
 
-	passive := &fakeClaudeProvider{pct: 33.0}
 	apiClient := usage.NewAnthropicClient(
 		usage.WithBaseURL(srv.URL),
 		usage.WithHTTPClient(srv.Client()),
 		usage.WithCredentialStore(&staticCred{token: "test-token"}),
 	)
-	p := &anthropicActiveProvider{client: apiClient, passive: passive}
+	p := &anthropicActiveProvider{client: apiClient}
 
 	pct, err := p.GetUsedPercent("weekly", 1_000_000)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	if err == nil {
+		t.Fatalf("expected error on API failure, got nil")
 	}
-	if pct != 33.0 {
-		t.Errorf("want 33.0 (passive fallback), got %f", pct)
+	if pct != 0.0 {
+		t.Errorf("want 0.0 on API error, got %f", pct)
 	}
-	if p.LastUsedPercentSource() != "file" {
-		t.Errorf("want source=file, got %s", p.LastUsedPercentSource())
+	if p.LastUsedPercentSource() != "none" {
+		t.Errorf("want source=none, got %s", p.LastUsedPercentSource())
 	}
 }
 
-func TestAnthropicActiveProvider_NilClient_FallsBackToPassive(t *testing.T) {
-	passive := &fakeClaudeProvider{pct: 20.0}
-	p := &anthropicActiveProvider{client: nil, passive: passive}
+func TestAnthropicActiveProvider_NilClient_ReturnsZero(t *testing.T) {
+	p := &anthropicActiveProvider{client: nil}
 
 	pct, err := p.GetUsedPercent("weekly", 1_000_000)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	if err == nil {
+		t.Fatalf("expected error on nil client, got nil")
 	}
-	if pct != 20.0 {
-		t.Errorf("want 20.0, got %f", pct)
+	if pct != 0.0 {
+		t.Errorf("want 0.0, got %f", pct)
 	}
 }
 
@@ -214,12 +135,11 @@ func TestCopilotActiveProvider_APISuccess(t *testing.T) {
 	srv := copilotTestServer(40.0) // 40% remaining → 60% used
 	defer srv.Close()
 
-	passive := &fakeCopilotProvider{pct: 99.0}
 	ghExec := func(args ...string) ([]byte, error) {
 		return []byte("fake-gh-token\n"), nil
 	}
 	apiClient := newCopilotClientForTest(t, srv.URL, ghExec)
-	p := &copilotActiveProvider{client: apiClient, passive: passive}
+	p := &copilotActiveProvider{client: apiClient}
 
 	pct, err := p.GetUsedPercent("weekly", 300)
 	if err != nil {
@@ -233,77 +153,56 @@ func TestCopilotActiveProvider_APISuccess(t *testing.T) {
 	}
 }
 
-func TestCopilotActiveProvider_APIError_FallsBackToPassive(t *testing.T) {
+func TestCopilotActiveProvider_APIError_ReturnsZero(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusServiceUnavailable)
 	}))
 	defer srv.Close()
 
-	passive := &fakeCopilotProvider{pct: 10.0}
 	ghExec := func(args ...string) ([]byte, error) {
 		return []byte("fake-gh-token\n"), nil
 	}
 	apiClient := newCopilotClientForTest(t, srv.URL, ghExec)
-	p := &copilotActiveProvider{client: apiClient, passive: passive}
+	p := &copilotActiveProvider{client: apiClient}
 
 	pct, err := p.GetUsedPercent("weekly", 300)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	if err == nil {
+		t.Fatalf("expected error on API failure, got nil")
 	}
-	if pct != 10.0 {
-		t.Errorf("want 10.0 (passive fallback), got %f", pct)
+	if pct != 0.0 {
+		t.Errorf("want 0.0 on API error, got %f", pct)
 	}
-	if p.LastUsedPercentSource() != "file" {
-		t.Errorf("want source=file, got %s", p.LastUsedPercentSource())
+	if p.LastUsedPercentSource() != "none" {
+		t.Errorf("want source=none, got %s", p.LastUsedPercentSource())
 	}
 }
 
-// --- hybrid mode via NewManagerWithTracking ---
+// --- NewManagerWithTracking ---
 
-func TestHybridMode_ConstructsActiveWrappersViaNewManagerWithTracking(t *testing.T) {
-	// Test that NewManagerWithTracking with tracking="hybrid" creates active wrappers.
-	// This verifies the constructor properly detects the tracking mode and wraps providers.
-	passiveClaude := &fakeClaudeProvider{pct: 42.0}
-	passiveCodex := &fakeCodexProvider{pct: 50.0}
-	passiveCopilot := &fakeCopilotProvider{pct: 30.0}
-
-	cfg := makeConfig("hybrid")
-	// NewManagerWithTracking creates AnthropicClient and wraps all providers.
-	// Construction succeeds even without real credentials (errors occur at API call time).
-	mgr := NewManagerWithTracking(cfg, passiveClaude, passiveCodex, passiveCopilot)
-
-	// Verify the manager was created (no panic, no error).
+func TestNewManagerWithTracking_Constructs(t *testing.T) {
+	cfg := makeConfig()
+	// Construction succeeds; providers may or may not have credentials depending on environment.
+	mgr := NewManagerWithTracking(cfg)
 	if mgr == nil {
 		t.Fatal("NewManagerWithTracking returned nil manager")
 	}
-	// In hybrid mode, the manager should be populated with wrapped providers.
-	// We can't directly inspect mgr.claude without exposing it, but we can verify
-	// GetUsedPercent doesn't panic and returns a valid percentage.
-	_, err := mgr.GetUsedPercent("claude")
-	if err != nil {
-		t.Fatalf("GetUsedPercent failed: %v", err)
-	}
+	// GetUsedPercent should not panic; returns error if credentials unavailable, data if available.
+	_, _ = mgr.GetUsedPercent("claude")
 }
 
-// --- hybrid mode manual construction (for detailed testing) ---
-
-func TestHybridMode_MixedCredentials(t *testing.T) {
-	// Anthropic API succeeds; codex/copilot no credentials → passive used.
+func TestActiveMode_APISucceeds_ReturnsAPIValue(t *testing.T) {
 	srv := anthropicTestServer(0.25)
 	defer srv.Close()
-
-	passiveClaude := &fakeClaudeProvider{pct: 99.0}
-	passiveCodex := &fakeCodexProvider{pct: 50.0}
 
 	apiClient := usage.NewAnthropicClient(
 		usage.WithBaseURL(srv.URL),
 		usage.WithHTTPClient(srv.Client()),
 		usage.WithCredentialStore(&staticCred{token: "test-token"}),
 	)
-	claudeP := &anthropicActiveProvider{client: apiClient, passive: passiveClaude, hybrid: true}
-	codexP := &codexActiveProvider{client: nil, passive: passiveCodex}
+	claudeP := &anthropicActiveProvider{client: apiClient}
+	codexP := &codexActiveProvider{client: nil}
 
-	cfg := makeConfig("hybrid")
+	cfg := makeConfig()
 	mgr := NewManager(cfg, claudeP, codexP, nil)
 
 	pct, err := mgr.GetUsedPercent("claude")
@@ -315,11 +214,11 @@ func TestHybridMode_MixedCredentials(t *testing.T) {
 	}
 
 	pct, err = mgr.GetUsedPercent("codex")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	if err == nil {
+		t.Fatalf("expected error on nil client, got nil")
 	}
-	if pct != 50.0 {
-		t.Errorf("want 50.0 (passive), got %f", pct)
+	if pct != 0.0 {
+		t.Errorf("want 0.0 (no client), got %f", pct)
 	}
 }
 
@@ -329,13 +228,12 @@ func TestAnthropicActiveProvider_Concurrent(t *testing.T) {
 	srv := anthropicTestServer(0.5)
 	defer srv.Close()
 
-	passive := &fakeClaudeProvider{pct: 99.0}
 	apiClient := usage.NewAnthropicClient(
 		usage.WithBaseURL(srv.URL),
 		usage.WithHTTPClient(srv.Client()),
 		usage.WithCredentialStore(&staticCred{token: "test-token"}),
 	)
-	p := &anthropicActiveProvider{client: apiClient, passive: passive}
+	p := &anthropicActiveProvider{client: apiClient}
 
 	var wg sync.WaitGroup
 	for i := 0; i < 20; i++ {

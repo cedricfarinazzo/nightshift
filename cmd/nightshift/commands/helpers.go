@@ -7,11 +7,8 @@ import (
 
 	"github.com/marcus/nightshift/internal/agents"
 	"github.com/marcus/nightshift/internal/budget"
-	"github.com/marcus/nightshift/internal/calibrator"
 	"github.com/marcus/nightshift/internal/config"
 	"github.com/marcus/nightshift/internal/db"
-	"github.com/marcus/nightshift/internal/providers"
-	"github.com/marcus/nightshift/internal/trends"
 )
 
 // agentByName creates an agent for the given provider name.
@@ -112,13 +109,6 @@ func newCopilotAgentFromConfig(cfg *config.Config, binaryPath string, extra ...a
 }
 
 // newBudgetManager builds a budget.Manager from config and an open database.
-// Shared between run.go and jira_preview.go to avoid duplicating provider + calibrator setup.
-func newBudgetManager(cfg *config.Config, database *db.DB) *budget.Manager {
-	claudeProvider := providers.NewClaudeWithPath(cfg.ExpandedProviderPath("claude"))
-	codexProvider := providers.NewCodexWithPath(cfg.ExpandedProviderPath("codex"))
-	copilotProvider := providers.NewCopilotWithPath(cfg.ExpandedProviderPath("copilot"))
-	cal := calibrator.New(database, cfg)
-	trend := trends.NewAnalyzer(database, cfg.Budget.SnapshotRetentionDays)
-	return budget.NewManagerWithTrackingFromProviders(cfg, claudeProvider, codexProvider, copilotProvider,
-		budget.WithBudgetSource(cal), budget.WithTrendAnalyzer(trend))
+func newBudgetManager(cfg *config.Config, _ *db.DB) *budget.Manager {
+	return budget.NewManagerWithTracking(cfg)
 }

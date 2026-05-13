@@ -54,12 +54,8 @@ type BudgetConfig struct {
 	WeeklyTokens          int            `json:"weekly_tokens" yaml:"weekly_tokens" mapstructure:"weekly_tokens"`           // Fallback weekly budget
 	PerProvider           map[string]int `json:"per_provider" yaml:"per_provider" mapstructure:"per_provider"`            // Per-provider overrides
 	BillingMode           string         `json:"billing_mode" yaml:"billing_mode" mapstructure:"billing_mode"`            // subscription | api
-	CalibrateEnabled      bool           `json:"calibrate_enabled" yaml:"calibrate_enabled" mapstructure:"calibrate_enabled"`       // Enable budget calibration
-	SnapshotInterval      string         `json:"snapshot_interval" yaml:"snapshot_interval" mapstructure:"snapshot_interval"`       // Interval for snapshots
-	SnapshotRetentionDays int            `json:"snapshot_retention_days" yaml:"snapshot_retention_days" mapstructure:"snapshot_retention_days"` // Snapshot retention in days
 	WeekStartDay          string         `json:"week_start_day" yaml:"week_start_day" mapstructure:"week_start_day"`          // monday | sunday
 	DBPath                string         `json:"db_path" yaml:"db_path" mapstructure:"db_path"`                 // Override DB path
-	Tracking              string         `json:"tracking" yaml:"tracking" mapstructure:"tracking"`                // passive | active | hybrid
 }
 
 // ProvidersConfig defines AI provider settings.
@@ -153,10 +149,7 @@ const (
 	DefaultReservePercent    = 5
 	DefaultWeeklyTokens      = 700000
 	DefaultBillingMode       = "subscription"
-	DefaultSnapshotInterval  = "30m"
-	DefaultSnapshotRetention = 90
 	DefaultWeekStartDay      = "monday"
-	DefaultTrackingMode      = "passive"
 	DefaultLogLevel          = "info"
 	DefaultLogFormat         = "json"
 	DefaultClaudeDataPath    = "~/.claude"
@@ -255,12 +248,8 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("budget.weekly_tokens", DefaultWeeklyTokens)
 	v.SetDefault("budget.aggressive_end_of_week", false)
 	v.SetDefault("budget.billing_mode", DefaultBillingMode)
-	v.SetDefault("budget.calibrate_enabled", true)
-	v.SetDefault("budget.snapshot_interval", DefaultSnapshotInterval)
-	v.SetDefault("budget.snapshot_retention_days", DefaultSnapshotRetention)
 	v.SetDefault("budget.week_start_day", DefaultWeekStartDay)
 	v.SetDefault("budget.db_path", DefaultDBPath())
-	v.SetDefault("budget.tracking", DefaultTrackingMode)
 
 	// Provider defaults
 	v.SetDefault("providers.preference", []string{"claude", "codex", "copilot"})
@@ -317,7 +306,6 @@ func bindEnvVars(v *viper.Viper) {
 	// Explicit bindings for nested config
 	_ = v.BindEnv("budget.max_percent", "NIGHTSHIFT_BUDGET_MAX_PERCENT")
 	_ = v.BindEnv("budget.mode", "NIGHTSHIFT_BUDGET_MODE")
-	_ = v.BindEnv("budget.tracking", "NIGHTSHIFT_BUDGET_TRACKING")
 	_ = v.BindEnv("logging.level", "NIGHTSHIFT_LOG_LEVEL")
 	_ = v.BindEnv("logging.path", "NIGHTSHIFT_LOG_PATH")
 }
@@ -342,11 +330,9 @@ var (
 	ErrInvalidWeekStartDay      = errors.New("week_start_day must be 'monday' or 'sunday'")
 	ErrInvalidMaxPercent        = errors.New("max_percent must be between 1 and 100")
 	ErrInvalidReservePercent    = errors.New("reserve_percent must be between 0 and 100")
-	ErrInvalidSnapshotRetention = errors.New("snapshot_retention_days must be >= 0")
 	ErrInvalidLogLevel          = errors.New("log level must be debug, info, warn, or error")
 	ErrInvalidLogFormat         = errors.New("log format must be json or text")
 	ErrNoSchedule               = errors.New("either cron or interval must be specified")
-	ErrInvalidTrackingMode      = errors.New("tracking mode must be 'passive', 'active', or 'hybrid'")
 
 	ErrCustomTaskMissingType        = errors.New("custom task: type is required")
 	ErrCustomTaskMissingName        = errors.New("custom task: name is required")
@@ -370,14 +356,6 @@ func Validate(cfg *Config) error {
 	// Budget mode validation
 	if cfg.Budget.Mode != "" && cfg.Budget.Mode != "daily" && cfg.Budget.Mode != "weekly" {
 		return ErrInvalidBudgetMode
-	}
-
-	// Tracking mode validation
-	if cfg.Budget.Tracking != "" {
-		t := strings.ToLower(cfg.Budget.Tracking)
-		if t != "passive" && t != "active" && t != "hybrid" {
-			return ErrInvalidTrackingMode
-		}
 	}
 
 	// Billing mode validation
@@ -406,9 +384,6 @@ func Validate(cfg *Config) error {
 		return ErrInvalidReservePercent
 	}
 
-	if cfg.Budget.SnapshotRetentionDays < 0 {
-		return ErrInvalidSnapshotRetention
-	}
 
 	// Log level validation
 	if cfg.Logging.Level != "" {
@@ -521,9 +496,6 @@ func validateCustomTasks(tasks []CustomTaskConfig) error {
 func normalizeBudgetConfig(cfg *Config) {
 	if cfg == nil {
 		return
-	}
-	if strings.EqualFold(cfg.Budget.BillingMode, "api") {
-		cfg.Budget.CalibrateEnabled = false
 	}
 }
 

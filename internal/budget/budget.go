@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/marcus/nightshift/internal/config"
-	"github.com/marcus/nightshift/internal/providers"
 )
 
 // UsageProvider is the interface for getting usage data from a provider.
@@ -58,11 +57,6 @@ type UsedPercentSourceProvider interface {
 	LastUsedPercentSource() string
 }
 
-// TrendAnalyzer predicts near-term usage to protect daytime budget.
-type TrendAnalyzer interface {
-	PredictDaytimeUsage(provider string, now time.Time, weeklyBudget int64) (int64, error)
-}
-
 // Option configures a Manager.
 type Option func(*Manager)
 
@@ -73,7 +67,6 @@ type Manager struct {
 	codex        CodexUsageProvider
 	copilot      CopilotUsageProvider
 	budgetSource BudgetSource
-	trend        TrendAnalyzer
 	nowFunc      func() time.Time // for testing
 }
 
@@ -99,12 +92,6 @@ func WithBudgetSource(source BudgetSource) Option {
 	}
 }
 
-// WithTrendAnalyzer injects a trend analyzer for predicted daytime usage.
-func WithTrendAnalyzer(analyzer TrendAnalyzer) Option {
-	return func(m *Manager) {
-		m.trend = analyzer
-	}
-}
 
 // AllowanceResult contains the calculated budget allowance and metadata.
 type AllowanceResult struct {
@@ -114,7 +101,7 @@ type AllowanceResult struct {
 	BudgetBase         int64   // Base budget for reserve calculation (daily budget or per-run allowance)
 	RemainingBudget    int64   // Remaining weekly budget (weekly mode only)
 	UsedPercent        float64 // Current used percentage
-	UsedPercentSource  string  // Source of used percentage (e.g., stats-cache, jsonl-fallback)
+	UsedPercentSource  string  // Source of used percentage (e.g., "api", "none")
 	ReserveAmount      int64   // Tokens reserved
 	PredictedUsage     int64   // Predicted remaining usage today
 	Mode               string  // "daily" or "weekly"
@@ -172,20 +159,6 @@ func (m *Manager) CalculateAllowance(provider string) (*AllowanceResult, error) 
 	// Apply reserve enforcement
 	result = m.applyReserve(result, reservePercent)
 	result.AllowanceNoDaytime = result.Allowance
-	if m.trend != nil {
-		predicted, err := m.trend.PredictDaytimeUsage(provider, m.nowFunc(), weeklyBudget)
-		if err != nil {
-			return nil, fmt.Errorf("predict daytime usage: %w", err)
-		}
-		if predicted > 0 {
-			result.PredictedUsage = predicted
-			if result.Allowance > predicted {
-				result.Allowance -= predicted
-			} else {
-				result.Allowance = 0
-			}
-		}
-	}
 	result.BudgetSource = estimate.Source
 	result.BudgetConfidence = estimate.Confidence
 	result.BudgetSampleCount = estimate.SampleCount
@@ -439,51 +412,4 @@ func (m *Manager) CanRun(provider string, estimatedTokens int64) (bool, error) {
 	return result.Allowance >= estimatedTokens, nil
 }
 
-// Tracker provides backward compatibility for tracking actual spend.
-// Deprecated: Use Manager for budget calculations.
-type Tracker struct {
-	spent map[string]int64
-	limit int64
-}
 
-// NewTracker creates a budget tracker with the given limit.
-// Deprecated: Use NewManager instead.
-func NewTracker(limitCents int64) *Tracker {
-	return &Tracker{
-		spent: make(map[string]int64),
-		limit: limitCents,
-	}
-}
-
-// Record logs spending for a provider.
-func (t *Tracker) Record(provider string, tokens int, costCents int64) {
-	t.spent[provider] += costCents
-}
-
-// Remaining returns cents left in budget.
-func (t *Tracker) Remaining() int64 {
-	var total int64
-	for _, v := range t.spent {
-		total += v
-	}
-	return t.limit - total
-}
-
-// NewManagerFromProviders is a convenience constructor that accepts the concrete provider types.
-func NewManagerFromProviders(cfg *config.Config, claude *providers.Claude, codex *providers.Codex, copilot *providers.Copilot, opts ...Option) *Manager {
-	var claudeProvider ClaudeUsageProvider
-	var codexProvider CodexUsageProvider
-	var copilotProvider CopilotUsageProvider
-
-	if claude != nil {
-		claudeProvider = claude
-	}
-	if codex != nil {
-		codexProvider = codex
-	}
-	if copilot != nil {
-		copilotProvider = copilot
-	}
-
-	return NewManager(cfg, claudeProvider, codexProvider, copilotProvider, opts...)
-}

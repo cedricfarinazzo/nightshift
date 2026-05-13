@@ -10,7 +10,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/marcus/nightshift/internal/calibrator"
 	"github.com/marcus/nightshift/internal/config"
 	"github.com/marcus/nightshift/internal/db"
 	"github.com/marcus/nightshift/internal/reporting"
@@ -50,8 +49,7 @@ func runStats(jsonOutput bool, period string) error {
 	defer func() { _ = database.Close() }()
 
 	reportsDir := reporting.DefaultReportsDir()
-	cal := calibrator.New(database, cfg)
-	s := stats.NewWithBudgetSource(database, reportsDir, cal)
+	s := stats.New(database, reportsDir)
 	result, err := s.Compute()
 	if err != nil {
 		return fmt.Errorf("computing stats: %w", err)
@@ -294,50 +292,6 @@ func renderStatsHuman(result *stats.StatsResult) error {
 	}
 	fmt.Println()
 
-	// Budget Projection section
-	projections := result.BudgetProjections
-	if len(projections) == 0 && result.BudgetProjection != nil {
-		projections = []stats.BudgetProjection{*result.BudgetProjection}
-	}
-	if len(projections) > 0 {
-		fmt.Println("Budget Projection")
-		for _, bp := range projections {
-			fmt.Printf("  [%s]\n", bp.Provider)
-			fmt.Printf("    Weekly:     %s tokens (%s)\n", formatTokens64(bp.WeeklyBudget), bp.Source)
-			fmt.Printf("    Avg daily:  %s tokens\n", formatTokens64(bp.AvgDailyUsage))
-			fmt.Printf("    Remaining:  %s tokens (%.1f%% left)\n", formatTokens64(bp.RemainingTokens), maxFloat(0, 100-bp.CurrentUsedPct))
-
-			if bp.ResetAt != nil {
-				fmt.Printf("    Reset:      %s (%s)\n", bp.ResetAt.Local().Format("Jan 2 3:04pm"), formatCompactDuration(time.Until(*bp.ResetAt)))
-			} else if bp.ResetHint != "" {
-				fmt.Printf("    Reset:      %s\n", bp.ResetHint)
-			}
-
-			if bp.EstExhaustAt != nil {
-				if time.Until(*bp.EstExhaustAt) <= 0 {
-					fmt.Printf("    Projected:  budget may already be exhausted\n")
-				} else {
-					fmt.Printf("    Projected:  %s (%s)\n", bp.EstExhaustAt.Local().Format("Jan 2 3:04pm"), formatCompactDuration(time.Until(*bp.EstExhaustAt)))
-					if bp.WillExhaustBeforeReset != nil {
-						if *bp.WillExhaustBeforeReset {
-							fmt.Printf("    Outlook:    likely exhausted before reset\n")
-						} else {
-							fmt.Printf("    Outlook:    likely resets before exhaustion\n")
-						}
-					}
-				}
-			} else if bp.RemainingTokens <= 0 {
-				fmt.Printf("    At current rate: budget may be exhausted\n")
-			} else if bp.EstDaysRemaining > 0 {
-				fmt.Printf("    At current rate: ~%d days until budget exhausted\n", bp.EstDaysRemaining)
-			} else {
-				fmt.Printf("    At current rate: budget may be exhausted\n")
-			}
-
-			fmt.Println()
-		}
-	}
-
 	// Projects section
 	if len(result.ProjectBreakdown) > 0 {
 		fmt.Printf("Projects (%d)\n", result.TotalProjects)
@@ -381,31 +335,3 @@ func renderStatsHuman(result *stats.StatsResult) error {
 	return nil
 }
 
-func formatCompactDuration(d time.Duration) string {
-	if d <= 0 {
-		return "now"
-	}
-	if d < time.Minute {
-		return "<1m"
-	}
-
-	days := int(d.Hours()) / 24
-	hours := int(d.Hours()) % 24
-	mins := int(d.Minutes()) % 60
-
-	switch {
-	case days > 0:
-		return fmt.Sprintf("%dd %dh", days, hours)
-	case hours > 0:
-		return fmt.Sprintf("%dh %dm", hours, mins)
-	default:
-		return fmt.Sprintf("%dm", mins)
-	}
-}
-
-func maxFloat(a, b float64) float64 {
-	if a > b {
-		return a
-	}
-	return b
-}

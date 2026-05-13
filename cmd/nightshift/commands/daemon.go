@@ -9,24 +9,18 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strconv"
-	"strings"
 	"syscall"
 	"time"
 
 	"github.com/marcus/nightshift/internal/budget"
-	"github.com/marcus/nightshift/internal/calibrator"
 	"github.com/marcus/nightshift/internal/config"
 	"github.com/marcus/nightshift/internal/db"
 	"github.com/marcus/nightshift/internal/logging"
 	"github.com/marcus/nightshift/internal/orchestrator"
-	"github.com/marcus/nightshift/internal/providers"
 	"github.com/marcus/nightshift/internal/reporting"
 	"github.com/marcus/nightshift/internal/scheduler"
-	"github.com/marcus/nightshift/internal/snapshots"
 	"github.com/marcus/nightshift/internal/state"
 	"github.com/marcus/nightshift/internal/tasks"
-	"github.com/marcus/nightshift/internal/tmux"
-	"github.com/marcus/nightshift/internal/trends"
 	"github.com/spf13/cobra"
 )
 
@@ -226,9 +220,6 @@ func runDaemonLoop(cfg *config.Config) error {
 		return runScheduledTasks(jobCtx, cfg, database, log)
 	})
 
-	startSnapshotLoop(ctx, cfg, database, log)
-	startSnapshotPruneLoop(ctx, cfg, database, log)
-
 	// Start scheduler
 	if err := sched.Start(ctx); err != nil {
 		return fmt.Errorf("start scheduler: %w", err)
@@ -268,15 +259,7 @@ func runScheduledTasks(ctx context.Context, cfg *config.Config, database *db.DB,
 		log.Infof("cleared %d stale assignments", cleared)
 	}
 
-	// Initialize providers
-	claudeProvider := providers.NewClaudeWithPath(cfg.ExpandedProviderPath("claude"))
-	codexProvider := providers.NewCodexWithPath(cfg.ExpandedProviderPath("codex"))
-	copilotProvider := providers.NewCopilotWithPath(cfg.ExpandedProviderPath("copilot"))
-
-	// Initialize budget manager
-	cal := calibrator.New(database, cfg)
-	trend := trends.NewAnalyzer(database, cfg.Budget.SnapshotRetentionDays)
-	budgetMgr := budget.NewManagerFromProviders(cfg, claudeProvider, codexProvider, copilotProvider, budget.WithBudgetSource(cal), budget.WithTrendAnalyzer(trend))
+	budgetMgr := budget.NewManagerWithTracking(cfg)
 
 	report := newRunReport(time.Now(), calculateRunBudgetStart(cfg, budgetMgr, log))
 
@@ -500,118 +483,6 @@ func runScheduledTasks(ctx context.Context, cfg *config.Config, database *db.DB,
 	return nil
 }
 
-type tmuxScraper struct{}
-
-// ScrapeClaudeUsage delegates to tmux.ScrapeClaudeUsage.
-func (tmuxScraper) ScrapeClaudeUsage(ctx context.Context) (tmux.UsageResult, error) {
-	return tmux.ScrapeClaudeUsage(ctx)
-}
-
-// ScrapeCodexUsage delegates to tmux.ScrapeCodexUsage.
-func (tmuxScraper) ScrapeCodexUsage(ctx context.Context) (tmux.UsageResult, error) {
-	return tmux.ScrapeCodexUsage(ctx)
-}
-
-func startSnapshotLoop(ctx context.Context, cfg *config.Config, database *db.DB, log *logging.Logger) {
-	interval, err := time.ParseDuration(cfg.Budget.SnapshotInterval)
-	if err != nil || interval <= 0 {
-		if err != nil {
-			log.Warnf("invalid snapshot interval %q: %v", cfg.Budget.SnapshotInterval, err)
-		}
-		return
-	}
-
-	go func() {
-		takeSnapshot(ctx, cfg, database, log)
-		ticker := time.NewTicker(interval)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				takeSnapshot(ctx, cfg, database, log)
-			}
-		}
-	}()
-}
-
-func startSnapshotPruneLoop(ctx context.Context, cfg *config.Config, database *db.DB, log *logging.Logger) {
-	go func() {
-		ticker := time.NewTicker(24 * time.Hour)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				pruneSnapshots(ctx, cfg, database, log)
-			}
-		}
-	}()
-}
-
-func takeSnapshot(ctx context.Context, cfg *config.Config, database *db.DB, log *logging.Logger) {
-	scraper := snapshots.UsageScraper(nil)
-	if cfg.Budget.CalibrateEnabled && strings.ToLower(cfg.Budget.BillingMode) != "api" {
-		scraper = tmuxScraper{}
-	}
-
-	collector := snapshots.NewCollector(
-		database,
-		providers.NewClaudeWithPath(cfg.ExpandedProviderPath("claude")),
-		providers.NewCodexWithPath(cfg.ExpandedProviderPath("codex")),
-		providers.NewCopilotWithPath(cfg.ExpandedProviderPath("copilot")),
-		scraper,
-		weekStartDayFromConfig(cfg),
-	)
-
-	if cfg.Providers.Claude.Enabled {
-		snapshot, err := collector.TakeSnapshot(ctx, "claude")
-		if err != nil {
-			log.Warnf("snapshot claude: %v", err)
-		} else if snapshot.ScrapedPct != nil {
-			log.Infof("snapshot claude: %.1f%%", *snapshot.ScrapedPct)
-		} else {
-			log.Info("snapshot claude: local-only")
-		}
-	}
-
-	if cfg.Providers.Codex.Enabled {
-		snapshot, err := collector.TakeSnapshot(ctx, "codex")
-		if err != nil {
-			log.Warnf("snapshot codex: %v", err)
-		} else if snapshot.ScrapedPct != nil {
-			log.Infof("snapshot codex: %.1f%%", *snapshot.ScrapedPct)
-		} else {
-			log.Info("snapshot codex: local-only")
-		}
-	}
-}
-
-func pruneSnapshots(ctx context.Context, cfg *config.Config, database *db.DB, log *logging.Logger) {
-	collector := snapshots.NewCollector(database, nil, nil, nil, nil, weekStartDayFromConfig(cfg))
-	deleted, err := collector.Prune(cfg.Budget.SnapshotRetentionDays)
-	if err != nil {
-		log.Warnf("snapshot prune: %v", err)
-		return
-	}
-	if deleted > 0 {
-		log.Infof("snapshot prune: deleted %d rows", deleted)
-	}
-}
-
-func weekStartDayFromConfig(cfg *config.Config) time.Weekday {
-	if cfg == nil {
-		return time.Monday
-	}
-	switch strings.ToLower(cfg.Budget.WeekStartDay) {
-	case "sunday":
-		return time.Sunday
-	default:
-		return time.Monday
-	}
-}
 
 func runDaemonStop(cmd *cobra.Command, args []string) error {
 	running, pid := isDaemonRunning()

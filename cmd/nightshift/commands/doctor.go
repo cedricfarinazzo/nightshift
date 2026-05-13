@@ -8,19 +8,14 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
-	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/marcus/nightshift/internal/budget"
-	"github.com/marcus/nightshift/internal/calibrator"
 	"github.com/marcus/nightshift/internal/config"
 	"github.com/marcus/nightshift/internal/db"
-	"github.com/marcus/nightshift/internal/providers"
 	"github.com/marcus/nightshift/internal/scheduler"
-	"github.com/marcus/nightshift/internal/snapshots"
 	"github.com/marcus/nightshift/internal/state"
-	"github.com/marcus/nightshift/internal/trends"
 )
 
 type checkStatus string
@@ -92,10 +87,8 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	checkDaemon(add)
 
 	checkCLIs(cfg, add)
-	claudeProvider, codexProvider, copilotProvider := checkProviders(cfg, add)
-	checkBudget(cfg, database, claudeProvider, codexProvider, copilotProvider, add)
-	checkSnapshots(cfg, database, add)
-	checkTmux(cfg, add)
+	checkProviders(cfg, add)
+	checkBudget(cfg, database, add)
 
 	printDoctorResults(results)
 
@@ -195,72 +188,20 @@ func checkCLIs(cfg *config.Config, add func(string, checkStatus, string)) {
 	}
 }
 
-func checkProviders(cfg *config.Config, add func(string, checkStatus, string)) (*providers.Claude, *providers.Codex, *providers.Copilot) {
-	var claudeProvider *providers.Claude
-	var codexProvider *providers.Codex
-	var copilotProvider *providers.Copilot
-
-	mode := cfg.Budget.Mode
-	if mode == "" {
-		mode = config.DefaultBudgetMode
-	}
-
+func checkProviders(cfg *config.Config, add func(string, checkStatus, string)) {
 	if cfg.Providers.Claude.Enabled {
-		path := cfg.ExpandedProviderPath("claude")
-		if _, err := os.Stat(path); err != nil {
-			add("claude.data_path", statusFail, fmt.Sprintf("missing %s", path))
-		} else {
-			add("claude.data_path", statusOK, path)
-		}
-		claudeProvider = providers.NewClaudeWithPath(path)
-		if usage, err := claudeProvider.GetWeeklyUsage(); err == nil {
-			add("claude.weekly_tokens", statusOK, fmt.Sprintf("%d tokens", usage))
-		}
-		if pct, err := claudeProvider.GetUsedPercent(mode, int64(cfg.GetProviderBudget("claude"))); err != nil {
-			add("claude.usage", statusFail, err.Error())
-		} else {
-			add("claude.usage", statusOK, fmt.Sprintf("%.1f%% used (%s, vs config budget)", pct, mode))
-		}
+		add("claude.provider", statusOK, "enabled (active tracking via API)")
 	}
-
 	if cfg.Providers.Codex.Enabled {
-		path := cfg.ExpandedProviderPath("codex")
-		if _, err := os.Stat(path); err != nil {
-			add("codex.data_path", statusFail, fmt.Sprintf("missing %s", path))
-		} else {
-			add("codex.data_path", statusOK, path)
-		}
-		codexProvider = providers.NewCodexWithPath(path)
-		if pct, err := codexProvider.GetUsedPercent(mode, int64(cfg.GetProviderBudget("codex"))); err != nil {
-			add("codex.usage", statusFail, err.Error())
-		} else {
-			add("codex.usage", statusOK, fmt.Sprintf("%.1f%% used (%s)", pct, mode))
-		}
+		add("codex.provider", statusOK, "enabled (active tracking via API)")
 	}
-
 	if cfg.Providers.Copilot.Enabled {
-		path := cfg.ExpandedProviderPath("copilot")
-		if _, err := os.Stat(path); err != nil {
-			add("copilot.data_path", statusFail, fmt.Sprintf("missing %s", path))
-		} else {
-			add("copilot.data_path", statusOK, path)
-		}
-		copilotProvider = providers.NewCopilotWithPath(path)
-		monthlyLimit := int64(cfg.GetProviderBudget("copilot"))
-		if pct, err := copilotProvider.GetUsedPercent(mode, monthlyLimit); err != nil {
-			add("copilot.usage", statusFail, err.Error())
-		} else {
-			add("copilot.usage", statusOK, fmt.Sprintf("%.1f%% used (%s)", pct, mode))
-		}
+		add("copilot.provider", statusOK, "enabled (active tracking via API)")
 	}
-
-	return claudeProvider, codexProvider, copilotProvider
 }
 
-func checkBudget(cfg *config.Config, database *db.DB, claudeProvider *providers.Claude, codexProvider *providers.Codex, copilotProvider *providers.Copilot, add func(string, checkStatus, string)) {
-	cal := calibrator.New(database, cfg)
-	trend := trends.NewAnalyzer(database, cfg.Budget.SnapshotRetentionDays)
-	budgetMgr := budget.NewManagerFromProviders(cfg, claudeProvider, codexProvider, copilotProvider, budget.WithBudgetSource(cal), budget.WithTrendAnalyzer(trend))
+func checkBudget(cfg *config.Config, _ *db.DB, add func(string, checkStatus, string)) {
+	budgetMgr := budget.NewManagerWithTracking(cfg)
 
 	if cfg.Providers.Claude.Enabled {
 		if allowance, err := budgetMgr.CalculateAllowance("claude"); err != nil {
@@ -279,49 +220,6 @@ func checkBudget(cfg *config.Config, database *db.DB, claudeProvider *providers.
 	}
 }
 
-func checkSnapshots(cfg *config.Config, database *db.DB, add func(string, checkStatus, string)) {
-	collector := snapshots.NewCollector(database, nil, nil, nil, nil, weekStartDayFromConfig(cfg))
-
-	for _, provider := range []string{"claude", "codex", "copilot"} {
-		if provider == "claude" && !cfg.Providers.Claude.Enabled {
-			continue
-		}
-		if provider == "codex" && !cfg.Providers.Codex.Enabled {
-			continue
-		}
-		if provider == "copilot" && !cfg.Providers.Copilot.Enabled {
-			continue
-		}
-		latest, err := collector.GetLatest(provider, 1)
-		if err != nil {
-			add(fmt.Sprintf("snapshots.%s", provider), statusWarn, err.Error())
-			continue
-		}
-		if len(latest) == 0 {
-			add(fmt.Sprintf("snapshots.%s", provider), statusWarn, "no snapshots yet")
-			continue
-		}
-		age := time.Since(latest[0].Timestamp)
-		msg := fmt.Sprintf("last snapshot %s ago", age.Truncate(time.Minute))
-		if latest[0].ScrapedPct == nil && cfg.Budget.CalibrateEnabled && strings.ToLower(cfg.Budget.BillingMode) != "api" {
-			add(fmt.Sprintf("snapshots.%s", provider), statusWarn, msg+" (local-only)")
-			continue
-		}
-		add(fmt.Sprintf("snapshots.%s", provider), statusOK, msg)
-	}
-}
-
-func checkTmux(cfg *config.Config, add func(string, checkStatus, string)) {
-	if !cfg.Budget.CalibrateEnabled || strings.EqualFold(cfg.Budget.BillingMode, "api") {
-		add("tmux", statusOK, "not required")
-		return
-	}
-	if _, err := exec.LookPath("tmux"); err != nil {
-		add("tmux", statusWarn, "tmux not found; calibration will be local-only")
-		return
-	}
-	add("tmux", statusOK, "available")
-}
 
 func printDoctorResults(results []checkResult) {
 	fmt.Println("Nightshift doctor")

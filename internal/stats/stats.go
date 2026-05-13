@@ -8,15 +8,12 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"math"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 	"time"
 
-	"github.com/marcus/nightshift/internal/budget"
 	"github.com/marcus/nightshift/internal/db"
 	"github.com/marcus/nightshift/internal/reporting"
 )
@@ -76,34 +73,12 @@ type StatsResult struct {
 	TotalTokensUsed int `json:"total_tokens_used"`
 	AvgTokensPerRun int `json:"avg_tokens_per_run"`
 
-	// Budget
-	BudgetProjection  *BudgetProjection  `json:"budget_projection,omitempty"` // Deprecated: use BudgetProjections.
-	BudgetProjections []BudgetProjection `json:"budget_projections,omitempty"`
-
 	// Projects
 	TotalProjects    int            `json:"total_projects"`
 	ProjectBreakdown []ProjectStats `json:"project_breakdown,omitempty"`
 
 	// Task types
 	TaskTypeBreakdown map[string]int `json:"task_type_breakdown,omitempty"`
-}
-
-// BudgetProjection estimates remaining budget days from snapshot data.
-type BudgetProjection struct {
-	Provider               string     `json:"provider"`
-	WeeklyBudget           int64      `json:"weekly_budget"`
-	CurrentUsedPct         float64    `json:"current_used_pct"`
-	AvgDailyUsage          int64      `json:"avg_daily_usage"`
-	AvgHourlyUsage         float64    `json:"avg_hourly_usage"`
-	RemainingTokens        int64      `json:"remaining_tokens"`
-	EstDaysRemaining       int        `json:"est_days_remaining"`
-	EstHoursRemaining      float64    `json:"est_hours_remaining,omitempty"`
-	EstExhaustAt           *time.Time `json:"est_exhaust_at,omitempty"`
-	ResetAt                *time.Time `json:"reset_at,omitempty"`
-	TimeUntilResetSec      int64      `json:"time_until_reset_sec,omitempty"`
-	ResetHint              string     `json:"reset_hint,omitempty"`
-	WillExhaustBeforeReset *bool      `json:"will_exhaust_before_reset,omitempty"`
-	Source                 string     `json:"source"`
 }
 
 // ProjectStats summarizes activity for a single project.
@@ -115,10 +90,9 @@ type ProjectStats struct {
 
 // Stats computes aggregate statistics from nightshift data sources.
 type Stats struct {
-	db           *db.DB
-	reportsDir   string
-	nowFunc      func() time.Time
-	budgetSource budget.BudgetSource
+	db         *db.DB
+	reportsDir string
+	nowFunc    func() time.Time
 }
 
 // New creates a Stats instance.
@@ -127,16 +101,6 @@ func New(database *db.DB, reportsDir string) *Stats {
 		db:         database,
 		reportsDir: reportsDir,
 		nowFunc:    time.Now,
-	}
-}
-
-// NewWithBudgetSource creates a Stats instance with a calibrated budget source.
-func NewWithBudgetSource(database *db.DB, reportsDir string, source budget.BudgetSource) *Stats {
-	return &Stats{
-		db:           database,
-		reportsDir:   reportsDir,
-		nowFunc:      time.Now,
-		budgetSource: source,
 	}
 }
 
@@ -154,7 +118,6 @@ func (s *Stats) Compute() (*StatsResult, error) {
 	if s.db != nil {
 		s.computeFromRunHistory(result)
 		s.computeFromProjects(result)
-		s.computeBudgetProjections(result)
 	}
 
 	// Compute averages
@@ -413,256 +376,6 @@ func (s *Stats) computeFromProjects(result *StatsResult) {
 		}
 		return result.ProjectBreakdown[i].RunCount > result.ProjectBreakdown[j].RunCount
 	})
-}
-
-// computeBudgetProjections estimates projection windows for available providers.
-func (s *Stats) computeBudgetProjections(result *StatsResult) {
-	sqlDB := s.db.SQL()
-	if sqlDB == nil {
-		return
-	}
-
-	now := time.Now()
-	if s.nowFunc != nil {
-		now = s.nowFunc()
-	}
-
-	// Keep output stable and always include both providers when possible.
-	for _, provider := range []string{"codex", "claude"} {
-		proj, ok := s.computeProviderBudgetProjection(sqlDB, provider, now)
-		if !ok {
-			continue
-		}
-		result.BudgetProjections = append(result.BudgetProjections, proj)
-	}
-
-	if len(result.BudgetProjections) == 0 {
-		return
-	}
-
-	// Back-compat single projection field.
-	legacy := result.BudgetProjections[0]
-	result.BudgetProjection = &legacy
-}
-
-func (s *Stats) computeProviderBudgetProjection(sqlDB *sql.DB, provider string, now time.Time) (BudgetProjection, bool) {
-	if sqlDB == nil {
-		return BudgetProjection{}, false
-	}
-
-	// Latest calibrated snapshot for this provider.
-	row := sqlDB.QueryRow(
-		`SELECT CAST(timestamp AS TEXT), CAST(week_start AS TEXT), local_tokens, scraped_pct, inferred_budget, COALESCE(weekly_reset_time, '')
-		 FROM snapshots
-		 WHERE provider = ? AND inferred_budget IS NOT NULL AND inferred_budget > 0
-		 ORDER BY timestamp DESC
-		 LIMIT 1`,
-		provider,
-	)
-	var (
-		tsRaw          string
-		weekStartRaw   string
-		localTokens    int64
-		scrapedPct     sql.NullFloat64
-		inferredBudget sql.NullInt64
-		weeklyResetRaw string
-	)
-	if err := row.Scan(&tsRaw, &weekStartRaw, &localTokens, &scrapedPct, &inferredBudget, &weeklyResetRaw); err != nil {
-		if !errors.Is(err, sql.ErrNoRows) {
-			log.Printf("stats: latest %s snapshot: %v", provider, err)
-		}
-		return BudgetProjection{}, false
-	}
-
-	if !inferredBudget.Valid || inferredBudget.Int64 <= 0 {
-		return BudgetProjection{}, false
-	}
-
-	// Override budget from calibrator when available.
-	budgetValue := inferredBudget.Int64
-	budgetSourceLabel := "calibrated"
-	if s.budgetSource != nil {
-		if est, err := s.budgetSource.GetBudget(provider); err == nil && est.WeeklyTokens > 0 {
-			budgetValue = est.WeeklyTokens
-			if est.Source != "" {
-				budgetSourceLabel = est.Source
-			}
-		}
-	}
-
-	// Average each day's max local_daily, preferring the current billing week
-	// to avoid spanning week boundaries. Falls back to rolling 7-day window
-	// when the current week has fewer than 2 days of data.
-	var avgDaily sql.NullFloat64
-	useWeekWindow := false
-
-	if weekStart, ok := parseDBTimestamp(weekStartRaw); ok {
-		var dayCount int
-		// Format as ISO string for consistent SQLite text comparison.
-		weekStartStr := weekStart.Format(time.RFC3339)
-		row = sqlDB.QueryRow(
-			`SELECT AVG(day_max), COUNT(*) FROM (
-			   SELECT SUBSTR(timestamp, 1, 10) AS day, MAX(local_daily) AS day_max
-			   FROM snapshots
-			   WHERE provider = ? AND timestamp >= ? AND local_daily > 0
-			   GROUP BY SUBSTR(timestamp, 1, 10)
-			 )`,
-			provider,
-			weekStartStr,
-		)
-		if err := row.Scan(&avgDaily, &dayCount); err != nil && !errors.Is(err, sql.ErrNoRows) {
-			log.Printf("stats: week avg daily for %s: %v", provider, err)
-		}
-		if avgDaily.Valid && avgDaily.Float64 > 0 && dayCount >= 2 {
-			useWeekWindow = true
-		}
-	}
-
-	if !useWeekWindow {
-		cutoff := now.AddDate(0, 0, -7)
-		row = sqlDB.QueryRow(
-			`SELECT AVG(day_max)
-			 FROM (
-			   SELECT SUBSTR(timestamp, 1, 10) AS day, MAX(local_daily) AS day_max
-			   FROM snapshots
-			   WHERE provider = ? AND timestamp >= ? AND local_daily > 0
-			   GROUP BY SUBSTR(timestamp, 1, 10)
-			 )`,
-			provider,
-			cutoff,
-		)
-		avgDaily = sql.NullFloat64{}
-		if err := row.Scan(&avgDaily); err != nil {
-			if !errors.Is(err, sql.ErrNoRows) {
-				log.Printf("stats: avg daily usage for %s: %v", provider, err)
-			}
-			return BudgetProjection{}, false
-		}
-	}
-
-	if !avgDaily.Valid || avgDaily.Float64 <= 0 {
-		return BudgetProjection{}, false
-	}
-
-	usedPct := 0.0
-	if scrapedPct.Valid {
-		usedPct = scrapedPct.Float64
-	} else if budgetValue > 0 && localTokens > 0 {
-		usedPct = (float64(localTokens) / float64(budgetValue)) * 100
-	}
-	if usedPct < 0 {
-		usedPct = 0
-	}
-	if usedPct > 100 {
-		usedPct = 100
-	}
-
-	remaining := int64(math.Round(float64(budgetValue) * (1 - usedPct/100)))
-	if remaining < 0 {
-		remaining = 0
-	}
-
-	proj := BudgetProjection{
-		Provider:        provider,
-		WeeklyBudget:    budgetValue,
-		CurrentUsedPct:  usedPct,
-		AvgDailyUsage:   int64(math.Round(avgDaily.Float64)),
-		AvgHourlyUsage:  avgDaily.Float64 / 24.0,
-		RemainingTokens: remaining,
-		Source:          budgetSourceLabel,
-	}
-
-	if proj.AvgDailyUsage > 0 && remaining > 0 {
-		proj.EstDaysRemaining = int(float64(remaining) / float64(proj.AvgDailyUsage))
-		proj.EstHoursRemaining = (float64(remaining) / float64(proj.AvgDailyUsage)) * 24.0
-		exhaustAt := now.Add(time.Duration(proj.EstHoursRemaining * float64(time.Hour)))
-		proj.EstExhaustAt = &exhaustAt
-	}
-
-	snapshotAt := now
-	if parsed, ok := parseDBTimestamp(tsRaw); ok {
-		snapshotAt = parsed
-	}
-	if resetAt, ok := resolveResetAt(provider, weeklyResetRaw, weekStartRaw, snapshotAt, now); ok {
-		proj.ResetAt = &resetAt
-		proj.TimeUntilResetSec = int64(resetAt.Sub(now).Seconds())
-		if proj.EstExhaustAt != nil {
-			will := proj.EstExhaustAt.Before(resetAt)
-			proj.WillExhaustBeforeReset = &will
-		}
-	} else if strings.TrimSpace(weeklyResetRaw) != "" {
-		proj.ResetHint = strings.TrimSpace(weeklyResetRaw)
-	}
-
-	return proj, true
-}
-
-var resetZoneSuffixRe = regexp.MustCompile(`\s+\(([^)]+)\)\s*$`)
-
-func resolveResetAt(provider, weeklyResetRaw, weekStartRaw string, snapshotAt, now time.Time) (time.Time, bool) {
-	if at, ok := parseWeeklyResetTime(weeklyResetRaw, snapshotAt, now); ok {
-		return at, true
-	}
-
-	if weekStart, ok := parseDBTimestamp(weekStartRaw); ok {
-		resetAt := weekStart.Add(7 * 24 * time.Hour)
-		for resetAt.Before(now) {
-			resetAt = resetAt.Add(7 * 24 * time.Hour)
-		}
-		return resetAt, true
-	}
-
-	_ = provider
-	return time.Time{}, false
-}
-
-func parseWeeklyResetTime(raw string, snapshotAt, now time.Time) (time.Time, bool) {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return time.Time{}, false
-	}
-
-	loc := snapshotAt.Location()
-	if m := resetZoneSuffixRe.FindStringSubmatch(raw); len(m) == 2 {
-		if parsedLoc, err := time.LoadLocation(strings.TrimSpace(m[1])); err == nil {
-			loc = parsedLoc
-		}
-		raw = strings.TrimSpace(resetZoneSuffixRe.ReplaceAllString(raw, ""))
-	}
-
-	layouts := []string{
-		"Jan 2 at 3:04pm",
-		"Jan 2 at 3pm",
-		"15:04 on 2 Jan",
-	}
-	ref := snapshotAt.In(loc)
-	current := now.In(loc)
-
-	for _, layout := range layouts {
-		t, err := time.ParseInLocation(layout, raw, loc)
-		if err != nil {
-			continue
-		}
-
-		candidate := time.Date(ref.Year(), t.Month(), t.Day(), t.Hour(), t.Minute(), 0, 0, loc)
-		// Year rollover handling (e.g., Jan dates observed from late Dec snapshots).
-		if candidate.Before(ref.Add(-31 * 24 * time.Hour)) {
-			candidate = candidate.AddDate(1, 0, 0)
-		}
-		for candidate.Before(current) {
-			candidate = candidate.Add(7 * 24 * time.Hour)
-		}
-		return candidate, true
-	}
-
-	if parsed, ok := parseDBTimestamp(raw); ok {
-		for parsed.Before(now) {
-			parsed = parsed.Add(7 * 24 * time.Hour)
-		}
-		return parsed, true
-	}
-
-	return time.Time{}, false
 }
 
 func parseDBTimestamp(raw string) (time.Time, bool) {
