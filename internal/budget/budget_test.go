@@ -680,18 +680,6 @@ func TestGetUsedPercent_Errors(t *testing.T) {
 	}
 }
 
-func TestTracker_BackwardCompat(t *testing.T) {
-	tracker := NewTracker(10000) // 100 dollars in cents
-
-	tracker.Record("claude", 1000, 500)
-	tracker.Record("codex", 500, 200)
-
-	remaining := tracker.Remaining()
-	expected := int64(10000 - 500 - 200)
-	if remaining != expected {
-		t.Errorf("Remaining() = %d, want %d", remaining, expected)
-	}
-}
 
 func TestReserveEnforcement(t *testing.T) {
 	tests := []struct {

@@ -18,7 +18,6 @@ import (
 	"github.com/marcus/nightshift/internal/db"
 	"github.com/marcus/nightshift/internal/logging"
 	"github.com/marcus/nightshift/internal/orchestrator"
-	"github.com/marcus/nightshift/internal/providers"
 	"github.com/marcus/nightshift/internal/reporting"
 	"github.com/marcus/nightshift/internal/scheduler"
 	"github.com/marcus/nightshift/internal/snapshots"
@@ -267,14 +266,8 @@ func runScheduledTasks(ctx context.Context, cfg *config.Config, database *db.DB,
 		log.Infof("cleared %d stale assignments", cleared)
 	}
 
-	// Initialize providers
-	claudeProvider := providers.NewClaudeWithPath(cfg.ExpandedProviderPath("claude"))
-	codexProvider := providers.NewCodexWithPath(cfg.ExpandedProviderPath("codex"))
-	copilotProvider := providers.NewCopilotWithPath(cfg.ExpandedProviderPath("copilot"))
-
-	// Initialize budget manager
 	trend := trends.NewAnalyzer(database, cfg.Budget.SnapshotRetentionDays)
-	budgetMgr := budget.NewManagerFromProviders(cfg, claudeProvider, codexProvider, copilotProvider, budget.WithTrendAnalyzer(trend))
+	budgetMgr := budget.NewManagerWithTracking(cfg, budget.WithTrendAnalyzer(trend))
 
 	report := newRunReport(time.Now(), calculateRunBudgetStart(cfg, budgetMgr, log))
 

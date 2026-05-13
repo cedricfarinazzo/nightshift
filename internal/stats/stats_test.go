@@ -530,8 +530,8 @@ func TestCompute_BudgetProjection(t *testing.T) {
 	if bp.RemainingTokens != 300000 {
 		t.Errorf("RemainingTokens = %d, want 300000", bp.RemainingTokens)
 	}
-	if bp.Source != "calibrated" {
-		t.Errorf("Source = %s, want calibrated", bp.Source)
+	if bp.Source != "inferred" {
+		t.Errorf("Source = %s, want inferred", bp.Source)
 	}
 	// EstDaysRemaining = (500000 * 0.60) / 2000 = 150
 	if bp.EstDaysRemaining != 150 {
@@ -912,7 +912,7 @@ func TestStatsResult_JSONRoundTrip(t *testing.T) {
 			AvgHourlyUsage:   83.33,
 			RemainingTokens:  300000,
 			EstDaysRemaining: 150,
-			Source:           "calibrated",
+			Source:           "inferred",
 		},
 		BudgetProjections: []BudgetProjection{
 			{
@@ -923,7 +923,7 @@ func TestStatsResult_JSONRoundTrip(t *testing.T) {
 				AvgHourlyUsage:   83.33,
 				RemainingTokens:  300000,
 				EstDaysRemaining: 150,
-				Source:           "calibrated",
+				Source:           "inferred",
 			},
 		},
 	}

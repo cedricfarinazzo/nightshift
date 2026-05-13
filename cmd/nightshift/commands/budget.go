@@ -14,7 +14,6 @@ import (
 	"github.com/marcus/nightshift/internal/budget"
 	"github.com/marcus/nightshift/internal/config"
 	"github.com/marcus/nightshift/internal/db"
-	"github.com/marcus/nightshift/internal/providers"
 	"github.com/marcus/nightshift/internal/snapshots"
 	"github.com/marcus/nightshift/internal/trends"
 )
@@ -78,39 +77,8 @@ func runBudget(opts budgetOptions) error {
 	}
 	defer func() { _ = database.Close() }()
 
-	var claude *providers.Claude
-	var codex *providers.Codex
-	var copilot *providers.Copilot
-
-	if cfg.Providers.Claude.Enabled {
-		dataPath := cfg.ExpandedProviderPath("claude")
-		if dataPath != "" {
-			claude = providers.NewClaudeWithPath(dataPath)
-		} else {
-			claude = providers.NewClaude()
-		}
-	}
-
-	if cfg.Providers.Codex.Enabled {
-		dataPath := cfg.ExpandedProviderPath("codex")
-		if dataPath != "" {
-			codex = providers.NewCodexWithPath(dataPath)
-		} else {
-			codex = providers.NewCodex()
-		}
-	}
-
-	if cfg.Providers.Copilot.Enabled {
-		dataPath := cfg.ExpandedProviderPath("copilot")
-		if dataPath != "" {
-			copilot = providers.NewCopilotWithPath(dataPath)
-		} else {
-			copilot = providers.NewCopilot()
-		}
-	}
-
 	trend := trends.NewAnalyzer(database, cfg.Budget.SnapshotRetentionDays)
-	mgr := budget.NewManagerWithTrackingFromProviders(cfg, claude, codex, copilot, budget.WithTrendAnalyzer(trend))
+	mgr := budget.NewManagerWithTracking(cfg, budget.WithTrendAnalyzer(trend))
 
 	providerList, err := resolveProviderList(cfg, opts.provider)
 	if err != nil {
@@ -139,7 +107,7 @@ func runBudget(opts budgetOptions) error {
 	snapCollector := snapshots.NewCollector(database, weekStartDayFromConfig(cfg))
 
 	for _, provName := range providerList {
-		if err := printProviderBudgetActive(cfg, provName, mgr, snapCollector, codex, opts); err != nil {
+		if err := printProviderBudgetActive(cfg, provName, mgr, snapCollector, opts); err != nil {
 			fmt.Printf("%s: error: %v\n\n", provName, err)
 			continue
 		}
@@ -156,7 +124,6 @@ func printProviderBudgetActive(
 	provName string,
 	mgr *budget.Manager,
 	snapCollector *snapshots.Collector,
-	codex *providers.Codex,
 	opts budgetOptions,
 ) error {
 	ctx := context.Background()

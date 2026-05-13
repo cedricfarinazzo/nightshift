@@ -16,7 +16,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/marcus/nightshift/internal/budget"
 	"github.com/marcus/nightshift/internal/db"
 	"github.com/marcus/nightshift/internal/reporting"
 )
@@ -115,10 +114,9 @@ type ProjectStats struct {
 
 // Stats computes aggregate statistics from nightshift data sources.
 type Stats struct {
-	db           *db.DB
-	reportsDir   string
-	nowFunc      func() time.Time
-	budgetSource budget.BudgetSource
+	db         *db.DB
+	reportsDir string
+	nowFunc    func() time.Time
 }
 
 // New creates a Stats instance.
@@ -127,16 +125,6 @@ func New(database *db.DB, reportsDir string) *Stats {
 		db:         database,
 		reportsDir: reportsDir,
 		nowFunc:    time.Now,
-	}
-}
-
-// NewWithBudgetSource creates a Stats instance with a calibrated budget source.
-func NewWithBudgetSource(database *db.DB, reportsDir string, source budget.BudgetSource) *Stats {
-	return &Stats{
-		db:           database,
-		reportsDir:   reportsDir,
-		nowFunc:      time.Now,
-		budgetSource: source,
 	}
 }
 
@@ -478,17 +466,8 @@ func (s *Stats) computeProviderBudgetProjection(sqlDB *sql.DB, provider string, 
 		return BudgetProjection{}, false
 	}
 
-	// Override budget from calibrator when available.
 	budgetValue := inferredBudget.Int64
-	budgetSourceLabel := "calibrated"
-	if s.budgetSource != nil {
-		if est, err := s.budgetSource.GetBudget(provider); err == nil && est.WeeklyTokens > 0 {
-			budgetValue = est.WeeklyTokens
-			if est.Source != "" {
-				budgetSourceLabel = est.Source
-			}
-		}
-	}
+	budgetSourceLabel := "inferred"
 
 	// Average each day's max local_daily, preferring the current billing week
 	// to avoid spanning week boundaries. Falls back to rolling 7-day window

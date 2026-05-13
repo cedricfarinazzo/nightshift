@@ -15,7 +15,6 @@ import (
 	"time"
 
 	"github.com/marcus/nightshift/internal/agents"
-	"github.com/marcus/nightshift/internal/budget"
 	"github.com/marcus/nightshift/internal/logging"
 	"github.com/marcus/nightshift/internal/tasks"
 )
@@ -113,7 +112,6 @@ func DefaultConfig() Config {
 // Orchestrator manages agent execution using plan-implement-review loop.
 type Orchestrator struct {
 	agent        agents.Agent
-	budget       *budget.Tracker
 	queue        *tasks.Queue
 	config       Config
 	logger       *logging.Logger
@@ -128,13 +126,6 @@ type Option func(*Orchestrator)
 func WithAgent(a agents.Agent) Option {
 	return func(o *Orchestrator) {
 		o.agent = a
-	}
-}
-
-// WithBudget sets the budget tracker.
-func WithBudget(b *budget.Tracker) Option {
-	return func(o *Orchestrator) {
-		o.budget = b
 	}
 }
 

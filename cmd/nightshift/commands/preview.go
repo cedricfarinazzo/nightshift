@@ -13,7 +13,6 @@ import (
 	"github.com/marcus/nightshift/internal/config"
 	"github.com/marcus/nightshift/internal/db"
 	"github.com/marcus/nightshift/internal/orchestrator"
-	"github.com/marcus/nightshift/internal/providers"
 	"github.com/marcus/nightshift/internal/scheduler"
 	"github.com/marcus/nightshift/internal/state"
 	"github.com/marcus/nightshift/internal/tasks"
@@ -253,11 +252,8 @@ func buildPreviewResult(cfg *config.Config, database *db.DB, projects []string, 
 		return nil, fmt.Errorf("compute next runs: %w", err)
 	}
 
-	claudeProvider := providers.NewClaudeWithPath(cfg.ExpandedProviderPath("claude"))
-	codexProvider := providers.NewCodexWithPath(cfg.ExpandedProviderPath("codex"))
-	copilotProvider := providers.NewCopilotWithPath(cfg.ExpandedProviderPath("copilot"))
 	trend := trends.NewAnalyzer(database, cfg.Budget.SnapshotRetentionDays)
-	budgetMgr := budget.NewManagerFromProviders(cfg, claudeProvider, codexProvider, copilotProvider, budget.WithTrendAnalyzer(trend))
+	budgetMgr := budget.NewManagerWithTracking(cfg, budget.WithTrendAnalyzer(trend))
 
 	selector := tasks.NewSelector(cfg, st)
 	orch := orchestrator.New()

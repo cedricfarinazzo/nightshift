@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/marcus/nightshift/internal/config"
-	"github.com/marcus/nightshift/internal/providers"
 )
 
 // UsageProvider is the interface for getting usage data from a provider.
@@ -439,51 +438,4 @@ func (m *Manager) CanRun(provider string, estimatedTokens int64) (bool, error) {
 	return result.Allowance >= estimatedTokens, nil
 }
 
-// Tracker provides backward compatibility for tracking actual spend.
-// Deprecated: Use Manager for budget calculations.
-type Tracker struct {
-	spent map[string]int64
-	limit int64
-}
 
-// NewTracker creates a budget tracker with the given limit.
-// Deprecated: Use NewManager instead.
-func NewTracker(limitCents int64) *Tracker {
-	return &Tracker{
-		spent: make(map[string]int64),
-		limit: limitCents,
-	}
-}
-
-// Record logs spending for a provider.
-func (t *Tracker) Record(provider string, tokens int, costCents int64) {
-	t.spent[provider] += costCents
-}
-
-// Remaining returns cents left in budget.
-func (t *Tracker) Remaining() int64 {
-	var total int64
-	for _, v := range t.spent {
-		total += v
-	}
-	return t.limit - total
-}
-
-// NewManagerFromProviders is a convenience constructor that accepts the concrete provider types.
-func NewManagerFromProviders(cfg *config.Config, claude *providers.Claude, codex *providers.Codex, copilot *providers.Copilot, opts ...Option) *Manager {
-	var claudeProvider ClaudeUsageProvider
-	var codexProvider CodexUsageProvider
-	var copilotProvider CopilotUsageProvider
-
-	if claude != nil {
-		claudeProvider = claude
-	}
-	if codex != nil {
-		codexProvider = codex
-	}
-	if copilot != nil {
-		copilotProvider = copilot
-	}
-
-	return NewManager(cfg, claudeProvider, codexProvider, copilotProvider, opts...)
-}

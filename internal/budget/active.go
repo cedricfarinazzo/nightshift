@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/marcus/nightshift/internal/config"
-	"github.com/marcus/nightshift/internal/providers"
+
 	"github.com/marcus/nightshift/internal/usage"
 	"github.com/rs/zerolog/log"
 )
@@ -25,7 +25,7 @@ type ProviderUsage struct {
 	Quotas    []Quota
 	Credits   *float64
 	ResetTime *time.Time
-	Source    string // "api", "file", "tmux"
+	Source    string // "api", "none"
 	FetchedAt time.Time
 }
 
@@ -247,18 +247,6 @@ func NewManagerWithTracking(cfg *config.Config, opts ...Option) *Manager {
 	}
 
 	return NewManager(cfg, claudeP, codexP, copilotP, opts...)
-}
-
-// NewManagerWithTrackingFromProviders is a convenience wrapper — providers param kept for
-// call-site compatibility but ignored; API clients are initialized internally.
-func NewManagerWithTrackingFromProviders(
-	cfg *config.Config,
-	_ *providers.Claude,
-	_ *providers.Codex,
-	_ *providers.Copilot,
-	opts ...Option,
-) *Manager {
-	return NewManagerWithTracking(cfg, opts...)
 }
 
 // FetchProviderUsage fetches unified usage data for a named provider using API clients.
