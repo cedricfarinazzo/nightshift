@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
-	"time"
 
 	"github.com/spf13/cobra"
 
@@ -16,9 +15,7 @@ import (
 	"github.com/marcus/nightshift/internal/config"
 	"github.com/marcus/nightshift/internal/db"
 	"github.com/marcus/nightshift/internal/scheduler"
-	"github.com/marcus/nightshift/internal/snapshots"
 	"github.com/marcus/nightshift/internal/state"
-	"github.com/marcus/nightshift/internal/trends"
 )
 
 type checkStatus string
@@ -92,7 +89,6 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	checkCLIs(cfg, add)
 	checkProviders(cfg, add)
 	checkBudget(cfg, database, add)
-	checkSnapshots(cfg, database, add)
 
 	printDoctorResults(results)
 
@@ -204,9 +200,8 @@ func checkProviders(cfg *config.Config, add func(string, checkStatus, string)) {
 	}
 }
 
-func checkBudget(cfg *config.Config, database *db.DB, add func(string, checkStatus, string)) {
-	trend := trends.NewAnalyzer(database, cfg.Budget.SnapshotRetentionDays)
-	budgetMgr := budget.NewManagerWithTracking(cfg, budget.WithTrendAnalyzer(trend))
+func checkBudget(cfg *config.Config, _ *db.DB, add func(string, checkStatus, string)) {
+	budgetMgr := budget.NewManagerWithTracking(cfg)
 
 	if cfg.Providers.Claude.Enabled {
 		if allowance, err := budgetMgr.CalculateAllowance("claude"); err != nil {
@@ -225,33 +220,6 @@ func checkBudget(cfg *config.Config, database *db.DB, add func(string, checkStat
 	}
 }
 
-func checkSnapshots(cfg *config.Config, database *db.DB, add func(string, checkStatus, string)) {
-	collector := snapshots.NewCollector(database, weekStartDayFromConfig(cfg))
-
-	for _, provider := range []string{"claude", "codex", "copilot"} {
-		if provider == "claude" && !cfg.Providers.Claude.Enabled {
-			continue
-		}
-		if provider == "codex" && !cfg.Providers.Codex.Enabled {
-			continue
-		}
-		if provider == "copilot" && !cfg.Providers.Copilot.Enabled {
-			continue
-		}
-		latest, err := collector.GetLatest(provider, 1)
-		if err != nil {
-			add(fmt.Sprintf("snapshots.%s", provider), statusWarn, err.Error())
-			continue
-		}
-		if len(latest) == 0 {
-			add(fmt.Sprintf("snapshots.%s", provider), statusWarn, "no snapshots yet")
-			continue
-		}
-		age := time.Since(latest[0].Timestamp)
-		msg := fmt.Sprintf("last snapshot %s ago", age.Truncate(time.Minute))
-		add(fmt.Sprintf("snapshots.%s", provider), statusOK, msg)
-	}
-}
 
 func printDoctorResults(results []checkResult) {
 	fmt.Println("Nightshift doctor")

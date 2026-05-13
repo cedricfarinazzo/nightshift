@@ -63,15 +63,6 @@ func (m *mockBudgetSource) GetBudget(provider string) (BudgetEstimate, error) {
 	return m.estimate, m.err
 }
 
-type mockTrendAnalyzer struct {
-	predicted int64
-	err       error
-}
-
-func (m *mockTrendAnalyzer) PredictDaytimeUsage(provider string, now time.Time, weeklyBudget int64) (int64, error) {
-	return m.predicted, m.err
-}
-
 func TestCalculateAllowance_DailyMode(t *testing.T) {
 	tests := []struct {
 		name           string
@@ -305,34 +296,6 @@ func TestAggressiveEndOfWeek(t *testing.T) {
 				t.Errorf("multiplier = %f, want %f", result.Multiplier, tt.wantMultiplier)
 			}
 		})
-	}
-}
-
-func TestCalculateAllowance_PredictedUsage(t *testing.T) {
-	cfg := &config.Config{
-		Budget: config.BudgetConfig{
-			Mode:           "daily",
-			WeeklyTokens:   700000,
-			MaxPercent:     10,
-			ReservePercent: 0,
-		},
-	}
-
-	claude := &mockClaudeProvider{usedPercent: 0}
-	mgr := NewManager(cfg, claude, nil, nil, WithTrendAnalyzer(&mockTrendAnalyzer{predicted: 2000}))
-
-	result, err := mgr.CalculateAllowance("claude")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if result.Allowance != 8000 {
-		t.Fatalf("allowance = %d, want %d", result.Allowance, 8000)
-	}
-	if result.AllowanceNoDaytime != 10000 {
-		t.Fatalf("allowance no daytime = %d, want %d", result.AllowanceNoDaytime, 10000)
-	}
-	if result.PredictedUsage != 2000 {
-		t.Fatalf("predicted usage = %d, want %d", result.PredictedUsage, 2000)
 	}
 }
 

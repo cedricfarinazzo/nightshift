@@ -9,7 +9,6 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strconv"
-	"strings"
 	"syscall"
 	"time"
 
@@ -20,11 +19,8 @@ import (
 	"github.com/marcus/nightshift/internal/orchestrator"
 	"github.com/marcus/nightshift/internal/reporting"
 	"github.com/marcus/nightshift/internal/scheduler"
-	"github.com/marcus/nightshift/internal/snapshots"
 	"github.com/marcus/nightshift/internal/state"
 	"github.com/marcus/nightshift/internal/tasks"
-	"github.com/marcus/nightshift/internal/trends"
-	"github.com/marcus/nightshift/internal/usage"
 	"github.com/spf13/cobra"
 )
 
@@ -224,9 +220,6 @@ func runDaemonLoop(cfg *config.Config) error {
 		return runScheduledTasks(jobCtx, cfg, database, log)
 	})
 
-	startSnapshotLoop(ctx, cfg, database, log)
-	startSnapshotPruneLoop(ctx, cfg, database, log)
-
 	// Start scheduler
 	if err := sched.Start(ctx); err != nil {
 		return fmt.Errorf("start scheduler: %w", err)
@@ -266,8 +259,7 @@ func runScheduledTasks(ctx context.Context, cfg *config.Config, database *db.DB,
 		log.Infof("cleared %d stale assignments", cleared)
 	}
 
-	trend := trends.NewAnalyzer(database, cfg.Budget.SnapshotRetentionDays)
-	budgetMgr := budget.NewManagerWithTracking(cfg, budget.WithTrendAnalyzer(trend))
+	budgetMgr := budget.NewManagerWithTracking(cfg)
 
 	report := newRunReport(time.Now(), calculateRunBudgetStart(cfg, budgetMgr, log))
 
@@ -491,131 +483,6 @@ func runScheduledTasks(ctx context.Context, cfg *config.Config, database *db.DB,
 	return nil
 }
 
-func startSnapshotLoop(ctx context.Context, cfg *config.Config, database *db.DB, log *logging.Logger) {
-	interval, err := time.ParseDuration(cfg.Budget.SnapshotInterval)
-	if err != nil || interval <= 0 {
-		if err != nil {
-			log.Warnf("invalid snapshot interval %q: %v", cfg.Budget.SnapshotInterval, err)
-		}
-		return
-	}
-
-	go func() {
-		takeSnapshot(ctx, cfg, database, log)
-		ticker := time.NewTicker(interval)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				takeSnapshot(ctx, cfg, database, log)
-			}
-		}
-	}()
-}
-
-func startSnapshotPruneLoop(ctx context.Context, cfg *config.Config, database *db.DB, log *logging.Logger) {
-	go func() {
-		ticker := time.NewTicker(24 * time.Hour)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				pruneSnapshots(ctx, cfg, database, log)
-			}
-		}
-	}()
-}
-
-func takeSnapshot(ctx context.Context, cfg *config.Config, database *db.DB, log *logging.Logger) {
-	var anthropicAPI snapshots.AnthropicAPIClient
-	var codexAPI snapshots.CodexAPIClient
-	var copilotAPI snapshots.CopilotAPIClient
-
-	if cfg.Providers.Claude.Enabled {
-		if client := usage.NewAnthropicClient(); client != nil {
-			anthropicAPI = client
-		}
-	}
-	if cfg.Providers.Codex.Enabled {
-		if client, err := usage.NewCodexClient(""); err == nil {
-			codexAPI = client
-		}
-	}
-	if cfg.Providers.Copilot.Enabled {
-		if client, err := usage.NewCopilotClient(); err == nil {
-			copilotAPI = client
-		}
-	}
-
-	collector := snapshots.NewCollectorWithAPIs(
-		database,
-		weekStartDayFromConfig(cfg),
-		anthropicAPI,
-		codexAPI,
-		copilotAPI,
-	)
-
-	if cfg.Providers.Claude.Enabled {
-		snapshot, err := collector.TakeSnapshot(ctx, "claude")
-		if err != nil {
-			log.Warnf("snapshot claude: %v", err)
-		} else if snapshot.ScrapedPct != nil {
-			log.Infof("snapshot claude: %.1f%%", *snapshot.ScrapedPct)
-		} else {
-			log.Info("snapshot claude: no quota data")
-		}
-	}
-
-	if cfg.Providers.Codex.Enabled {
-		snapshot, err := collector.TakeSnapshot(ctx, "codex")
-		if err != nil {
-			log.Warnf("snapshot codex: %v", err)
-		} else if snapshot.ScrapedPct != nil {
-			log.Infof("snapshot codex: %.1f%%", *snapshot.ScrapedPct)
-		} else {
-			log.Info("snapshot codex: no quota data")
-		}
-	}
-
-	if cfg.Providers.Copilot.Enabled {
-		snapshot, err := collector.TakeSnapshot(ctx, "copilot")
-		if err != nil {
-			log.Warnf("snapshot copilot: %v", err)
-		} else if snapshot.ScrapedPct != nil {
-			log.Infof("snapshot copilot: %.1f%%", *snapshot.ScrapedPct)
-		} else {
-			log.Info("snapshot copilot: no quota data")
-		}
-	}
-}
-
-func pruneSnapshots(ctx context.Context, cfg *config.Config, database *db.DB, log *logging.Logger) {
-	collector := snapshots.NewCollector(database, weekStartDayFromConfig(cfg))
-	deleted, err := collector.Prune(cfg.Budget.SnapshotRetentionDays)
-	if err != nil {
-		log.Warnf("snapshot prune: %v", err)
-		return
-	}
-	if deleted > 0 {
-		log.Infof("snapshot prune: deleted %d rows", deleted)
-	}
-}
-
-func weekStartDayFromConfig(cfg *config.Config) time.Weekday {
-	if cfg == nil {
-		return time.Monday
-	}
-	switch strings.ToLower(cfg.Budget.WeekStartDay) {
-	case "sunday":
-		return time.Sunday
-	default:
-		return time.Monday
-	}
-}
 
 func runDaemonStop(cmd *cobra.Command, args []string) error {
 	running, pid := isDaemonRunning()

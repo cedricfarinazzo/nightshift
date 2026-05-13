@@ -57,11 +57,6 @@ type UsedPercentSourceProvider interface {
 	LastUsedPercentSource() string
 }
 
-// TrendAnalyzer predicts near-term usage to protect daytime budget.
-type TrendAnalyzer interface {
-	PredictDaytimeUsage(provider string, now time.Time, weeklyBudget int64) (int64, error)
-}
-
 // Option configures a Manager.
 type Option func(*Manager)
 
@@ -72,7 +67,6 @@ type Manager struct {
 	codex        CodexUsageProvider
 	copilot      CopilotUsageProvider
 	budgetSource BudgetSource
-	trend        TrendAnalyzer
 	nowFunc      func() time.Time // for testing
 }
 
@@ -98,12 +92,6 @@ func WithBudgetSource(source BudgetSource) Option {
 	}
 }
 
-// WithTrendAnalyzer injects a trend analyzer for predicted daytime usage.
-func WithTrendAnalyzer(analyzer TrendAnalyzer) Option {
-	return func(m *Manager) {
-		m.trend = analyzer
-	}
-}
 
 // AllowanceResult contains the calculated budget allowance and metadata.
 type AllowanceResult struct {
@@ -171,20 +159,6 @@ func (m *Manager) CalculateAllowance(provider string) (*AllowanceResult, error) 
 	// Apply reserve enforcement
 	result = m.applyReserve(result, reservePercent)
 	result.AllowanceNoDaytime = result.Allowance
-	if m.trend != nil {
-		predicted, err := m.trend.PredictDaytimeUsage(provider, m.nowFunc(), weeklyBudget)
-		if err != nil {
-			return nil, fmt.Errorf("predict daytime usage: %w", err)
-		}
-		if predicted > 0 {
-			result.PredictedUsage = predicted
-			if result.Allowance > predicted {
-				result.Allowance -= predicted
-			} else {
-				result.Allowance = 0
-			}
-		}
-	}
 	result.BudgetSource = estimate.Source
 	result.BudgetConfidence = estimate.Confidence
 	result.BudgetSampleCount = estimate.SampleCount

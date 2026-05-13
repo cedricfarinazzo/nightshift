@@ -16,7 +16,6 @@ import (
 	"github.com/marcus/nightshift/internal/scheduler"
 	"github.com/marcus/nightshift/internal/state"
 	"github.com/marcus/nightshift/internal/tasks"
-	"github.com/marcus/nightshift/internal/trends"
 )
 
 const defaultPromptPreviewChars = 400
@@ -252,8 +251,7 @@ func buildPreviewResult(cfg *config.Config, database *db.DB, projects []string, 
 		return nil, fmt.Errorf("compute next runs: %w", err)
 	}
 
-	trend := trends.NewAnalyzer(database, cfg.Budget.SnapshotRetentionDays)
-	budgetMgr := budget.NewManagerWithTracking(cfg, budget.WithTrendAnalyzer(trend))
+	budgetMgr := budget.NewManagerWithTracking(cfg)
 
 	selector := tasks.NewSelector(cfg, st)
 	orch := orchestrator.New()

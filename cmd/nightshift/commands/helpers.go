@@ -9,7 +9,6 @@ import (
 	"github.com/marcus/nightshift/internal/budget"
 	"github.com/marcus/nightshift/internal/config"
 	"github.com/marcus/nightshift/internal/db"
-	"github.com/marcus/nightshift/internal/trends"
 )
 
 // agentByName creates an agent for the given provider name.
@@ -110,7 +109,6 @@ func newCopilotAgentFromConfig(cfg *config.Config, binaryPath string, extra ...a
 }
 
 // newBudgetManager builds a budget.Manager from config and an open database.
-func newBudgetManager(cfg *config.Config, database *db.DB) *budget.Manager {
-	trend := trends.NewAnalyzer(database, cfg.Budget.SnapshotRetentionDays)
-	return budget.NewManagerWithTracking(cfg, budget.WithTrendAnalyzer(trend))
+func newBudgetManager(cfg *config.Config, _ *db.DB) *budget.Manager {
+	return budget.NewManagerWithTracking(cfg)
 }

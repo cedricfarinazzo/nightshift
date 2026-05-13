@@ -4,9 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"strings"
-	"text/tabwriter"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -14,8 +12,6 @@ import (
 	"github.com/marcus/nightshift/internal/budget"
 	"github.com/marcus/nightshift/internal/config"
 	"github.com/marcus/nightshift/internal/db"
-	"github.com/marcus/nightshift/internal/snapshots"
-	"github.com/marcus/nightshift/internal/trends"
 )
 
 var budgetCmd = &cobra.Command{
@@ -34,25 +30,10 @@ Shows spending across all providers or a specific provider.`,
 	},
 }
 
-var budgetHistoryCmd = &cobra.Command{
-	Use:   "history",
-	Short: "Show recent budget snapshots",
-	Long:  `Show recent usage snapshots stored by the active tracking system.`,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		provider, _ := cmd.Flags().GetString("provider")
-		n, _ := cmd.Flags().GetInt("n")
-		return runBudgetHistory(provider, n)
-	},
-}
-
 func init() {
 	budgetCmd.Flags().StringP("provider", "p", "", "Show specific provider status (claude, codex, copilot)")
 	budgetCmd.Flags().Bool("json", false, "Output JSON for scripting")
 	rootCmd.AddCommand(budgetCmd)
-
-	budgetHistoryCmd.Flags().StringP("provider", "p", "", "Provider to show history for (claude, codex, copilot)")
-	budgetHistoryCmd.Flags().IntP("n", "n", 20, "Number of snapshots to show")
-	budgetCmd.AddCommand(budgetHistoryCmd)
 }
 
 type budgetOptions struct {
@@ -77,8 +58,7 @@ func runBudget(opts budgetOptions) error {
 	}
 	defer func() { _ = database.Close() }()
 
-	trend := trends.NewAnalyzer(database, cfg.Budget.SnapshotRetentionDays)
-	mgr := budget.NewManagerWithTracking(cfg, budget.WithTrendAnalyzer(trend))
+	mgr := budget.NewManagerWithTracking(cfg)
 
 	providerList, err := resolveProviderList(cfg, opts.provider)
 	if err != nil {
@@ -104,10 +84,8 @@ func runBudget(opts budgetOptions) error {
 	fmt.Println(strings.Repeat("=", len(header)))
 	fmt.Println()
 
-	snapCollector := snapshots.NewCollector(database, weekStartDayFromConfig(cfg))
-
 	for _, provName := range providerList {
-		if err := printProviderBudgetActive(cfg, provName, mgr, snapCollector, opts); err != nil {
+		if err := printProviderBudgetActive(cfg, provName, mgr, opts); err != nil {
 			fmt.Printf("%s: error: %v\n\n", provName, err)
 			continue
 		}
@@ -123,7 +101,6 @@ func printProviderBudgetActive(
 	cfg *config.Config,
 	provName string,
 	mgr *budget.Manager,
-	snapCollector *snapshots.Collector,
 	opts budgetOptions,
 ) error {
 	ctx := context.Background()
@@ -167,13 +144,7 @@ func printProviderBudgetActive(
 	} else if allowanceErr == nil {
 		bar := unicodeProgressBar(result.UsedPercent, 25)
 		pct := fmt.Sprintf("%.0f%%", result.UsedPercent)
-		resetStr := ""
-		if snapCollector != nil {
-			if latest, err := snapCollector.GetLatest(provName, 1); err == nil && len(latest) > 0 {
-				resetStr = "  " + formatResetLine(latest[0].SessionResetTime, latest[0].WeeklyResetTime)
-			}
-		}
-		fmt.Printf("  Used     %s %4s%s\n", bar, pct, resetStr)
+		fmt.Printf("  Used     %s %4s\n", bar, pct)
 	}
 
 	if pu.Credits != nil {
@@ -265,82 +236,6 @@ func printBudgetJSON(cfg *config.Config, providerList []string, mgr *budget.Mana
 	return nil
 }
 
-func runBudgetHistory(filterProvider string, n int) error {
-	if n <= 0 {
-		return fmt.Errorf("n must be positive")
-	}
-
-	cfg, err := config.Load()
-	if err != nil {
-		return fmt.Errorf("loading config: %w", err)
-	}
-
-	database, err := db.Open(cfg.ExpandedDBPath())
-	if err != nil {
-		return fmt.Errorf("opening db: %w", err)
-	}
-	defer func() { _ = database.Close() }()
-
-	providerList, err := resolveProviderList(cfg, filterProvider)
-	if err != nil {
-		return err
-	}
-
-	if len(providerList) == 0 {
-		fmt.Println("No providers enabled.")
-		return nil
-	}
-
-	collector := snapshots.NewCollector(database, weekStartDayFromConfig(cfg))
-
-	for _, provider := range providerList {
-		history, err := collector.GetLatest(provider, n)
-		if err != nil {
-			fmt.Printf("%s: error: %v\n\n", provider, err)
-			continue
-		}
-		if len(history) == 0 {
-			fmt.Printf("[%s]\n  No snapshots yet.\n\n", provider)
-			continue
-		}
-
-		fmt.Printf("[%s]\n", provider)
-		printSnapshotTable(history)
-		fmt.Println()
-	}
-
-	return nil
-}
-
-func printSnapshotTable(history []snapshots.Snapshot) {
-	writer := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	_, _ = fmt.Fprintln(writer, "Time\tLocal\tDaily\tPct\tInferred\tResets")
-	for _, snapshot := range history {
-		pct := "-"
-		if snapshot.ScrapedPct != nil {
-			pct = fmt.Sprintf("%.1f%%", *snapshot.ScrapedPct)
-		}
-		inferred := "-"
-		if snapshot.InferredBudget != nil {
-			inferred = formatTokens64(*snapshot.InferredBudget)
-		}
-		resets := formatResetLine(snapshot.SessionResetTime, snapshot.WeeklyResetTime)
-		if resets == "" {
-			resets = "-"
-		}
-		_, _ = fmt.Fprintf(
-			writer,
-			"%s\t%s\t%s\t%s\t%s\t%s\n",
-			snapshot.Timestamp.Format("Jan 02 15:04"),
-			formatTokens64(snapshot.LocalTokens),
-			formatTokens64(snapshot.LocalDaily),
-			pct,
-			inferred,
-			resets,
-		)
-	}
-	_ = writer.Flush()
-}
 
 func formatTokens64(tokens int64) string {
 	if tokens >= 1000000 {
@@ -352,17 +247,6 @@ func formatTokens64(tokens int64) string {
 	return fmt.Sprintf("%d", tokens)
 }
 
-// formatResetLine builds the "Resets:" display from reset time strings.
-func formatResetLine(sessionReset, weeklyReset string) string {
-	var parts []string
-	if sessionReset != "" {
-		parts = append(parts, "session "+sessionReset)
-	}
-	if weeklyReset != "" {
-		parts = append(parts, "week "+weeklyReset)
-	}
-	return strings.Join(parts, " · ")
-}
 
 func progressBar(percent float64, width int) string {
 	displayPercent := percent
