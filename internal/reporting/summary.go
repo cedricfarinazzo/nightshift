@@ -4,6 +4,7 @@ package reporting
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -16,6 +17,7 @@ import (
 
 	"github.com/marcus/nightshift/internal/config"
 	"github.com/marcus/nightshift/internal/logging"
+	"github.com/marcus/nightshift/internal/usage"
 )
 
 // TaskResult represents a completed or skipped task in the run.
@@ -33,14 +35,15 @@ type TaskResult struct {
 
 // RunResults holds all results from a nightshift run.
 type RunResults struct {
-	Date            time.Time    `json:"date"`
-	StartBudget     int          `json:"start_budget"`
-	UsedBudget      int          `json:"used_budget"`
-	RemainingBudget int          `json:"remaining_budget"`
-	Tasks           []TaskResult `json:"tasks"`
-	StartTime       time.Time    `json:"start_time"`
-	EndTime         time.Time    `json:"end_time"`
-	LogPath         string       `json:"log_path,omitempty"`
+	Date            time.Time             `json:"date"`
+	StartBudget     int                   `json:"start_budget"`
+	UsedBudget      int                   `json:"used_budget"`
+	RemainingBudget int                   `json:"remaining_budget"`
+	Tasks           []TaskResult          `json:"tasks"`
+	StartTime       time.Time             `json:"start_time"`
+	EndTime         time.Time             `json:"end_time"`
+	LogPath         string                `json:"log_path,omitempty"`
+	CostSnapshots   []usage.CostSnapshot  `json:"cost_snapshots,omitempty"`
 }
 
 // Summary represents a generated morning summary.
@@ -54,12 +57,19 @@ type Summary struct {
 	BudgetStart     int
 	BudgetUsed      int
 	BudgetRemaining int
+	CostSnapshots   []usage.CostSnapshot
+}
+
+// CostSnapshotProvider retrieves cost snapshots from persistent storage for delta calculations.
+type CostSnapshotProvider interface {
+	GetYesterdayCostSnapshot(ctx context.Context, provider string) (*usage.CostSnapshot, error)
 }
 
 // Generator creates morning summary reports.
 type Generator struct {
-	cfg    *config.Config
-	logger *logging.Logger
+	cfg         *config.Config
+	logger      *logging.Logger
+	costHistory CostSnapshotProvider // optional; enables yesterday deltas in cost section
 }
 
 // NewGenerator creates a summary generator with the given configuration.
@@ -68,6 +78,12 @@ func NewGenerator(cfg *config.Config) *Generator {
 		cfg:    cfg,
 		logger: logging.Component("reporting"),
 	}
+}
+
+// WithCostHistory attaches a CostSnapshotProvider for yesterday-delta calculations.
+func (g *Generator) WithCostHistory(p CostSnapshotProvider) *Generator {
+	g.costHistory = p
+	return g
 }
 
 // Generate creates a summary from run results.
@@ -85,6 +101,7 @@ func (g *Generator) Generate(results *RunResults) (*Summary, error) {
 		CompletedTasks:  make([]TaskResult, 0),
 		SkippedTasks:    make([]TaskResult, 0),
 		FailedTasks:     make([]TaskResult, 0),
+		CostSnapshots:   results.CostSnapshots,
 	}
 
 	// Categorize tasks and count by project
@@ -122,6 +139,11 @@ func (g *Generator) renderMarkdown(summary *Summary, results *RunResults) string
 	fmt.Fprintf(&buf, "- Started with: %s tokens\n", formatTokens(summary.BudgetStart))
 	fmt.Fprintf(&buf, "- Used: %s tokens (%d%%)\n", formatTokens(summary.BudgetUsed), usedPercent)
 	fmt.Fprintf(&buf, "- Remaining: %s tokens\n\n", formatTokens(summary.BudgetRemaining))
+
+	// Cost section — only rendered when snapshots present
+	if len(summary.CostSnapshots) > 0 {
+		g.renderCostSection(&buf, summary.CostSnapshots)
+	}
 
 	// Projects processed section
 	if len(summary.ProjectCounts) > 0 {
@@ -198,6 +220,61 @@ func (g *Generator) renderMarkdown(summary *Summary, results *RunResults) string
 	}
 
 	return buf.String()
+}
+
+// renderCostSection writes a markdown Cost Summary table to buf.
+func (g *Generator) renderCostSection(buf *bytes.Buffer, snapshots []usage.CostSnapshot) {
+	buf.WriteString("## Cost Summary\n")
+	buf.WriteString("| Provider | Used | Remaining | Budget |\n")
+	buf.WriteString("|----------|------|-----------|--------|\n")
+
+	for _, s := range snapshots {
+		usedStr := "-"
+		remStr := "-"
+		budgetStr := "-"
+
+		switch s.Provider {
+		case "anthropic":
+			if s.Used != nil {
+				usedStr = fmt.Sprintf("$%.2f", *s.Used)
+			}
+			if s.Remaining != nil {
+				remStr = fmt.Sprintf("$%.2f", *s.Remaining)
+			}
+			if s.TotalBudget != nil {
+				budgetStr = fmt.Sprintf("$%.2f/mo", *s.TotalBudget)
+			}
+			// fetch yesterday delta when history provider available
+			if g.costHistory != nil && s.Used != nil {
+				if prev, err := g.costHistory.GetYesterdayCostSnapshot(context.Background(), s.Provider); err == nil && prev != nil && prev.Used != nil {
+					delta := *s.Used - *prev.Used
+					if delta >= 0 {
+						usedStr = fmt.Sprintf("$%.2f (+$%.2f today)", *s.Used, delta)
+					}
+				}
+			}
+		case "codex":
+			if s.Remaining != nil {
+				remStr = fmt.Sprintf("$%.2f", *s.Remaining)
+			}
+			budgetStr = "credits"
+		case "copilot":
+			if s.OverageCount > 0 {
+				usedStr = fmt.Sprintf("%d overage", s.OverageCount)
+			} else {
+				usedStr = "0 overage"
+			}
+			if s.Remaining != nil {
+				remStr = fmt.Sprintf("%.0f left", *s.Remaining)
+			}
+			if s.TotalBudget != nil {
+				budgetStr = fmt.Sprintf("%.0f/mo", *s.TotalBudget)
+			}
+		}
+
+		fmt.Fprintf(buf, "| %s | %s | %s | %s |\n", s.Provider, usedStr, remStr, budgetStr)
+	}
+	buf.WriteString("\n")
 }
 
 // formatTaskLine formats a single completed task as a markdown line.

@@ -442,6 +442,47 @@ func FetchProviderUsage(ctx context.Context, provider string) ProviderUsage {
 	return ProviderUsage{Provider: provider, Source: "none", FetchedAt: now}
 }
 
+// FetchAllCostSnapshots fetches cost snapshots from all three providers.
+// Results for providers that fail or have no cost data are silently omitted.
+// Never returns an error — failures are degraded gracefully.
+func FetchAllCostSnapshots(ctx context.Context) []usage.CostSnapshot {
+	var out []usage.CostSnapshot
+
+	// Anthropic
+	anthropicClient := usage.NewAnthropicClient()
+	if resp, err := anthropicClient.FetchQuotas(ctx); err == nil {
+		if snap := usage.ExtractAnthropicCost(resp); snap != nil {
+			out = append(out, *snap)
+		}
+	} else {
+		log.Debug().Err(err).Str("provider", "anthropic").Msg("cost: fetch failed")
+	}
+
+	// Codex
+	if codexClient, err := usage.NewCodexClient(""); err == nil {
+		if resp, err := codexClient.FetchUsage(ctx); err == nil {
+			if snap := usage.ExtractCodexCost(resp); snap != nil {
+				out = append(out, *snap)
+			}
+		} else {
+			log.Debug().Err(err).Str("provider", "codex").Msg("cost: fetch failed")
+		}
+	}
+
+	// Copilot
+	if copilotClient, err := usage.NewCopilotClient(); err == nil {
+		if resp, err := copilotClient.FetchQuotas(ctx); err == nil {
+			if snap := usage.ExtractCopilotCost(resp); snap != nil {
+				out = append(out, *snap)
+			}
+		} else {
+			log.Debug().Err(err).Str("provider", "copilot").Msg("cost: fetch failed")
+		}
+	}
+
+	return out
+}
+
 // isKnownAnthropicQuotaKey returns true for main quota windows, excluding
 // per-model variants (e.g. "seven_day_sonnet_20250514") and internal keys.
 func isKnownAnthropicQuotaKey(key string) bool {
