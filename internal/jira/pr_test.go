@@ -564,3 +564,79 @@ func TestParseCheckRuns_PreservesURLs(t *testing.T) {
 		t.Errorf("LogsURL = %q, want https://example.com/run/123", runs[0].LogsURL)
 	}
 }
+
+// ── HasMergeConflict ──────────────────────────────────────────────────────────
+
+func TestHasMergeConflict(t *testing.T) {
+	tests := []struct {
+		name      string
+		ghOutput  string
+		ghErr     error
+		wantBool  bool
+		wantErr   bool
+	}{
+		{"conflicting", "CONFLICTING", nil, true, false},
+		{"mergeable", "MERGEABLE", nil, false, false},
+		{"unknown", "UNKNOWN", nil, false, false},
+		{"whitespace trimmed", "CONFLICTING\n", nil, true, false},
+		{"api error", "", fmt.Errorf("gh failed"), false, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			orig := ghExec
+			ghExec = func(_ context.Context, _ string, args ...string) (string, error) {
+				return tt.ghOutput, tt.ghErr
+			}
+			defer func() { ghExec = orig }()
+
+			got, err := HasMergeConflict(context.Background(), "/repo", 42)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("HasMergeConflict() err=%v, wantErr=%v", err, tt.wantErr)
+			}
+			if err == nil && got != tt.wantBool {
+				t.Errorf("HasMergeConflict() = %v, want %v", got, tt.wantBool)
+			}
+		})
+	}
+}
+
+func TestFetchPRReviewComments_SetsHasConflict(t *testing.T) {
+	orig := ghExec
+	ghExec = func(_ context.Context, _ string, args ...string) (string, error) {
+		// GraphQL review threads call
+		if contains(args, "graphql") {
+			return `{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[]}}}}}`, nil
+		}
+		// check-runs API call
+		if len(args) > 1 && args[0] == "api" && strings.HasPrefix(args[1], "repos/") {
+			return `{"check_runs":[]}`, nil
+		}
+		// mergeable call: gh pr view <N> --json mergeable --jq .mergeable
+		if contains(args, "--jq") {
+			return "CONFLICTING", nil
+		}
+		// First call: gh pr view <url> --json url,state,...
+		if contains(args, "--json") {
+			return `{"url":"https://github.com/org/repo/pull/1","number":1,"state":"OPEN","reviewDecision":"","headRefOid":"abc123","reviews":[],"comments":[]}`, nil
+		}
+		return "", fmt.Errorf("unexpected gh call: %v", args)
+	}
+	defer func() { ghExec = orig }()
+
+	rs, err := FetchPRReviewComments(context.Background(), "/repo", "https://github.com/org/repo/pull/1")
+	if err != nil {
+		t.Fatalf("FetchPRReviewComments: %v", err)
+	}
+	if !rs.HasConflict {
+		t.Error("HasConflict should be true when gh returns CONFLICTING")
+	}
+}
+
+func contains(ss []string, s string) bool {
+	for _, v := range ss {
+		if v == s {
+			return true
+		}
+	}
+	return false
+}
