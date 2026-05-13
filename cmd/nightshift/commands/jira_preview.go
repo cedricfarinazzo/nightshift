@@ -33,6 +33,7 @@ func init() {
 	jiraPreviewCmd.Flags().Bool("validate", false, "Run LLM validation on each ticket (costs tokens)")
 	jiraPreviewCmd.Flags().Bool("explain", false, "Show detailed budget breakdown")
 	jiraPreviewCmd.Flags().String("type", "", "Filter tickets by issue type (e.g. Bug, Story)")
+	jiraPreviewCmd.Flags().Bool("ignore-budget", false, "Bypass budget checks (use with caution)")
 	jiraCmd.AddCommand(jiraPreviewCmd)
 }
 
@@ -98,6 +99,7 @@ func runJiraPreview(cmd *cobra.Command, _ []string) error {
 	explain, _ := cmd.Flags().GetBool("explain")
 	runValidate, _ := cmd.Flags().GetBool("validate")
 	typeFilter, _ := cmd.Flags().GetString("type")
+	ignoreBudget, _ := cmd.Flags().GetBool("ignore-budget")
 
 	cfg, err := loadConfig("")
 	if err != nil {
@@ -270,7 +272,7 @@ func runJiraPreview(cmd *cobra.Command, _ []string) error {
 		}
 	}
 
-	// Budget.
+	// Budget: check phase providers using CheckProviders for centralized enforcement.
 	if cfg.Jira.BudgetEnabled {
 		database, dbErr := db.Open(cfg.ExpandedDBPath())
 		if dbErr != nil {
@@ -279,15 +281,40 @@ func runJiraPreview(cmd *cobra.Command, _ []string) error {
 			defer func() { _ = database.Close() }()
 			budgetMgr := newBudgetManager(cfg, database)
 
-			provider := cfg.Jira.Implement.Provider
-			if provider == "" {
-				provider = "claude"
-			}
-			allowance, budgetErr := budgetMgr.CalculateAllowance(provider)
-			if budgetErr != nil {
-				result.BudgetErr = budgetErr.Error()
+			// Collect unique providers across all configured projects (all phases, worst case).
+			if len(projects) > 0 {
+				providers := jiraPhaseProviders(cfg.Jira, projects[0], false, false, false)
+				budgetResults, _ := budgetMgr.CheckProviders(providers, ignoreBudget)
+				// Use the implement provider's allowance as the primary Budget field.
+				for _, r := range budgetResults {
+					if r.Allowance != nil {
+						result.Budget = r.Allowance
+						break
+					}
+				}
+				// Collect any exhausted providers into BudgetErr for display.
+				var exhausted []string
+				for _, r := range budgetResults {
+					if !r.OK {
+						exhausted = append(exhausted, fmt.Sprintf("%s: %s", r.Provider, r.Reason))
+					}
+				}
+				if len(exhausted) > 0 {
+					result.BudgetErr = strings.Join(exhausted, "; ")
+				}
 			} else {
-				result.Budget = allowance
+				// Fallback: single provider check.
+				provider := cfg.Jira.Implement.Provider
+				if provider == "" {
+					provider = "claude"
+				}
+				budgetResults, _ := budgetMgr.CheckProviders([]string{provider}, ignoreBudget)
+				if len(budgetResults) > 0 && budgetResults[0].Allowance != nil {
+					result.Budget = budgetResults[0].Allowance
+					if !budgetResults[0].OK {
+						result.BudgetErr = budgetResults[0].Reason
+					}
+				}
 			}
 		}
 	}

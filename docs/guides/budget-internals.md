@@ -163,6 +163,52 @@ budget:
   copilot_monthly_limit: 300   # max premium Copilot requests/month
 ```
 
+## Centralized Budget Enforcement
+
+All five commands that run agents go through a single enforcement path via
+`Manager.CheckProviders`. This prevents budget logic from being duplicated per
+command.
+
+```go
+type EnforcementResult struct {
+    Provider  string
+    OK        bool
+    Reason    string           // human-readable when not OK
+    Allowance *AllowanceResult // nil only on budget error
+}
+
+func (m *Manager) CheckProviders(providers []string, ignoreBudget bool) ([]EnforcementResult, error)
+```
+
+### Per-Command Enforcement Model
+
+| Command | Providers passed | Selection logic |
+|---------|-----------------|-----------------|
+| `nightshift run` | priority list from config | pick first `OK=true` |
+| `nightshift preview` | priority list from config | show all results |
+| `nightshift task run` | single `--provider` flag | error if not OK |
+| `nightshift jira run` | phase providers for each project | skip project if any not OK |
+| `nightshift jira preview` | all phase providers (worst case) | display capacity per phase |
+
+### `--ignore-budget` Flag
+
+All five commands accept `--ignore-budget`. When set, `CheckProviders` returns
+`OK=true` for every provider regardless of actual usage. A warning is printed
+to stdout before execution.
+
+### Jira Phase Provider Extraction
+
+`jiraPhaseProviders(jiracfg, proj, skipValidation, todoOnly, reviewOnly)` returns
+the unique providers needed for the phases that will actually run:
+
+- TODO path: validate (if `!skipValidation`), plan, implement
+- Review path: review-fix only
+- Both paths: union of the above
+
+This means a project is only skipped if a provider needed for its *remaining*
+phases is exhausted — a provider used only in already-completed phases does not
+block resumption.
+
 ## Testing
 
 Inject a `nowFunc` on `Manager` via the internal field to control time:

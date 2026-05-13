@@ -1962,7 +1962,7 @@ func buildSetupPreviewOutput(cfg *config.Config, projects []string) (string, err
 	}
 	defer func() { _ = database.Close() }()
 
-	result, err := buildPreviewResult(cfg, database, projects, "", 1, "", nil, false)
+	result, err := buildPreviewResult(cfg, database, projects, "", 1, "", nil, false, false)
 	if err != nil {
 		return "", err
 	}

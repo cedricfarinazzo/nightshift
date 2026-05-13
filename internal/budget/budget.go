@@ -412,4 +412,46 @@ func (m *Manager) CanRun(provider string, estimatedTokens int64) (bool, error) {
 	return result.Allowance >= estimatedTokens, nil
 }
 
+// EnforcementResult holds the budget check outcome for a single provider.
+type EnforcementResult struct {
+	Provider  string
+	OK        bool
+	Reason    string
+	Allowance *AllowanceResult
+}
+
+// CheckProviders checks budget capacity for a set of providers.
+//
+// For run/preview: pass providers in priority order — caller picks first OK result.
+// For task run: pass single explicit provider; error if not OK.
+// For jira: pass only providers needed for remaining phases; skip ticket if any not OK.
+//
+// When ignoreBudget is true, all results have OK=true (bypass).
+func (m *Manager) CheckProviders(providers []string, ignoreBudget bool) ([]EnforcementResult, error) {
+	results := make([]EnforcementResult, 0, len(providers))
+	for _, provider := range providers {
+		allowance, err := m.CalculateAllowance(provider)
+		if err != nil {
+			results = append(results, EnforcementResult{
+				Provider: provider,
+				OK:       ignoreBudget,
+				Reason:   fmt.Sprintf("budget error: %v", err),
+			})
+			continue
+		}
+		ok := ignoreBudget || allowance.Allowance > 0
+		reason := ""
+		if !ok {
+			reason = fmt.Sprintf("budget exhausted (%.0f%% used)", allowance.UsedPercent)
+		}
+		results = append(results, EnforcementResult{
+			Provider:  provider,
+			OK:        ok,
+			Reason:    reason,
+			Allowance: allowance,
+		})
+	}
+	return results, nil
+}
+
 

@@ -11,6 +11,7 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/marcus/nightshift/internal/db"
 	"github.com/marcus/nightshift/internal/logging"
 	"github.com/marcus/nightshift/internal/orchestrator"
 	"github.com/marcus/nightshift/internal/security"
@@ -71,6 +72,7 @@ func init() {
 	taskRunCmd.Flags().Bool("dry-run", false, "Show prompt without executing")
 	taskRunCmd.Flags().Duration("timeout", 30*time.Minute, "Execution timeout")
 	taskRunCmd.Flags().StringP("branch", "b", "", "Base branch for new feature branches (defaults to current branch)")
+	taskRunCmd.Flags().Bool("ignore-budget", false, "Bypass budget checks (use with caution)")
 	_ = taskRunCmd.MarkFlagRequired("provider")
 
 	taskCmd.AddCommand(taskListCmd)
@@ -183,6 +185,7 @@ func runTaskRun(cmd *cobra.Command, args []string) error {
 	dryRun, _ := cmd.Flags().GetBool("dry-run")
 	timeout, _ := cmd.Flags().GetDuration("timeout")
 	branch, _ := cmd.Flags().GetString("branch")
+	ignoreBudget, _ := cmd.Flags().GetBool("ignore-budget")
 
 	def, err := tasks.GetDefinition(taskType)
 	if err != nil {
@@ -218,6 +221,24 @@ func runTaskRun(cmd *cobra.Command, args []string) error {
 	cfg, err := loadConfig(projectPath)
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
+	}
+
+	// Budget gate: check provider capacity before running.
+	if !dryRun {
+		database, dbErr := db.Open(cfg.ExpandedDBPath())
+		if dbErr != nil {
+			logging.Component("task-run").Warnf("open db for budget check: %v", dbErr)
+		} else {
+			defer func() { _ = database.Close() }()
+			budgetMgr := newBudgetManager(cfg, database)
+			results, _ := budgetMgr.CheckProviders([]string{provider}, ignoreBudget)
+			if len(results) > 0 && !results[0].OK {
+				return fmt.Errorf("budget exhausted for %s (%s), use --ignore-budget to override", provider, results[0].Reason)
+			}
+			if ignoreBudget {
+				fmt.Printf("WARNING: --ignore-budget is set, budget checks bypassed for %s\n", provider)
+			}
+		}
 	}
 
 	agent, err := agentByName(cfg, provider)

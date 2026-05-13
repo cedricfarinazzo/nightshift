@@ -281,6 +281,7 @@ type providerChoice struct {
 // selectProvider picks the best available provider with budget remaining.
 // Order is determined by providers.preference (default: claude, codex).
 // When ignoreBudget is true, budget-exhausted providers are still selected.
+// Delegates budget checking to budgetMgr.CheckProviders for centralized enforcement.
 func selectProvider(cfg *config.Config, budgetMgr *budget.Manager, log *logging.Logger, ignoreBudget bool) (*providerChoice, error) {
 	type candidate struct {
 		name      string
@@ -331,41 +332,51 @@ func selectProvider(cfg *config.Config, budgetMgr *budget.Manager, log *logging.
 		return nil, fmt.Errorf("no providers enabled in config")
 	}
 
-	var notInPath, budgetExhausted []string
+	// Filter candidates whose CLI binary is in PATH.
+	var notInPath []string
+	var available []candidate
 	for _, c := range candidates {
 		if _, err := exec.LookPath(c.binary); err != nil {
 			log.Infof("provider %s: CLI not in PATH, skipping", c.name)
 			notInPath = append(notInPath, c.name)
 			continue
 		}
-		allowance, err := budgetMgr.CalculateAllowance(c.name)
-		if err != nil {
-			log.Warnf("provider %s: budget error: %v", c.name, err)
+		available = append(available, c)
+	}
+
+	if len(available) == 0 {
+		return nil, fmt.Errorf("CLI not in PATH: %s", strings.Join(notInPath, ", "))
+	}
+
+	// Build provider names in order for centralized budget check.
+	providerNames := make([]string, len(available))
+	candidateByName := make(map[string]candidate, len(available))
+	for i, c := range available {
+		providerNames[i] = c.name
+		candidateByName[c.name] = c
+	}
+
+	results, _ := budgetMgr.CheckProviders(providerNames, ignoreBudget)
+
+	var budgetExhausted []string
+	for _, r := range results {
+		if !r.OK {
+			log.Infof("provider %s: %s", r.Provider, r.Reason)
+			budgetExhausted = append(budgetExhausted, fmt.Sprintf("%s (%.0f%% used)", r.Provider, r.Allowance.UsedPercent))
 			continue
 		}
-		if allowance.Allowance <= 0 {
-			log.Infof("provider %s: budget exhausted (%.1f%% used)", c.name, allowance.UsedPercent)
-			if ignoreBudget {
-				log.Warnf("provider %s: ignoring exhausted budget per --ignore-budget", c.name)
-				return &providerChoice{
-					agent:     c.makeAgent(),
-					name:      c.name,
-					allowance: allowance,
-				}, nil
-			}
-			budgetExhausted = append(budgetExhausted, fmt.Sprintf("%s (%.0f%% used)", c.name, allowance.UsedPercent))
+		if r.Allowance == nil {
+			// Budget error case — already logged, skip.
 			continue
 		}
+		c := candidateByName[r.Provider]
 		return &providerChoice{
 			agent:     c.makeAgent(),
-			name:      c.name,
-			allowance: allowance,
+			name:      r.Provider,
+			allowance: r.Allowance,
 		}, nil
 	}
 
-	if len(notInPath) > 0 && len(budgetExhausted) == 0 {
-		return nil, fmt.Errorf("CLI not in PATH: %s", strings.Join(notInPath, ", "))
-	}
 	if len(budgetExhausted) > 0 && len(notInPath) == 0 {
 		return nil, fmt.Errorf("budget exhausted: %s", strings.Join(budgetExhausted, ", "))
 	}

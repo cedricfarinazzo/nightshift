@@ -38,6 +38,7 @@ func init() {
 	previewCmd.Flags().Bool("explain", false, "Show budget and task-filter explanations")
 	previewCmd.Flags().Bool("plain", false, "Disable gum pager output")
 	previewCmd.Flags().Bool("json", false, "Output JSON (includes full prompts)")
+	previewCmd.Flags().Bool("ignore-budget", false, "Bypass budget checks (use with caution)")
 	rootCmd.AddCommand(previewCmd)
 }
 
@@ -50,6 +51,7 @@ func runPreview(cmd *cobra.Command, args []string) error {
 	explain, _ := cmd.Flags().GetBool("explain")
 	plainOutput, _ := cmd.Flags().GetBool("plain")
 	jsonOutput, _ := cmd.Flags().GetBool("json")
+	ignoreBudget, _ := cmd.Flags().GetBool("ignore-budget")
 
 	sources, err := detectPreviewConfigSources(projectPath)
 	if err != nil {
@@ -82,7 +84,7 @@ func runPreview(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("resolve projects: %w", err)
 	}
 
-	result, err := buildPreviewResult(cfg, database, projects, taskFilter, runs, writeDir, sources, explain || jsonOutput)
+	result, err := buildPreviewResult(cfg, database, projects, taskFilter, runs, writeDir, sources, explain||jsonOutput, ignoreBudget)
 	if err != nil {
 		return err
 	}
@@ -228,7 +230,7 @@ type previewCooldownEntry struct {
 	Simulated     bool   `json:"simulated,omitempty"`
 }
 
-func buildPreviewResult(cfg *config.Config, database *db.DB, projects []string, taskFilter string, runs int, writeDir string, sources *previewConfigSources, includeDiagnostics bool) (*previewResult, error) {
+func buildPreviewResult(cfg *config.Config, database *db.DB, projects []string, taskFilter string, runs int, writeDir string, sources *previewConfigSources, includeDiagnostics bool, ignoreBudget bool) (*previewResult, error) {
 	if runs <= 0 {
 		return nil, fmt.Errorf("runs must be positive")
 	}
@@ -306,18 +308,22 @@ func buildPreviewResult(cfg *config.Config, database *db.DB, projects []string, 
 				continue
 			}
 
-			allowance, err := budgetMgr.CalculateAllowance(provider)
-			if err != nil {
+			budgetResults, _ := budgetMgr.CheckProviders([]string{provider}, ignoreBudget)
+			if len(budgetResults) == 0 || budgetResults[0].Allowance == nil {
 				projectResult.Status = previewProjectError
-				projectResult.Detail = fmt.Sprintf("budget error: %v", err)
+				projectResult.Detail = "budget error: no result"
+				if len(budgetResults) > 0 {
+					projectResult.Detail = fmt.Sprintf("budget error: %s", budgetResults[0].Reason)
+				}
 				run.Projects = append(run.Projects, projectResult)
 				continue
 			}
+			allowance := budgetResults[0].Allowance
 
 			projectResult.Budget = allowance
-			if allowance.Allowance <= 0 {
+			if !budgetResults[0].OK {
 				projectResult.Status = previewProjectBudgetExhausted
-				projectResult.Detail = "budget exhausted"
+				projectResult.Detail = budgetResults[0].Reason
 				if includeDiagnostics {
 					projectResult.Diagnostics = computePreviewDiagnostics(cfg, selector, project, taskFilter, allowance.Allowance)
 				}
