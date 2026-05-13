@@ -47,12 +47,17 @@ var migrations = []Migration{
 	},
 	{
 		Version:     7,
-		Description: "add source column to snapshots",
+		Description: "add cost_snapshots table for monetary cost tracking",
 		SQL:         migration007SQL,
+	},
+	{
+		Version:     8,
+		Description: "add source column to snapshots",
+		SQL:         migration008SQL,
 	},
 }
 
-const migration007SQL = `
+const migration008SQL = `
 ALTER TABLE snapshots ADD COLUMN source TEXT NOT NULL DEFAULT 'file';
 `
 
@@ -173,6 +178,22 @@ CREATE TABLE IF NOT EXISTS jira_phase_logs (
 
 CREATE INDEX IF NOT EXISTS idx_jira_phase_logs_run_ticket ON jira_phase_logs(run_id, ticket_key);
 CREATE INDEX IF NOT EXISTS idx_jira_ticket_results_run ON jira_ticket_results(run_id);
+`
+
+const migration007SQL = `
+CREATE TABLE IF NOT EXISTS cost_snapshots (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    provider     TEXT    NOT NULL,
+    total_budget REAL,
+    used         REAL,
+    remaining    REAL,
+    overage      INTEGER NOT NULL DEFAULT 0,
+    currency     TEXT    NOT NULL DEFAULT 'USD',
+    period       TEXT    NOT NULL DEFAULT 'monthly',
+    captured_at  DATETIME NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_cost_snapshots_provider_time
+    ON cost_snapshots(provider, captured_at DESC);
 `
 
 // Migrate runs all pending migrations inside transactions.
