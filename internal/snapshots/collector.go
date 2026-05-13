@@ -212,6 +212,7 @@ func (c *Collector) collectClaudeFromAPI(ctx context.Context) (localWeekly, loca
 		}
 	}
 
+	// Active tracking doesn't use local token counts; these are always 0 and inferred_budget is not computed.
 	return 0, 0, scrapedPct, sessionResetTime, weeklyResetTime, "api", nil
 }
 
@@ -232,6 +233,7 @@ func (c *Collector) collectCodexFromAPI(ctx context.Context) (localWeekly, local
 		}
 	}
 
+	// Active tracking doesn't use local token counts; these are always 0 and inferred_budget is not computed.
 	return 0, 0, scrapedPct, sessionResetTime, weeklyResetTime, "api", nil
 }
 
@@ -254,6 +256,7 @@ func (c *Collector) collectCopilotFromAPI(ctx context.Context) (localWeekly, loc
 		sessionResetTime = resp.QuotaResetDate
 	}
 
+	// Active tracking doesn't use local token counts; these are always 0 and inferred_budget is not computed.
 	return 0, 0, scrapedPct, sessionResetTime, weeklyResetTime, "api", nil
 }
 
@@ -412,7 +415,8 @@ func scanSnapshot(rows *sql.Rows) (Snapshot, error) {
 	if source.Valid {
 		snapshot.Source = source.String
 	} else {
-		snapshot.Source = "api"
+		// Legacy snapshots created before source column existed default to "unknown"
+		snapshot.Source = "unknown"
 	}
 	return snapshot, nil
 }

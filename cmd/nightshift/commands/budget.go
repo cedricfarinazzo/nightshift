@@ -134,11 +134,21 @@ func printProviderBudgetActive(
 
 	srcLabel := strings.ToUpper(pu.Source)
 	if pu.Source == "none" || pu.Source == "" {
-		srcLabel = "file"
+		srcLabel = "N/A"
 	}
 
 	displayName := providerDisplayName(provName)
 	fmt.Printf("[%s]  Source: %s\n", displayName, srcLabel)
+	if pu.Source == "none" || pu.Source == "" {
+		switch provName {
+		case "claude":
+			fmt.Printf("  (set ANTHROPIC_API_KEY to enable active tracking)\n")
+		case "codex":
+			fmt.Printf("  (set OPENAI_API_KEY to enable active tracking)\n")
+		case "copilot":
+			fmt.Printf("  (configure GitHub token via 'gh auth' to enable active tracking)\n")
+		}
+	}
 
 	if len(pu.Quotas) > 0 {
 		for _, q := range pu.Quotas {
@@ -234,9 +244,11 @@ func printBudgetJSON(cfg *config.Config, providerList []string, mgr *budget.Mana
 				Utilization: q.Utilization,
 				ResetsAt:    q.ResetsAt,
 			})
-			if pj.UsedPct == 0 {
-				pj.UsedPct = q.Utilization * 100
-			}
+		}
+		// Compute UsedPct from manager for consistency with active tracking
+		result, err := mgr.CalculateAllowance(provName)
+		if err == nil {
+			pj.UsedPct = result.UsedPercent
 		}
 		if pj.Source == "" {
 			pj.Source = "none"

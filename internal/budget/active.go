@@ -39,21 +39,24 @@ type anthropicActiveProvider struct {
 func (p *anthropicActiveProvider) Name() string { return "claude" }
 
 func (p *anthropicActiveProvider) GetUsedPercent(mode string, weeklyBudget int64) (float64, error) {
-	if p.client != nil {
-		resp, err := p.client.FetchQuotas(context.Background())
-		if err == nil {
-			if entry, ok := resp["seven_day"]; ok {
-				pct := entry.Utilization * 100
-				p.setSource("api")
-				log.Debug().Str("provider", "claude").Str("source", "api").Float64("used_pct", pct).Msg("budget: usage from api")
-				return pct, nil
-			}
-		} else {
-			log.Warn().Err(err).Str("provider", "claude").Msg("budget: api fetch failed")
-		}
+	if p.client == nil {
+		p.setSource("none")
+		return 0, fmt.Errorf("anthropic client not initialized")
+	}
+	resp, err := p.client.FetchQuotas(context.Background())
+	if err != nil {
+		log.Warn().Err(err).Str("provider", "claude").Msg("budget: api fetch failed")
+		p.setSource("none")
+		return 0, fmt.Errorf("anthropic api fetch failed: %w", err)
+	}
+	if entry, ok := resp["seven_day"]; ok {
+		pct := entry.Utilization * 100
+		p.setSource("api")
+		log.Debug().Str("provider", "claude").Str("source", "api").Float64("used_pct", pct).Msg("budget: usage from api")
+		return pct, nil
 	}
 	p.setSource("none")
-	return 0, nil
+	return 0, fmt.Errorf("anthropic: seven_day quota not found in response")
 }
 
 func (p *anthropicActiveProvider) LastUsedPercentSource() string {
@@ -83,28 +86,32 @@ type codexActiveProvider struct {
 func (p *codexActiveProvider) Name() string { return "codex" }
 
 func (p *codexActiveProvider) GetUsedPercent(mode string, weeklyBudget int64) (float64, error) {
-	if p.client != nil {
-		resp, err := p.client.FetchUsage(context.Background())
-		if err == nil && resp != nil && resp.RateLimit != nil && resp.RateLimit.SecondaryWindow != nil {
-			// Cache response for reuse by GetResetTime (1-minute TTL).
-			p.mu.Lock()
-			p.cachedResp = resp
-			p.cachedTime = time.Now()
-			if p.cacheTTL == 0 {
-				p.cacheTTL = 1 * time.Minute
-			}
-			p.mu.Unlock()
-			pct := resp.RateLimit.SecondaryWindow.UsedPercent
-			p.setSource("api")
-			log.Debug().Str("provider", "codex").Str("source", "api").Float64("used_pct", pct).Msg("budget: usage from api")
-			return pct, nil
-		}
-		if err != nil {
-			log.Warn().Err(err).Str("provider", "codex").Msg("budget: api fetch failed")
-		}
+	if p.client == nil {
+		p.setSource("none")
+		return 0, fmt.Errorf("codex client not initialized")
 	}
-	p.setSource("none")
-	return 0, nil
+	resp, err := p.client.FetchUsage(context.Background())
+	if err != nil {
+		log.Warn().Err(err).Str("provider", "codex").Msg("budget: api fetch failed")
+		p.setSource("none")
+		return 0, fmt.Errorf("codex api fetch failed: %w", err)
+	}
+	if resp == nil || resp.RateLimit == nil || resp.RateLimit.SecondaryWindow == nil {
+		p.setSource("none")
+		return 0, fmt.Errorf("codex: incomplete rate limit data in response")
+	}
+	// Cache response for reuse by GetResetTime (1-minute TTL).
+	p.mu.Lock()
+	p.cachedResp = resp
+	p.cachedTime = time.Now()
+	if p.cacheTTL == 0 {
+		p.cacheTTL = 1 * time.Minute
+	}
+	p.mu.Unlock()
+	pct := resp.RateLimit.SecondaryWindow.UsedPercent
+	p.setSource("api")
+	log.Debug().Str("provider", "codex").Str("source", "api").Float64("used_pct", pct).Msg("budget: usage from api")
+	return pct, nil
 }
 
 func (p *codexActiveProvider) GetResetTime(mode string) (time.Time, error) {
@@ -154,35 +161,41 @@ type copilotActiveProvider struct {
 func (p *copilotActiveProvider) Name() string { return "copilot" }
 
 func (p *copilotActiveProvider) GetUsedPercent(mode string, monthlyLimit int64) (float64, error) {
-	if p.client != nil {
-		resp, err := p.client.FetchQuotas(context.Background())
-		if err == nil && resp != nil {
-			// Cache response for reuse by GetResetTime (1-minute TTL).
-			p.mu.Lock()
-			p.cachedResp = resp
-			p.cachedTime = time.Now()
-			if p.cacheTTL == 0 {
-				p.cacheTTL = 1 * time.Minute
-			}
-			p.mu.Unlock()
+	if p.client == nil {
+		p.setSource("none")
+		return 0, fmt.Errorf("copilot client not initialized")
+	}
+	resp, err := p.client.FetchQuotas(context.Background())
+	if err != nil {
+		log.Warn().Err(err).Str("provider", "copilot").Msg("budget: api fetch failed")
+		p.setSource("none")
+		return 0, fmt.Errorf("copilot api fetch failed: %w", err)
+	}
+	if resp == nil {
+		p.setSource("none")
+		return 0, fmt.Errorf("copilot: nil response from api")
+	}
+	// Cache response for reuse by GetResetTime (1-minute TTL).
+	p.mu.Lock()
+	p.cachedResp = resp
+	p.cachedTime = time.Now()
+	if p.cacheTTL == 0 {
+		p.cacheTTL = 1 * time.Minute
+	}
+	p.mu.Unlock()
 
-			if snap, ok := resp.Quotas["premium_interactions"]; ok {
-				// PercentRemaining is 0–100; convert to used %.
-				pct := 100 - snap.PercentRemaining
-				if snap.Unlimited {
-					pct = 0
-				}
-				p.setSource("api")
-				log.Debug().Str("provider", "copilot").Str("source", "api").Float64("used_pct", pct).Msg("budget: usage from api")
-				return pct, nil
-			}
+	if snap, ok := resp.Quotas["premium_interactions"]; ok {
+		// PercentRemaining is 0–100; convert to used %.
+		pct := 100 - snap.PercentRemaining
+		if snap.Unlimited {
+			pct = 0
 		}
-		if err != nil {
-			log.Warn().Err(err).Str("provider", "copilot").Msg("budget: api fetch failed")
-		}
+		p.setSource("api")
+		log.Debug().Str("provider", "copilot").Str("source", "api").Float64("used_pct", pct).Msg("budget: usage from api")
+		return pct, nil
 	}
 	p.setSource("none")
-	return 0, nil
+	return 0, fmt.Errorf("copilot: premium_interactions quota not found")
 }
 
 func (p *copilotActiveProvider) GetResetTime(mode string) (time.Time, error) {

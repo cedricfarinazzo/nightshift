@@ -83,8 +83,8 @@ func TestAnthropicActiveProvider_APIError_ReturnsZero(t *testing.T) {
 	p := &anthropicActiveProvider{client: apiClient}
 
 	pct, err := p.GetUsedPercent("weekly", 1_000_000)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	if err == nil {
+		t.Fatalf("expected error on API failure, got nil")
 	}
 	if pct != 0.0 {
 		t.Errorf("want 0.0 on API error, got %f", pct)
@@ -98,8 +98,8 @@ func TestAnthropicActiveProvider_NilClient_ReturnsZero(t *testing.T) {
 	p := &anthropicActiveProvider{client: nil}
 
 	pct, err := p.GetUsedPercent("weekly", 1_000_000)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	if err == nil {
+		t.Fatalf("expected error on nil client, got nil")
 	}
 	if pct != 0.0 {
 		t.Errorf("want 0.0, got %f", pct)
@@ -166,8 +166,8 @@ func TestCopilotActiveProvider_APIError_ReturnsZero(t *testing.T) {
 	p := &copilotActiveProvider{client: apiClient}
 
 	pct, err := p.GetUsedPercent("weekly", 300)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	if err == nil {
+		t.Fatalf("expected error on API failure, got nil")
 	}
 	if pct != 0.0 {
 		t.Errorf("want 0.0 on API error, got %f", pct)
@@ -181,16 +181,13 @@ func TestCopilotActiveProvider_APIError_ReturnsZero(t *testing.T) {
 
 func TestNewManagerWithTracking_Constructs(t *testing.T) {
 	cfg := makeConfig()
-	// Construction succeeds even without real credentials (errors occur at API call time).
+	// Construction succeeds; providers may or may not have credentials depending on environment.
 	mgr := NewManagerWithTracking(cfg)
 	if mgr == nil {
 		t.Fatal("NewManagerWithTracking returned nil manager")
 	}
-	// GetUsedPercent must not panic; returns 0 when no real credentials present.
-	_, err := mgr.GetUsedPercent("claude")
-	if err != nil {
-		t.Fatalf("GetUsedPercent failed: %v", err)
-	}
+	// GetUsedPercent should not panic; returns error if credentials unavailable, data if available.
+	_, _ = mgr.GetUsedPercent("claude")
 }
 
 func TestActiveMode_APISucceeds_ReturnsAPIValue(t *testing.T) {
@@ -217,8 +214,8 @@ func TestActiveMode_APISucceeds_ReturnsAPIValue(t *testing.T) {
 	}
 
 	pct, err = mgr.GetUsedPercent("codex")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	if err == nil {
+		t.Fatalf("expected error on nil client, got nil")
 	}
 	if pct != 0.0 {
 		t.Errorf("want 0.0 (no client), got %f", pct)
