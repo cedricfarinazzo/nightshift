@@ -521,6 +521,8 @@ func createJiraAgent(cfg *config.Config, phase jira.PhaseConfig) (agents.Agent, 
 		if timeout > 0 {
 			extra = append(extra, agents.WithCopilotDefaultTimeout(timeout))
 		}
+		// Jira always requires headless non-interactive execution.
+		extra = append(extra, agents.WithCopilotDangerouslySkipPermissions(true))
 		a := newCopilotAgentFromConfig(cfg, "", extra...)
 		if !a.Available() {
 			return nil, fmt.Errorf("copilot CLI not found in PATH")
