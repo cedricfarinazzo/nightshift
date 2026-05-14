@@ -1366,7 +1366,9 @@ func (m *setupModel) applyDaemonAction(action string) error {
 		if err := installService(m.serviceType, m.cfg); err != nil {
 			return err
 		}
-		return runDaemonStart(nil, nil)
+		// Non-fatal: service is installed; start failure (e.g. systemd not reloaded yet) should not block wizard.
+		_ = runDaemonStart(nil, nil)
+		return nil
 	case "Start daemon":
 		return runDaemonStart(nil, nil)
 	case "Stop daemon":
