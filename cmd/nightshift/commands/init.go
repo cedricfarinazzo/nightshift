@@ -133,7 +133,7 @@ schedule:
 #
 budget:
   mode: daily                    # daily | weekly
-  max_percent: 75                # Max % of budget per run (default: 75)
+  max_percent: 90                # Max % of budget per run (default: 90)
   aggressive_end_of_week: false  # Weekly mode: ramp up in last 2 days
   reserve_percent: 5             # Always keep this % in reserve
   weekly_tokens: 700000          # Fallback weekly budget

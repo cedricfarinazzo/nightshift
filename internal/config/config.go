@@ -139,7 +139,7 @@ type ReportingConfig struct {
 // Default values for configuration.
 const (
 	DefaultBudgetMode = "daily"
-	DefaultMaxPercent = 75
+	DefaultMaxPercent = 90
 	DefaultLogLevel   = "info"
 	DefaultLogFormat         = "json"
 	DefaultClaudeDataPath    = "~/.claude"
