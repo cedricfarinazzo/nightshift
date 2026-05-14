@@ -15,7 +15,6 @@ import (
 
 type previewTextOptions struct {
 	LongPrompt bool
-	Explain    bool
 }
 
 type previewPagerOptions struct {
@@ -92,7 +91,7 @@ func renderPreviewText(result *previewResult, opts previewTextOptions) string {
 	} else {
 		fmt.Fprintf(b, "  Task filter: enabled list (%d) [%s]\n", len(result.EnabledTasks), strings.Join(result.EnabledTasks, ", "))
 	}
-	if opts.Explain && result.ProjectCount > 1 {
+	if result.ProjectCount > 1 {
 		b.WriteString("  Note: budget is not split per project during preview/run\n")
 	}
 
@@ -125,7 +124,7 @@ func renderPreviewText(result *previewResult, opts previewTextOptions) string {
 				b.WriteString("\n")
 			}
 
-			if opts.Explain && project.Diagnostics != nil {
+			if project.Diagnostics != nil {
 				renderDiagnosticsText(b, styles, project.Diagnostics, "    ")
 			}
 
@@ -133,9 +132,7 @@ func renderPreviewText(result *previewResult, opts previewTextOptions) string {
 				continue
 			}
 
-			if opts.Explain {
-				renderBudgetText(b, project.Budget, "    ")
-			}
+			renderBudgetText(b, project.Budget, "    ")
 
 			for _, task := range project.Tasks {
 				b.WriteString("    ")

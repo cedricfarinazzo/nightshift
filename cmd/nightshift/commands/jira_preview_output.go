@@ -7,11 +7,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-type jiraPreviewTextOptions struct {
-	Explain bool
-}
-
-func renderJiraPreviewText(result *jiraPreviewResult, opts jiraPreviewTextOptions) string {
+func renderJiraPreviewText(result *jiraPreviewResult) string {
 	styles := newPreviewStyles()
 	b := &strings.Builder{}
 
@@ -61,20 +57,11 @@ func renderJiraPreviewText(result *jiraPreviewResult, opts jiraPreviewTextOption
 		b.WriteString("\n")
 		if len(result.ProviderBudgets) > 0 {
 			for _, pb := range result.ProviderBudgets {
-				renderJiraProviderBudget(b, styles, pb, opts.Explain)
+				renderJiraProviderBudget(b, styles, pb)
 			}
 		} else if result.Budget != nil {
 			// Fallback: single-provider summary.
-			if opts.Explain {
-				renderBudgetText(b, result.Budget, "  ")
-			} else {
-				fmt.Fprintf(b, "  %.0f%% capacity  [%s: %.1f%% used, limit: %d%%, source=%s]\n",
-					result.Budget.HourlyCapacity*100,
-					result.Budget.BottleneckWindow,
-					result.Budget.BottleneckUsedPct,
-					result.Budget.MaxPercent,
-					result.Budget.Source)
-			}
+			renderBudgetText(b, result.Budget, "  ")
 		}
 		if result.BudgetErr != "" {
 			b.WriteString("  ")
@@ -175,7 +162,7 @@ func renderJiraPreviewText(result *jiraPreviewResult, opts jiraPreviewTextOption
 }
 
 // renderJiraProviderBudget renders one provider's budget row in the jira preview Budget section.
-func renderJiraProviderBudget(b *strings.Builder, styles previewStyles, pb jiraPreviewProviderBudget, explain bool) {
+func renderJiraProviderBudget(b *strings.Builder, styles previewStyles, pb jiraPreviewProviderBudget) {
 	if pb.Allowance == nil {
 		status := styles.Warn.Render("unavailable")
 		fmt.Fprintf(b, "  %-10s  %s\n", pb.Provider, status)
@@ -197,7 +184,7 @@ func renderJiraProviderBudget(b *strings.Builder, styles previewStyles, pb jiraP
 	fmt.Fprintf(b, "  %-10s  %s %s  %.1f%% used%s\n",
 		pb.Provider, capBar, statusStr, a.BottleneckUsedPct, phasesStr)
 
-	if explain {
+	{
 		for _, w := range a.Windows {
 			marker := " "
 			if w.Name == a.BottleneckWindow {

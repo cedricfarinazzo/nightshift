@@ -31,7 +31,6 @@ func init() {
 	jiraPreviewCmd.Flags().Bool("json", false, "Output as JSON")
 	jiraPreviewCmd.Flags().Bool("plain", false, "Disable TUI pager")
 	jiraPreviewCmd.Flags().Bool("validate", false, "Run LLM validation on each ticket (costs tokens)")
-	jiraPreviewCmd.Flags().Bool("explain", false, "Show detailed budget breakdown")
 	jiraPreviewCmd.Flags().String("type", "", "Filter tickets by issue type (e.g. Bug, Story)")
 	jiraPreviewCmd.Flags().Bool("ignore-budget", false, "Bypass budget checks (use with caution)")
 	jiraCmd.AddCommand(jiraPreviewCmd)
@@ -105,7 +104,6 @@ func runJiraPreview(cmd *cobra.Command, _ []string) error {
 	labelOverride, _ := cmd.Flags().GetString("label")
 	jsonOutput, _ := cmd.Flags().GetBool("json")
 	plainOutput, _ := cmd.Flags().GetBool("plain")
-	explain, _ := cmd.Flags().GetBool("explain")
 	runValidate, _ := cmd.Flags().GetBool("validate")
 	typeFilter, _ := cmd.Flags().GetString("type")
 	ignoreBudget, _ := cmd.Flags().GetBool("ignore-budget")
@@ -351,7 +349,7 @@ func runJiraPreview(cmd *cobra.Command, _ []string) error {
 		return writeJiraPreviewJSON(cmd.OutOrStdout(), result)
 	}
 
-	text := renderJiraPreviewText(result, jiraPreviewTextOptions{Explain: explain})
+	text := renderJiraPreviewText(result)
 	return writePreviewText(cmd.OutOrStdout(), text, previewPagerOptions{Plain: plainOutput})
 }
 

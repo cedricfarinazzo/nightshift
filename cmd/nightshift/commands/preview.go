@@ -35,7 +35,6 @@ func init() {
 	previewCmd.Flags().StringP("task", "t", "", "Preview only a specific task type")
 	previewCmd.Flags().Bool("long", false, "Show full prompts (default shows a truncated preview)")
 	previewCmd.Flags().String("write", "", "Write full prompts to a directory")
-	previewCmd.Flags().Bool("explain", false, "Show budget and task-filter explanations")
 	previewCmd.Flags().Bool("plain", false, "Disable gum pager output")
 	previewCmd.Flags().Bool("json", false, "Output JSON (includes full prompts)")
 	previewCmd.Flags().Bool("ignore-budget", false, "Bypass budget checks (use with caution)")
@@ -48,7 +47,6 @@ func runPreview(cmd *cobra.Command, args []string) error {
 	taskFilter, _ := cmd.Flags().GetString("task")
 	longPrompt, _ := cmd.Flags().GetBool("long")
 	writeDir, _ := cmd.Flags().GetString("write")
-	explain, _ := cmd.Flags().GetBool("explain")
 	plainOutput, _ := cmd.Flags().GetBool("plain")
 	jsonOutput, _ := cmd.Flags().GetBool("json")
 	ignoreBudget, _ := cmd.Flags().GetBool("ignore-budget")
@@ -84,7 +82,7 @@ func runPreview(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("resolve projects: %w", err)
 	}
 
-	result, err := buildPreviewResult(cfg, database, projects, taskFilter, runs, writeDir, sources, explain||jsonOutput, ignoreBudget)
+	result, err := buildPreviewResult(cfg, database, projects, taskFilter, runs, writeDir, sources, true, ignoreBudget)
 	if err != nil {
 		return err
 	}
@@ -95,7 +93,6 @@ func runPreview(cmd *cobra.Command, args []string) error {
 
 	text := renderPreviewText(result, previewTextOptions{
 		LongPrompt: longPrompt,
-		Explain:    explain,
 	})
 	return writePreviewText(cmd.OutOrStdout(), text, previewPagerOptions{
 		Plain: plainOutput,
