@@ -75,53 +75,6 @@ func TestSortByPriority(t *testing.T) {
 	}
 }
 
-func TestAllocateBudget(t *testing.T) {
-	projects := []Project{
-		{Path: "/high", Priority: 9}, // weight 10
-		{Path: "/low", Priority: 0},  // weight 1
-	}
-	// Total weight = 11, high gets 10/11 = ~90.9%, low gets 1/11 = ~9.1%
-
-	allocs := AllocateBudget(projects, 1100)
-
-	if len(allocs) != 2 {
-		t.Fatalf("expected 2 allocations, got %d", len(allocs))
-	}
-
-	// High priority should get more
-	if allocs[0].Tokens < allocs[1].Tokens {
-		t.Errorf("high priority should get more tokens")
-	}
-
-	// Total should equal budget
-	var total int64
-	for _, a := range allocs {
-		total += a.Tokens
-	}
-	if total != 1100 {
-		t.Errorf("total allocation %d != budget 1100", total)
-	}
-}
-
-func TestAllocateBudgetEmpty(t *testing.T) {
-	allocs := AllocateBudget(nil, 1000)
-	if allocs != nil {
-		t.Errorf("expected nil for empty projects")
-	}
-
-	allocs = AllocateBudget([]Project{}, 1000)
-	if allocs != nil {
-		t.Errorf("expected nil for empty projects")
-	}
-}
-
-func TestAllocateBudgetZeroBudget(t *testing.T) {
-	projects := []Project{{Path: "/test", Priority: 1}}
-	allocs := AllocateBudget(projects, 0)
-	if allocs != nil {
-		t.Errorf("expected nil for zero budget")
-	}
-}
 
 func TestFilterProcessedToday(t *testing.T) {
 	s := newTestState(t)

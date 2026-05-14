@@ -209,57 +209,6 @@ func (c *Codex) GetRateLimits() (*CodexRateLimits, error) {
 	return nil, nil
 }
 
-// GetUsedPercent returns the used percentage based on mode.
-// Uses Codex's own rate limit percentages as the authoritative source since our
-// local billable token calculation may not match Codex's internal accounting
-// (prompt caching, model launch bonuses, etc.).
-// For daily mode: token-based daily calculation (weekly budget / 7), falling back
-// to primary rate limit used_percent (5h window) if token data is unavailable.
-// For weekly mode: secondary rate limit used_percent.
-// Falls back to token-based calculation only if rate limits are unavailable.
-func (c *Codex) GetUsedPercent(mode string, weeklyBudget int64) (float64, error) {
-	switch mode {
-	case "daily":
-		// Prefer token-based daily calculation — it reflects actual daily usage,
-		// unlike the 5h rolling window from rate limits.
-		if weeklyBudget > 0 {
-			usage, err := c.GetTodayTokenUsage()
-			if err == nil && usage != nil && usage.TotalTokens > 0 {
-				dailyBudget := weeklyBudget / 7
-				if dailyBudget > 0 {
-					return float64(usage.TotalTokens) / float64(dailyBudget) * 100, nil
-				}
-			}
-		}
-		// Fall back to 5h rate limit if token data unavailable.
-		limits, err := c.GetRateLimits()
-		if err != nil {
-			return 0, err
-		}
-		if limits != nil && limits.Primary != nil {
-			return limits.Primary.UsedPercent, nil
-		}
-		return 0, nil
-	case "weekly":
-		limits, err := c.GetRateLimits()
-		if err != nil {
-			return 0, err
-		}
-		if limits != nil && limits.Secondary != nil {
-			return limits.Secondary.UsedPercent, nil
-		}
-		// Fall back to token-based if no rate limit data
-		if weeklyBudget > 0 {
-			usage, err := c.GetWeeklyTokenUsage()
-			if err == nil && usage != nil && usage.TotalTokens > 0 {
-				return float64(usage.TotalTokens) / float64(weeklyBudget) * 100, nil
-			}
-		}
-		return 0, nil
-	default:
-		return 0, fmt.Errorf("invalid mode: %s (must be 'daily' or 'weekly')", mode)
-	}
-}
 
 // UsageBreakdown contains both rate-limit and local token data for display.
 type UsageBreakdown struct {

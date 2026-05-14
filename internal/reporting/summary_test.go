@@ -28,11 +28,9 @@ func TestGenerate(t *testing.T) {
 
 	testDate := time.Date(2024, 1, 15, 8, 0, 0, 0, time.UTC)
 	results := &RunResults{
-		Date:            testDate,
-		StartBudget:     100000,
-		UsedBudget:      45234,
-		RemainingBudget: 54766,
-		StartTime:       testDate.Add(-6 * time.Hour),
+		Date:       testDate,
+		UsedBudget: 45234,
+		StartTime:  testDate.Add(-6 * time.Hour),
 		EndTime:         testDate,
 		Tasks: []TaskResult{
 			{
@@ -78,14 +76,8 @@ func TestGenerate(t *testing.T) {
 	}
 
 	// Verify summary fields
-	if summary.BudgetStart != 100000 {
-		t.Errorf("BudgetStart = %d, want 100000", summary.BudgetStart)
-	}
 	if summary.BudgetUsed != 45234 {
 		t.Errorf("BudgetUsed = %d, want 45234", summary.BudgetUsed)
-	}
-	if summary.BudgetRemaining != 54766 {
-		t.Errorf("BudgetRemaining = %d, want 54766", summary.BudgetRemaining)
 	}
 	if len(summary.CompletedTasks) != 3 {
 		t.Errorf("CompletedTasks count = %d, want 3", len(summary.CompletedTasks))
@@ -110,11 +102,8 @@ func TestGenerate(t *testing.T) {
 	if !strings.Contains(content, "## Budget") {
 		t.Error("Content missing Budget section")
 	}
-	if !strings.Contains(content, "100,000 tokens") {
-		t.Error("Content missing formatted start budget")
-	}
-	if !strings.Contains(content, "45%") {
-		t.Error("Content missing used percentage")
+	if !strings.Contains(content, "45,234 tokens") {
+		t.Error("Content missing formatted used budget")
 	}
 	if !strings.Contains(content, "## Projects Processed") {
 		t.Error("Content missing Projects section")
@@ -151,11 +140,9 @@ func TestGenerateEmptyResults(t *testing.T) {
 	gen := NewGenerator(cfg)
 
 	results := &RunResults{
-		Date:            time.Now(),
-		StartBudget:     50000,
-		UsedBudget:      0,
-		RemainingBudget: 50000,
-		Tasks:           []TaskResult{},
+		Date:       time.Now(),
+		UsedBudget: 0,
+		Tasks:      []TaskResult{},
 	}
 
 	summary, err := gen.Generate(results)
@@ -398,8 +385,7 @@ func TestFormatSlackSummary(t *testing.T) {
 	gen := NewGenerator(cfg)
 
 	summary := &Summary{
-		BudgetStart: 100000,
-		BudgetUsed:  45000,
+		BudgetUsed: 45000,
 		CompletedTasks: []TaskResult{
 			{Title: "Task 1"},
 			{Title: "Task 2"},
@@ -418,8 +404,8 @@ func TestFormatSlackSummary(t *testing.T) {
 	if !strings.Contains(result, "Budget:") {
 		t.Error("Slack summary missing budget")
 	}
-	if !strings.Contains(result, "45%") {
-		t.Error("Slack summary missing percentage")
+	if !strings.Contains(result, "45,000") {
+		t.Error("Slack summary missing tokens used")
 	}
 	if !strings.Contains(result, "Tasks Completed:") {
 		t.Error("Slack summary missing completed tasks")
@@ -437,10 +423,8 @@ func TestGenerateWithFailedTasks(t *testing.T) {
 	gen := NewGenerator(cfg)
 
 	results := &RunResults{
-		Date:            time.Now(),
-		StartBudget:     50000,
-		UsedBudget:      10000,
-		RemainingBudget: 40000,
+		Date:       time.Now(),
+		UsedBudget: 10000,
 		Tasks: []TaskResult{
 			{
 				Project:    "/home/user/project",

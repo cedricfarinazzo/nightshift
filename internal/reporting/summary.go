@@ -36,9 +36,7 @@ type TaskResult struct {
 // RunResults holds all results from a nightshift run.
 type RunResults struct {
 	Date            time.Time             `json:"date"`
-	StartBudget     int                   `json:"start_budget"`
 	UsedBudget      int                   `json:"used_budget"`
-	RemainingBudget int                   `json:"remaining_budget"`
 	Tasks           []TaskResult          `json:"tasks"`
 	StartTime       time.Time             `json:"start_time"`
 	EndTime         time.Time             `json:"end_time"`
@@ -54,9 +52,7 @@ type Summary struct {
 	CompletedTasks  []TaskResult
 	SkippedTasks    []TaskResult
 	FailedTasks     []TaskResult
-	BudgetStart     int
-	BudgetUsed      int
-	BudgetRemaining int
+	BudgetUsed int
 	CostSnapshots   []usage.CostSnapshot
 }
 
@@ -94,9 +90,7 @@ func (g *Generator) Generate(results *RunResults) (*Summary, error) {
 
 	summary := &Summary{
 		Date:            results.Date,
-		BudgetStart:     results.StartBudget,
-		BudgetUsed:      results.UsedBudget,
-		BudgetRemaining: results.RemainingBudget,
+		BudgetUsed:    results.UsedBudget,
 		ProjectCounts:   make(map[string]int),
 		CompletedTasks:  make([]TaskResult, 0),
 		SkippedTasks:    make([]TaskResult, 0),
@@ -132,13 +126,7 @@ func (g *Generator) renderMarkdown(summary *Summary, results *RunResults) string
 
 	// Budget section
 	buf.WriteString("## Budget\n")
-	usedPercent := 0
-	if summary.BudgetStart > 0 {
-		usedPercent = (summary.BudgetUsed * 100) / summary.BudgetStart
-	}
-	fmt.Fprintf(&buf, "- Started with: %s tokens\n", formatTokens(summary.BudgetStart))
-	fmt.Fprintf(&buf, "- Used: %s tokens (%d%%)\n", formatTokens(summary.BudgetUsed), usedPercent)
-	fmt.Fprintf(&buf, "- Remaining: %s tokens\n\n", formatTokens(summary.BudgetRemaining))
+	fmt.Fprintf(&buf, "- Used: %s tokens\n\n", formatTokens(summary.BudgetUsed))
 
 	// Cost section — only rendered when snapshots present
 	if len(summary.CostSnapshots) > 0 {
@@ -471,12 +459,7 @@ func (g *Generator) formatSlackSummary(summary *Summary) string {
 	var buf bytes.Buffer
 
 	// Budget
-	usedPercent := 0
-	if summary.BudgetStart > 0 {
-		usedPercent = (summary.BudgetUsed * 100) / summary.BudgetStart
-	}
-	fmt.Fprintf(&buf, "*Budget:* %s used (%d%%) of %s\n\n",
-		formatTokens(summary.BudgetUsed), usedPercent, formatTokens(summary.BudgetStart))
+	fmt.Fprintf(&buf, "*Budget:* %s tokens used\n\n", formatTokens(summary.BudgetUsed))
 
 	// Tasks completed
 	if len(summary.CompletedTasks) > 0 {

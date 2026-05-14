@@ -18,15 +18,13 @@ type runReport struct {
 	usedBudget int
 }
 
-func newRunReport(start time.Time, startBudget int) *runReport {
+func newRunReport(start time.Time) *runReport {
 	return &runReport{
 		results: &reporting.RunResults{
-			Date:            start,
-			StartTime:       start,
-			StartBudget:     startBudget,
-			UsedBudget:      0,
-			RemainingBudget: 0,
-			Tasks:           []reporting.TaskResult{},
+			Date:      start,
+			StartTime: start,
+			UsedBudget: 0,
+			Tasks:     []reporting.TaskResult{},
 		},
 	}
 }
@@ -47,10 +45,6 @@ func (r *runReport) finalizeWithDB(cfg *config.Config, log *logging.Logger, data
 
 	r.results.EndTime = time.Now()
 	r.results.UsedBudget = r.usedBudget
-	r.results.RemainingBudget = r.results.StartBudget - r.usedBudget
-	if r.results.RemainingBudget < 0 {
-		r.results.RemainingBudget = 0
-	}
 
 	logPath := ""
 	if cfg.ExpandedLogPath() != "" {
@@ -104,26 +98,4 @@ func (r *runReport) finalizeWithDB(cfg *config.Config, log *logging.Logger, data
 	} else {
 		log.Infof("run results saved: %s", resultsPath)
 	}
-}
-
-func calculateRunBudgetStart(cfg *config.Config, budgetMgr *budget.Manager, log *logging.Logger) int {
-	if cfg == nil || budgetMgr == nil {
-		return 0
-	}
-	total := 0
-	if cfg.Providers.Claude.Enabled {
-		if allowance, err := budgetMgr.CalculateAllowance("claude"); err == nil {
-			total += int(allowance.Allowance)
-		} else if log != nil {
-			log.Warnf("budget claude: %v", err)
-		}
-	}
-	if cfg.Providers.Codex.Enabled {
-		if allowance, err := budgetMgr.CalculateAllowance("codex"); err == nil {
-			total += int(allowance.Allowance)
-		} else if log != nil {
-			log.Warnf("budget codex: %v", err)
-		}
-	}
-	return total
 }

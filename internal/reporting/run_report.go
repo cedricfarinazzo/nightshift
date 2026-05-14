@@ -41,13 +41,6 @@ func RenderRunReport(results *RunResults, logPath string) (string, error) {
 	buf.WriteString("## Summary\n")
 	duration := results.EndTime.Sub(results.StartTime)
 	fmt.Fprintf(&buf, "- Duration: %s\n", formatDuration(duration))
-	if results.StartBudget > 0 {
-		fmt.Fprintf(&buf, "- Budget: %s start, %s used, %s remaining\n",
-			formatTokens(results.StartBudget),
-			formatTokens(results.UsedBudget),
-			formatTokens(results.RemainingBudget),
-		)
-	}
 	fmt.Fprintf(&buf, "- Tasks: %d completed, %d failed, %d skipped\n",
 		len(completed), len(failed), len(skipped))
 	if logPath != "" {

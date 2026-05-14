@@ -75,9 +75,8 @@ func (u *TokenUsage) TotalTokens() int64 {
 
 // Claude wraps the Claude Code CLI as a provider.
 type Claude struct {
-	dataPath              string // Path to ~/.claude
-	mu                    sync.RWMutex
-	lastUsedPercentSource string
+	dataPath string // Path to ~/.claude
+	mu       sync.RWMutex
 }
 
 // NewClaude creates a Claude Code provider.
@@ -274,56 +273,6 @@ func (c *Claude) getWeeklyUsageWithSource() (int64, string, error) {
 	return 0, "stats-cache", nil
 }
 
-// GetUsedPercent calculates the used percentage based on mode and budget.
-// mode: "daily" or "weekly"
-// weeklyBudget: total weekly token budget
-func (c *Claude) GetUsedPercent(mode string, weeklyBudget int64) (float64, error) {
-	if weeklyBudget <= 0 {
-		c.setLastUsedPercentSource("")
-		return 0, fmt.Errorf("invalid weekly budget: %d", weeklyBudget)
-	}
-
-	switch mode {
-	case "daily":
-		usage, source, err := c.getTodayUsageWithSource()
-		if err != nil {
-			c.setLastUsedPercentSource("")
-			return 0, err
-		}
-		c.setLastUsedPercentSource(source)
-		dailyBudget := weeklyBudget / 7
-		if dailyBudget <= 0 {
-			return 0, nil
-		}
-		return float64(usage) / float64(dailyBudget) * 100, nil
-
-	case "weekly":
-		usage, source, err := c.getWeeklyUsageWithSource()
-		if err != nil {
-			c.setLastUsedPercentSource("")
-			return 0, err
-		}
-		c.setLastUsedPercentSource(source)
-		return float64(usage) / float64(weeklyBudget) * 100, nil
-
-	default:
-		c.setLastUsedPercentSource("")
-		return 0, fmt.Errorf("invalid mode: %s (must be 'daily' or 'weekly')", mode)
-	}
-}
-
-// LastUsedPercentSource reports where the last GetUsedPercent call sourced data.
-func (c *Claude) LastUsedPercentSource() string {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	return c.lastUsedPercentSource
-}
-
-func (c *Claude) setLastUsedPercentSource(source string) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.lastUsedPercentSource = source
-}
 
 // GetDailyStats returns usage stats for a specific date.
 func (c *Claude) GetDailyStats(date string) (*DailyStat, error) {

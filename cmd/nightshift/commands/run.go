@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"math"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -247,7 +246,7 @@ func runRun(cmd *cobra.Command, args []string) error {
 		log:          log,
 	}
 	if !dryRun {
-		params.report = newRunReport(time.Now(), calculateRunBudgetStart(cfg, budgetMgr, log))
+		params.report = newRunReport(time.Now())
 	}
 	return executeRun(ctx, params)
 }
@@ -482,11 +481,7 @@ func buildPreflight(p executeRunParams) (*preflightPlan, error) {
 				Project:    projectPath,
 			}}
 		} else if p.randomTask {
-			taskBudget := choice.allowance.Allowance
-			if p.ignoreBudget {
-				taskBudget = math.MaxInt64
-			}
-			if picked := p.selector.SelectRandom(taskBudget, projectPath); picked != nil {
+			if picked := p.selector.SelectRandom(projectPath); picked != nil {
 				selectedTasks = []tasks.ScoredTask{*picked}
 			}
 		} else {
@@ -494,11 +489,7 @@ func buildPreflight(p executeRunParams) (*preflightPlan, error) {
 			if n <= 0 {
 				n = 1
 			}
-			taskBudget := choice.allowance.Allowance
-			if p.ignoreBudget {
-				taskBudget = math.MaxInt64
-			}
-			selectedTasks = p.selector.SelectTopN(taskBudget, projectPath, n)
+			selectedTasks = p.selector.SelectTopN(projectPath, n)
 		}
 
 		pp := preflightProject{
@@ -508,10 +499,9 @@ func buildPreflight(p executeRunParams) (*preflightPlan, error) {
 		}
 
 		if len(selectedTasks) == 0 {
-			skipReason := "no tasks available within budget"
+			skipReason := "no tasks available"
 			allEnabled := p.selector.FilterEnabled(tasks.AllDefinitions())
-			inBudget := p.selector.FilterByBudget(allEnabled, choice.allowance.Allowance)
-			unassigned := p.selector.FilterUnassigned(inBudget, projectPath)
+			unassigned := p.selector.FilterUnassigned(allEnabled, projectPath)
 			afterCooldown := p.selector.FilterByCooldown(unassigned, projectPath)
 			cooledDown := len(unassigned) - len(afterCooldown)
 			if cooledDown > 0 {
@@ -542,9 +532,8 @@ func displayPreflight(w io.Writer, plan *preflightPlan) {
 	// Show provider info from first project that has one
 	for _, pp := range plan.projects {
 		if pp.provider != nil {
-			_, _ = fmt.Fprintf(w, "Provider: %s (%.1f%% budget used, %s mode)\n",
-				pp.provider.name, pp.provider.allowance.UsedPercent, pp.provider.allowance.Mode)
-			_, _ = fmt.Fprintf(w, "Budget: %d tokens remaining\n", pp.provider.allowance.Allowance)
+			_, _ = fmt.Fprintf(w, "Provider: %s (%.1f%% used)\n",
+				pp.provider.name, pp.provider.allowance.UsedPercent)
 			break
 		}
 	}
@@ -670,9 +659,7 @@ func executeRun(ctx context.Context, p executeRunParams) error {
 			displayProjectHeaderColored(projectPath, choice.name, choice.allowance, len(pp.tasks), pp.tasks)
 		} else {
 			fmt.Printf("\n=== Project: %s ===\n", projectPath)
-			fmt.Printf("Provider: %s\n", choice.name)
-			fmt.Printf("Budget: %d tokens available (%.1f%% used, mode=%s)\n",
-				choice.allowance.Allowance, choice.allowance.UsedPercent, choice.allowance.Mode)
+			fmt.Printf("Provider: %s (%.1f%% used)\n", choice.name, choice.allowance.UsedPercent)
 
 			fmt.Printf("Selected %d task(s):\n", len(pp.tasks))
 			for i, st := range pp.tasks {
