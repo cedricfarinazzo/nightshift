@@ -202,7 +202,6 @@ func TestCopilot_IncrementRequestCount(t *testing.T) {
 	}
 }
 
-
 func TestCopilot_GetMonthlyResetTime(t *testing.T) {
 	tmpDir := t.TempDir()
 	provider := NewCopilotWithPath(tmpDir)
@@ -316,4 +315,3 @@ func TestDaysElapsedInMonth(t *testing.T) {
 		})
 	}
 }
-

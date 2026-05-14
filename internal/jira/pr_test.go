@@ -569,11 +569,11 @@ func TestParseCheckRuns_PreservesURLs(t *testing.T) {
 
 func TestHasMergeConflict(t *testing.T) {
 	tests := []struct {
-		name      string
-		ghOutput  string
-		ghErr     error
-		wantBool  bool
-		wantErr   bool
+		name     string
+		ghOutput string
+		ghErr    error
+		wantBool bool
+		wantErr  bool
 	}{
 		{"conflicting", "CONFLICTING", nil, true, false},
 		{"mergeable", "MERGEABLE", nil, false, false},

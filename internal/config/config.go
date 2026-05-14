@@ -137,12 +137,12 @@ type ReportingConfig struct {
 
 // Default values for configuration.
 const (
-	DefaultMaxPercent = 90
-	DefaultLogLevel   = "info"
-	DefaultLogFormat         = "json"
-	DefaultClaudeDataPath    = "~/.claude"
-	DefaultCodexDataPath     = "~/.codex"
-	DefaultCopilotDataPath   = "~/.copilot"
+	DefaultMaxPercent      = 90
+	DefaultLogLevel        = "info"
+	DefaultLogFormat       = "json"
+	DefaultClaudeDataPath  = "~/.claude"
+	DefaultCodexDataPath   = "~/.codex"
+	DefaultCopilotDataPath = "~/.copilot"
 )
 
 // DefaultLogPath returns the default log path.
@@ -262,6 +262,9 @@ func setDefaults(v *viper.Viper) {
 
 	// Jira defaults
 	v.SetDefault("jira.budget_enabled", true)
+
+	// Jira systemd defaults
+	v.SetDefault("jira.systemd_on_calendar", "*-*-* 22:00:00")
 }
 
 // loadConfigFile merges a YAML config file into viper.
@@ -305,11 +308,11 @@ func expandPath(path string) string {
 
 // Validation errors
 var (
-	ErrCronAndInterval          = errors.New("cron and interval are mutually exclusive")
+	ErrCronAndInterval   = errors.New("cron and interval are mutually exclusive")
 	ErrInvalidMaxPercent = errors.New("max_percent must be between 1 and 100")
 	ErrInvalidLogLevel   = errors.New("log level must be debug, info, warn, or error")
-	ErrInvalidLogFormat         = errors.New("log format must be json or text")
-	ErrNoSchedule               = errors.New("either cron or interval must be specified")
+	ErrInvalidLogFormat  = errors.New("log format must be json or text")
+	ErrNoSchedule        = errors.New("either cron or interval must be specified")
 
 	ErrCustomTaskMissingType        = errors.New("custom task: type is required")
 	ErrCustomTaskMissingName        = errors.New("custom task: name is required")
@@ -335,7 +338,6 @@ func Validate(cfg *Config) error {
 	if cfg.Budget.MaxPercent < 0 || cfg.Budget.MaxPercent > 100 {
 		return ErrInvalidMaxPercent
 	}
-
 
 	// Log level validation
 	if cfg.Logging.Level != "" {
@@ -452,7 +454,6 @@ func normalizeBudgetConfig(cfg *Config) {
 }
 
 // Helper methods for accessing configuration
-
 
 // IsTaskEnabled checks if a task type is enabled.
 func (c *Config) IsTaskEnabled(task string) bool {

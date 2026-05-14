@@ -22,9 +22,6 @@ func TestValidate_CronAndInterval(t *testing.T) {
 	}
 }
 
-
-
-
 func TestValidate_InvalidMaxPercent(t *testing.T) {
 	cfg := &Config{
 		Budget: BudgetConfig{
@@ -97,7 +94,6 @@ func TestExpandPath(t *testing.T) {
 		}
 	}
 }
-
 
 func TestIsTaskEnabled(t *testing.T) {
 	cfg := &Config{
@@ -545,5 +541,22 @@ func TestValidate_NoScheduleIsOK(t *testing.T) {
 	cfg := &Config{}
 	if err := Validate(cfg); err != nil {
 		t.Errorf("Validate() without schedule should pass, got %v", err)
+	}
+}
+
+func TestValidate_JiraSystemd_enabled(t *testing.T) {
+	cfg := &Config{}
+	cfg.Jira.SystemdEnabled = true
+	cfg.Jira.SystemdOnCalendar = "*-*-* 22:00:00"
+	if err := Validate(cfg); err != nil {
+		t.Errorf("jira systemd enabled should be valid, got %v", err)
+	}
+}
+
+func TestValidate_JiraSystemd_disabled(t *testing.T) {
+	cfg := &Config{}
+	cfg.Jira.SystemdEnabled = false
+	if err := Validate(cfg); err != nil {
+		t.Errorf("jira systemd disabled should pass validation, got %v", err)
 	}
 }

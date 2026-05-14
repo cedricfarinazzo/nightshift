@@ -75,7 +75,6 @@ func TestSortByPriority(t *testing.T) {
 	}
 }
 
-
 func TestFilterProcessedToday(t *testing.T) {
 	s := newTestState(t)
 

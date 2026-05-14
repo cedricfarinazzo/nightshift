@@ -30,9 +30,9 @@ type CodexAPIRateLimit struct {
 
 // CodexWindow represents a single rate limit window.
 type CodexWindow struct {
-	UsedPercent        float64   `json:"used_percent"`
-	ResetAt            UnixTime  `json:"reset_at"`
-	LimitWindowSeconds int64     `json:"limit_window_seconds"`
+	UsedPercent        float64  `json:"used_percent"`
+	ResetAt            UnixTime `json:"reset_at"`
+	LimitWindowSeconds int64    `json:"limit_window_seconds"`
 }
 
 // UnixTime unmarshals a Unix timestamp integer as time.Time.

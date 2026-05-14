@@ -334,4 +334,3 @@ func renderStatsHuman(result *stats.StatsResult) error {
 
 	return nil
 }
-

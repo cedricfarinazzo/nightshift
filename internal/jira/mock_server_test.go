@@ -18,16 +18,16 @@ import (
 
 // mockServerConfig controls which endpoints succeed and which fail.
 type mockServerConfig struct {
-	myselfStatus    int
-	statusesPayload string  // JSON for project statuses
-	commentStatus   int
-	transitionsGet  string  // JSON for GET transitions
-	transitionsPost int     // HTTP status for POST transitions (move)
-	searchPayload   string  // JSON for POST /rest/api/3/search
-	boardPayload    string  // JSON for GET /rest/agile/1.0/board/{id}/issue
-	backlogPayload  string  // JSON for GET /rest/agile/1.0/board/{id}/backlog
-	failTransitions bool    // force GET transitions to return error
-	capturedJQL     *string // if non-nil, last JQL from search body is written here
+	myselfStatus     int
+	statusesPayload  string // JSON for project statuses
+	commentStatus    int
+	transitionsGet   string  // JSON for GET transitions
+	transitionsPost  int     // HTTP status for POST transitions (move)
+	searchPayload    string  // JSON for POST /rest/api/3/search
+	boardPayload     string  // JSON for GET /rest/agile/1.0/board/{id}/issue
+	backlogPayload   string  // JSON for GET /rest/agile/1.0/board/{id}/backlog
+	failTransitions  bool    // force GET transitions to return error
+	capturedJQL      *string // if non-nil, last JQL from search body is written here
 	capturedBoardJQL *string // if non-nil, JQL from board issue request is written here
 }
 

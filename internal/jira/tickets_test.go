@@ -423,11 +423,11 @@ func TestIssueLinkToLink_BothKeys(t *testing.T) {
 
 // ── buildTodoJQL ──────────────────────────────────────────────────────────────
 
-func TestBuildTodoJQL_NoSprintFilter(t *testing.T) {
-	proj := ProjectConfig{Key: "PROJ", Label: "auto", RequireActiveSprint: false}
+func TestBuildTodoJQL_Basic(t *testing.T) {
+	proj := ProjectConfig{Key: "PROJ", Label: "auto"}
 	jql := buildTodoJQL(proj, "")
 	if strings.Contains(jql, "sprint") {
-		t.Errorf("JQL should not contain sprint filter when RequireActiveSprint=false, got: %s", jql)
+		t.Errorf("JQL should not contain sprint filter, got: %s", jql)
 	}
 	if !strings.Contains(jql, `project = "PROJ"`) {
 		t.Errorf("JQL missing project clause, got: %s", jql)
@@ -440,83 +440,20 @@ func TestBuildTodoJQL_NoSprintFilter(t *testing.T) {
 	}
 }
 
-func TestBuildTodoJQL_WithSprintFilter(t *testing.T) {
-	proj := ProjectConfig{Key: "PROJ", Label: "auto", RequireActiveSprint: true, BoardType: "scrum"}
-	jql := buildTodoJQL(proj, "")
-	if !strings.Contains(jql, "sprint in openSprints()") {
-		t.Errorf("JQL should contain sprint filter for scrum when RequireActiveSprint=true, got: %s", jql)
+func TestBuildTodoJQL_WithIssueType(t *testing.T) {
+	proj := ProjectConfig{Key: "PROJ", Label: "auto"}
+	jql := buildTodoJQL(proj, "Story")
+	if !strings.Contains(jql, `issuetype = "Story"`) {
+		t.Errorf("JQL missing issuetype clause, got: %s", jql)
 	}
 }
 
-func TestBuildTodoJQL_KanbanNoSprintFilter(t *testing.T) {
-	proj := ProjectConfig{Key: "PROJ", Label: "auto", RequireActiveSprint: true, BoardType: "kanban"}
-	jql := buildTodoJQL(proj, "")
-	if strings.Contains(jql, "sprint") {
-		t.Errorf("JQL should NOT contain sprint filter for kanban (backlog indistinguishable from board), got: %s", jql)
-	}
-}
-
-func TestBuildTodoJQL_SprintFilterBeforeOrderBy(t *testing.T) {
-	proj := ProjectConfig{Key: "PROJ", Label: "auto", RequireActiveSprint: true, BoardType: "scrum"}
-	jql := buildTodoJQL(proj, "")
-	sprintIdx := strings.Index(jql, "sprint in openSprints()")
-	orderIdx := strings.Index(jql, "ORDER BY created ASC")
-	if sprintIdx < 0 || orderIdx < 0 {
-		t.Fatalf("expected both sprint filter and ORDER BY in JQL, got: %s", jql)
-	}
-	if sprintIdx > orderIdx {
-		t.Errorf("sprint filter should appear before ORDER BY, got: %s", jql)
-	}
-}
-
-func TestFetchTodoTickets_SprintFilterSentInJQL(t *testing.T) {
-	var capturedJQL string
+func TestFetchTodoTickets_BoardIDFiltersBacklog(t *testing.T) {
 	cfg := defaultMockConfig()
-	cfg.capturedJQL = &capturedJQL
-	client, srv := newMockJiraClient(t, cfg)
-	defer srv.Close()
-
-	proj := mockProject()
-	proj.RequireActiveSprint = true
-	proj.BoardType = "scrum"
-
-	_, err := client.FetchTodoTickets(testCtx(t), proj, "")
-	if err != nil {
-		t.Fatalf("FetchTodoTickets() error = %v", err)
-	}
-	if !strings.Contains(capturedJQL, "sprint in openSprints()") {
-		t.Errorf("expected sprint filter in wire JQL for scrum board, got: %q", capturedJQL)
-	}
-}
-
-func TestFetchTodoTickets_KanbanNoSprintFilterInJQL(t *testing.T) {
-	var capturedJQL string
-	cfg := defaultMockConfig()
-	cfg.capturedJQL = &capturedJQL
-	client, srv := newMockJiraClient(t, cfg)
-	defer srv.Close()
-
-	proj := mockProject()
-	proj.RequireActiveSprint = true
-	proj.BoardType = "kanban"
-
-	_, err := client.FetchTodoTickets(testCtx(t), proj, "")
-	if err != nil {
-		t.Fatalf("FetchTodoTickets() error = %v", err)
-	}
-	if strings.Contains(capturedJQL, "sprint") {
-		t.Errorf("expected no sprint filter in wire JQL for kanban board, got: %q", capturedJQL)
-	}
-}
-
-func TestFetchTodoTickets_KanbanBoardAPIUsedWhenBoardIDSet(t *testing.T) {
-	var capturedBoardJQL string
-	cfg := defaultMockConfig()
-	cfg.capturedBoardJQL = &capturedBoardJQL
-	// board/issue returns VC-59 (on board) and VC-31 (also returned but in backlog)
-	cfg.boardPayload = `{"startAt":0,"maxResults":50,"total":2,"issues":[
-		{"key":"VC-59","fields":{"summary":"Board ticket","labels":["auto"],"status":{"id":"10001","name":"To Do","statusCategory":{"key":"new"}},"description":"Do the thing.","comment":{"comments":[]},"issuelinks":[]}},
-		{"key":"VC-31","fields":{"summary":"Backlog ticket","labels":["auto"],"status":{"id":"10001","name":"To Do","statusCategory":{"key":"new"}},"description":"In backlog.","comment":{"comments":[]},"issuelinks":[]}}
+	// JQL search returns both VC-59 (on board) and VC-31 (in backlog)
+	cfg.searchPayload = `{"total":2,"issues":[
+		{"key":"VC-59","fields":{"summary":"Board ticket","labels":["auto"],"status":{"id":"10001","name":"To Do","statusCategory":{"key":"new"}},"comment":{"comments":[]},"issuelinks":[]}},
+		{"key":"VC-31","fields":{"summary":"Backlog ticket","labels":["auto"],"status":{"id":"10001","name":"To Do","statusCategory":{"key":"new"}},"comment":{"comments":[]},"issuelinks":[]}}
 	]}`
 	// board/backlog returns VC-31 only — it should be excluded from results
 	cfg.backlogPayload = `{"startAt":0,"maxResults":50,"total":1,"issues":[
@@ -526,27 +463,19 @@ func TestFetchTodoTickets_KanbanBoardAPIUsedWhenBoardIDSet(t *testing.T) {
 	defer srv.Close()
 
 	proj := mockProject()
-	proj.BoardType = "kanban"
 	proj.BoardID = 42
-	proj.RequireActiveSprint = true
 	proj.Label = "auto"
 
 	tickets, err := client.FetchTodoTickets(testCtx(t), proj, "")
 	if err != nil {
-		t.Fatalf("FetchTodoTickets() with board API error = %v", err)
+		t.Fatalf("FetchTodoTickets() with board filtering error = %v", err)
 	}
 	if len(tickets) != 1 || tickets[0].Key != "VC-59" {
 		t.Errorf("expected only VC-59 (backlog VC-31 excluded), got %v", tickets)
 	}
-	if !strings.Contains(capturedBoardJQL, `labels = "auto"`) {
-		t.Errorf("board JQL should filter by label, got: %q", capturedBoardJQL)
-	}
-	if strings.Contains(capturedBoardJQL, "sprint") {
-		t.Errorf("board JQL should not contain sprint filter, got: %q", capturedBoardJQL)
-	}
 }
 
-func TestFetchTodoTickets_NoSprintFilterWhenFlagOff(t *testing.T) {
+func TestFetchTodoTickets_NoBoardID_NoBacklogFilter(t *testing.T) {
 	var capturedJQL string
 	cfg := defaultMockConfig()
 	cfg.capturedJQL = &capturedJQL
@@ -558,6 +487,6 @@ func TestFetchTodoTickets_NoSprintFilterWhenFlagOff(t *testing.T) {
 		t.Fatalf("FetchTodoTickets() error = %v", err)
 	}
 	if strings.Contains(capturedJQL, "sprint") {
-		t.Errorf("expected no sprint filter in wire JQL when RequireActiveSprint=false, got: %q", capturedJQL)
+		t.Errorf("expected no sprint filter in wire JQL, got: %q", capturedJQL)
 	}
 }

@@ -334,8 +334,6 @@ func TestCodexGetRateLimits_SkipsNewestStubSession(t *testing.T) {
 	}
 }
 
-
-
 func TestCodexGetPrimaryUsedPercent(t *testing.T) {
 	tmpDir := t.TempDir()
 	sessionsDir := filepath.Join(tmpDir, "sessions", "2026", "02", "03")

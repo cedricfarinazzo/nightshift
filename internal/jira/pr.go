@@ -272,10 +272,10 @@ func parseCheckRuns(raw string) ([]CheckRun, error) {
 		return nil, fmt.Errorf("parse check-runs: %w", err)
 	}
 	failingConclusions := map[string]bool{
-		"failure":           true,
-		"timed_out":         true,
-		"cancelled":         true,
-		"action_required":   true,
+		"failure":         true,
+		"timed_out":       true,
+		"cancelled":       true,
+		"action_required": true,
 	}
 	runs := make([]CheckRun, 0)
 	for _, cr := range v.CheckRuns {

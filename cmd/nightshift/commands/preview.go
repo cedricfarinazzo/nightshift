@@ -136,16 +136,16 @@ func detectPreviewConfigSources(projectPath string) (*previewConfigSources, erro
 }
 
 type previewResult struct {
-	GeneratedAt    time.Time
-	Provider       string
-	TaskFilter     string
-	MaxPercent int
-	EnabledTasks []string
-	ProjectCount   int
-	Runs           []previewRun
-	Providers      []providerBudgetSummary
-	ConfigSources  *previewConfigSources
-	Note           string
+	GeneratedAt   time.Time
+	Provider      string
+	TaskFilter    string
+	MaxPercent    int
+	EnabledTasks  []string
+	ProjectCount  int
+	Runs          []previewRun
+	Providers     []providerBudgetSummary
+	ConfigSources *previewConfigSources
+	Note          string
 }
 
 type previewRun struct {
@@ -265,15 +265,15 @@ func buildPreviewResult(cfg *config.Config, database *db.DB, projects []string, 
 		maxPercent = config.DefaultMaxPercent
 	}
 	result := &previewResult{
-		GeneratedAt:  time.Now(),
-		Provider:     provider,
-		TaskFilter: taskFilter,
-		MaxPercent: maxPercent,
-		EnabledTasks: append([]string(nil), cfg.Tasks.Enabled...),
-		ProjectCount:   len(projects),
-		Providers:      collectProviderBudgets(cfg, budgetMgr, ignoreBudget),
-		ConfigSources:  sources,
-		Note:           "Only the plan prompt is deterministic. Implement/review prompts are generated after plan output.",
+		GeneratedAt:   time.Now(),
+		Provider:      provider,
+		TaskFilter:    taskFilter,
+		MaxPercent:    maxPercent,
+		EnabledTasks:  append([]string(nil), cfg.Tasks.Enabled...),
+		ProjectCount:  len(projects),
+		Providers:     collectProviderBudgets(cfg, budgetMgr, ignoreBudget),
+		ConfigSources: sources,
+		Note:          "Only the plan prompt is deterministic. Implement/review prompts are generated after plan output.",
 	}
 
 	for i, runAt := range nextRuns {
@@ -444,12 +444,12 @@ func computePreviewDiagnostics(cfg *config.Config, selector *tasks.Selector, pro
 		}
 		minTok, maxTok := def.EstimatedTokens()
 		diagnostics.FilteredTask = &previewFilteredTaskDiagnostic{
-			Type:     string(def.Type),
-			Name:     def.Name,
-			CostTier: def.CostTier.String(),
+			Type:      string(def.Type),
+			Name:      def.Name,
+			CostTier:  def.CostTier.String(),
 			MinTokens: minTok,
 			MaxTokens: maxTok,
-			Disabled: !cfg.IsTaskEnabled(string(def.Type)),
+			Disabled:  !cfg.IsTaskEnabled(string(def.Type)),
 		}
 		onCooldown, remaining, interval := selector.IsOnCooldown(tasks.TaskType(taskFilter), project)
 		simulated := selector.HasSimulatedCooldown(taskFilter, project)

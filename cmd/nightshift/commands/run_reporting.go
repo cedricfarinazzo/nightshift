@@ -21,10 +21,10 @@ type runReport struct {
 func newRunReport(start time.Time) *runReport {
 	return &runReport{
 		results: &reporting.RunResults{
-			Date:      start,
-			StartTime: start,
+			Date:       start,
+			StartTime:  start,
 			UsedBudget: 0,
-			Tasks:     []reporting.TaskResult{},
+			Tasks:      []reporting.TaskResult{},
 		},
 	}
 }

@@ -209,7 +209,6 @@ func (c *Codex) GetRateLimits() (*CodexRateLimits, error) {
 	return nil, nil
 }
 
-
 // UsageBreakdown contains both rate-limit and local token data for display.
 type UsageBreakdown struct {
 	PrimaryPct   float64          // 5h window used_percent from rate limit

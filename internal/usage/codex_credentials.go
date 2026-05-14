@@ -116,9 +116,9 @@ func parseIDToken(token string) (userID string, exp time.Time, err error) {
 	}
 
 	var claims struct {
-		Exp            int64  `json:"exp"`
-		ChatGPTUserID  string `json:"chatgpt_user_id"`
-		Sub            string `json:"sub"`
+		Exp           int64  `json:"exp"`
+		ChatGPTUserID string `json:"chatgpt_user_id"`
+		Sub           string `json:"sub"`
 	}
 	if err := json.Unmarshal(decoded, &claims); err != nil {
 		return "", time.Time{}, fmt.Errorf("codex: parse id_token claims: %w", err)

@@ -142,6 +142,40 @@ func checkService(add func(string, checkStatus, string)) {
 		} else {
 			add("service.timer", statusWarn, "systemd timer missing")
 		}
+
+		// Check Jira-specific service unit.
+		jiraServicePath := filepath.Join(home, ".config", "systemd", "user", systemdJiraServiceName)
+		if _, err := os.Stat(jiraServicePath); err == nil {
+			out, err := exec.Command("systemctl", "--user", "is-active", systemdJiraServiceName).CombinedOutput()
+			status := strings.TrimSpace(string(out))
+			if err != nil {
+				// systemctl failed (e.g., no user bus) — include error in output
+				add("service.jira", statusWarn, fmt.Sprintf("nightshift-jira.service: %s (systemctl error: %v)", status, err))
+			} else {
+				switch status {
+				case "active":
+					add("service.jira", statusOK, "nightshift-jira.service active")
+				case "inactive":
+					add("service.jira", statusWarn, "nightshift-jira.service installed but inactive")
+				default:
+					add("service.jira", statusWarn, fmt.Sprintf("nightshift-jira.service: %s", status))
+				}
+			}
+			jiraTimerPath := filepath.Join(home, ".config", "systemd", "user", systemdJiraTimerName)
+			if _, err := os.Stat(jiraTimerPath); err == nil {
+				out, err := exec.Command("systemctl", "--user", "is-active", systemdJiraTimerName).CombinedOutput()
+				timerStatus := strings.TrimSpace(string(out))
+				if err != nil {
+					add("service.jira.timer", statusWarn, fmt.Sprintf("nightshift-jira.timer: %s (systemctl error: %v)", timerStatus, err))
+				} else if timerStatus == "active" {
+					add("service.jira.timer", statusOK, "nightshift-jira.timer active")
+				} else {
+					add("service.jira.timer", statusWarn, fmt.Sprintf("nightshift-jira.timer: %s", timerStatus))
+				}
+			}
+		} else {
+			add("service.jira", statusWarn, "nightshift-jira.service not installed")
+		}
 	case ServiceCron:
 		out, err := exec.Command("crontab", "-l").CombinedOutput()
 		if err != nil {
@@ -219,7 +253,6 @@ func checkBudget(cfg *config.Config, _ *db.DB, add func(string, checkStatus, str
 		}
 	}
 }
-
 
 func printDoctorResults(results []checkResult) {
 	fmt.Println("Nightshift doctor")
