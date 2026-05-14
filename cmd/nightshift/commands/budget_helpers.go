@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/marcus/nightshift/internal/budget"
 	"github.com/marcus/nightshift/internal/config"
 )
 
@@ -129,6 +130,24 @@ func primaryWindowLabel(secStr string) string {
 		return "1d-pri"
 	default:
 		return "7d-pri"
+	}
+}
+
+// printHourlyCapacity prints a capacity line plus per-window input data.
+func printHourlyCapacity(hcr budget.HourlyCapacityResult) {
+	capBar := unicodeProgressBar(hcr.Capacity*100, 25)
+	fmt.Printf("  Capacity %s %3.0f%%\n", capBar, hcr.Capacity*100)
+	for _, w := range hcr.Windows {
+		marker := " "
+		if w.Name == hcr.BottleneckWindow {
+			marker = "▶"
+		}
+		resetStr := ""
+		if w.ResetIn > 0 {
+			resetStr = "  resets in " + formatDuration(w.ResetIn)
+		}
+		fmt.Printf("    %s %-22s used=%3.0f%%  cap=%3.0f%%%s\n",
+			marker, w.Name, w.UsedPct, w.Capacity*100, resetStr)
 	}
 }
 

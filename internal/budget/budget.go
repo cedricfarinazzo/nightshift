@@ -84,11 +84,12 @@ func NewManager(cfg *config.Config, claude ClaudeUsageProvider, codex CodexUsage
 // AllowanceResult holds the live budget check result for a single provider.
 // All budget decisions are based on hourly capacity; no token arithmetic is performed.
 type AllowanceResult struct {
-	HourlyCapacity    float64 // 0–1; 0 = exhausted
+	HourlyCapacity    float64          // 0–1; 0 = exhausted
 	BottleneckWindow  string
-	BottleneckUsedPct float64 // raw utilization of bottleneck window (for display)
+	BottleneckUsedPct float64          // raw utilization of bottleneck window (for display)
 	MaxPercent        int
 	Source            string
+	Windows           []WindowCapacity // per-window input data used to compute capacity
 }
 
 // EnforcementResult holds the budget check outcome for a single provider.
@@ -181,6 +182,7 @@ func (m *Manager) CheckProviders(providers []string, ignoreBudget bool) ([]Enfor
 				BottleneckUsedPct: hcr.BottleneckUsedPct,
 				MaxPercent:        maxPercent,
 				Source:            hcr.Source,
+				Windows:           hcr.Windows,
 			},
 		})
 	}

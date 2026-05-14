@@ -146,8 +146,7 @@ func printProviderBudgetActive(
 	}
 
 	if hcr, err := mgr.GetHourlyCapacity(ctx, provName); err == nil {
-		capBar := unicodeProgressBar(hcr.Capacity*100, 25)
-		fmt.Printf("  Capacity %s %3.0f%%  (bottleneck: %s)\n", capBar, hcr.Capacity*100, hcr.BottleneckWindow)
+		printHourlyCapacity(hcr)
 	}
 
 	if pu.Credits != nil {
