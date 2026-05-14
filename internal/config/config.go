@@ -45,11 +45,10 @@ type WindowConfig struct {
 	Timezone string `mapstructure:"timezone"` // Timezone (e.g., "America/Denver")
 }
 
-// BudgetConfig controls token budget allocation.
+// BudgetConfig controls budget enforcement.
 type BudgetConfig struct {
-	Mode       string `json:"mode" yaml:"mode" mapstructure:"mode"`                               // daily | weekly
-	MaxPercent int    `json:"max_percent" yaml:"max_percent" mapstructure:"max_percent"`          // Max % of budget per run
-	DBPath     string `json:"db_path" yaml:"db_path" mapstructure:"db_path"`                     // Override DB path
+	MaxPercent int    `json:"max_percent" yaml:"max_percent" mapstructure:"max_percent"` // Max % usage before blocking
+	DBPath     string `json:"db_path" yaml:"db_path" mapstructure:"db_path"`             // Override DB path
 }
 
 // ProvidersConfig defines AI provider settings.
@@ -138,7 +137,6 @@ type ReportingConfig struct {
 
 // Default values for configuration.
 const (
-	DefaultBudgetMode = "daily"
 	DefaultMaxPercent = 90
 	DefaultLogLevel   = "info"
 	DefaultLogFormat         = "json"
@@ -232,7 +230,6 @@ func LoadFromPaths(projectPath, globalPath string) (*Config, error) {
 // setDefaults configures default values.
 func setDefaults(v *viper.Viper) {
 	// Budget defaults
-	v.SetDefault("budget.mode", DefaultBudgetMode)
 	v.SetDefault("budget.max_percent", DefaultMaxPercent)
 	v.SetDefault("budget.db_path", DefaultDBPath())
 
@@ -290,7 +287,6 @@ func bindEnvVars(v *viper.Viper) {
 
 	// Explicit bindings for nested config
 	_ = v.BindEnv("budget.max_percent", "NIGHTSHIFT_BUDGET_MAX_PERCENT")
-	_ = v.BindEnv("budget.mode", "NIGHTSHIFT_BUDGET_MODE")
 	_ = v.BindEnv("logging.level", "NIGHTSHIFT_LOG_LEVEL")
 	_ = v.BindEnv("logging.path", "NIGHTSHIFT_LOG_PATH")
 }
@@ -310,7 +306,6 @@ func expandPath(path string) string {
 // Validation errors
 var (
 	ErrCronAndInterval          = errors.New("cron and interval are mutually exclusive")
-	ErrInvalidBudgetMode = errors.New("budget mode must be 'daily' or 'weekly'")
 	ErrInvalidMaxPercent = errors.New("max_percent must be between 1 and 100")
 	ErrInvalidLogLevel   = errors.New("log level must be debug, info, warn, or error")
 	ErrInvalidLogFormat         = errors.New("log format must be json or text")
@@ -336,10 +331,6 @@ func Validate(cfg *Config) error {
 	}
 
 	// Budget mode validation
-	if cfg.Budget.Mode != "" && cfg.Budget.Mode != "daily" && cfg.Budget.Mode != "weekly" {
-		return ErrInvalidBudgetMode
-	}
-
 	// MaxPercent validation
 	if cfg.Budget.MaxPercent < 0 || cfg.Budget.MaxPercent > 100 {
 		return ErrInvalidMaxPercent

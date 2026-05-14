@@ -57,7 +57,7 @@ func renderPreviewText(result *previewResult, opts previewTextOptions) string {
 	b.WriteString(styles.Section.Render("Summary"))
 	b.WriteString("\n")
 	fmt.Fprintf(b, "  Provider: %s (preview picks first enabled: claude -> codex -> copilot)\n", result.Provider)
-	fmt.Fprintf(b, "  Budget mode: %s (max %d%%)\n", result.BudgetMode, result.MaxPercent)
+	fmt.Fprintf(b, "  Budget limit: %d%%\n", result.MaxPercent)
 	if result.ConfigSources != nil {
 		fmt.Fprintf(b, "  Config global: %s (%s)\n", result.ConfigSources.GlobalPath, configLoadedLabel(result.ConfigSources.GlobalExists))
 		fmt.Fprintf(b, "  Config project: %s (%s)\n", result.ConfigSources.ProjectPath, configLoadedLabel(result.ConfigSources.ProjectExists))
@@ -423,8 +423,7 @@ type previewJSON struct {
 }
 
 type previewJSONBudgetConfig struct {
-	Mode       string `json:"mode"`
-	MaxPercent int    `json:"max_percent"`
+	MaxPercent int `json:"max_percent"`
 }
 
 type previewJSONConfigSources struct {
@@ -570,7 +569,6 @@ func buildPreviewJSON(result *previewResult) previewJSON {
 		TaskFilter:   result.TaskFilter,
 		EnabledTasks: result.EnabledTasks,
 		Budget: previewJSONBudgetConfig{
-			Mode:       result.BudgetMode,
 			MaxPercent: result.MaxPercent,
 		},
 		Config:          configSources,

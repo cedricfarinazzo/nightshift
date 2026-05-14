@@ -17,8 +17,7 @@ import (
 func makeConfig() *config.Config {
 	return &config.Config{
 		Budget: config.BudgetConfig{
-			Mode:         "weekly",
-			MaxPercent:   80,
+			MaxPercent: 80,
 		},
 	}
 }

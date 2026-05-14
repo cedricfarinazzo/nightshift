@@ -243,7 +243,7 @@ func TestCheckProviders_MultipleProviders(t *testing.T) {
 
 func TestGetUsedPercent_Errors(t *testing.T) {
 	cfg := &config.Config{
-		Budget: config.BudgetConfig{Mode: "daily"},
+		Budget: config.BudgetConfig{MaxPercent: 80},
 	}
 
 	mgr := NewManager(cfg, nil, nil, nil)

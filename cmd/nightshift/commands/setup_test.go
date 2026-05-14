@@ -19,7 +19,7 @@ func TestApplyBudgetEdit_MaxPercentBounds(t *testing.T) {
 		budgetInput: textinput.New(),
 	}
 
-	m.budgetCursor = 1
+	m.budgetCursor = 0
 	m.budgetInput.SetValue("101")
 	if err := m.applyBudgetEdit(); err == nil {
 		t.Fatal("expected max_percent > 100 to fail")

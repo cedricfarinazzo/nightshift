@@ -134,7 +134,6 @@ tasks:
 	globalCfg := &config.Config{
 		Budget: config.BudgetConfig{
 			MaxPercent: 10,
-			Mode:       "daily",
 		},
 		Tasks: config.TasksConfig{
 			Enabled: []string{"all"},
@@ -151,10 +150,6 @@ tasks:
 		t.Errorf("MaxPercent = %d, want 20", merged.Budget.MaxPercent)
 	}
 
-	// Check preserved global
-	if merged.Budget.Mode != "daily" {
-		t.Errorf("Mode = %s, want daily", merged.Budget.Mode)
-	}
 }
 
 func TestMergeProjectConfigNoFile(t *testing.T) {

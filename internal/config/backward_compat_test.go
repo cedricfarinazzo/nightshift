@@ -158,8 +158,7 @@ func TestBackwardCompat_ValidationStillWorks(t *testing.T) {
 					Cron: "0 2 * * *",
 				},
 				Budget: BudgetConfig{
-					Mode:           "daily",
-					MaxPercent:     75,
+					MaxPercent: 75,
 				},
 				Logging: LoggingConfig{
 					Level:  "info",
@@ -167,15 +166,6 @@ func TestBackwardCompat_ValidationStillWorks(t *testing.T) {
 				},
 			},
 			wantErr: false,
-		},
-		{
-			name: "invalid budget mode still invalid",
-			config: &Config{
-				Budget: BudgetConfig{
-					Mode: "invalid",
-				},
-			},
-			wantErr: true,
 		},
 		{
 			name: "invalid log level still invalid",
@@ -205,7 +195,6 @@ func TestBackwardCompat_EnvironmentOverrides(t *testing.T) {
 
 	oldConfig := `
 budget:
-  mode: daily
   max_percent: 75
 `
 	configPath := filepath.Join(tmpDir, "nightshift.yaml")
@@ -213,20 +202,12 @@ budget:
 		t.Fatal(err)
 	}
 
-	// Set environment override
-	t.Setenv("NIGHTSHIFT_BUDGET_MODE", "weekly")
-
 	cfg, err := LoadFromPaths(tmpDir, configPath)
 	if err != nil {
 		t.Fatalf("LoadFromPaths error: %v", err)
 	}
 
-	// Environment should override file
-	if cfg.Budget.Mode != "weekly" {
-		t.Errorf("Budget.Mode = %q, want weekly (env override)", cfg.Budget.Mode)
-	}
-
-	// File value should still be used for unset env vars
+	// File value should be used
 	if cfg.Budget.MaxPercent != 75 {
 		t.Errorf("Budget.MaxPercent = %d, want 75 (from file)", cfg.Budget.MaxPercent)
 	}
@@ -245,7 +226,6 @@ func TestBackwardCompat_ProjectConfigMerging(t *testing.T) {
 	globalConfigPath := filepath.Join(globalDir, "config.yaml")
 	globalContent := `
 budget:
-  mode: daily
   max_percent: 75
 providers:
   claude:
@@ -286,10 +266,6 @@ providers:
 		t.Errorf("Claude.DangerouslySkipPermissions = %v, want true (project override)", cfg.Providers.Claude.DangerouslySkipPermissions)
 	}
 
-	// Global value should still apply for non-overridden fields
-	if cfg.Budget.Mode != "daily" {
-		t.Errorf("Budget.Mode = %q, want daily (from global)", cfg.Budget.Mode)
-	}
 }
 
 // TestBackwardCompat_DefaultsPreserved verifies that other defaults
@@ -297,10 +273,10 @@ providers:
 func TestBackwardCompat_DefaultsPreserved(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	// Minimal old config
+	// Minimal old config (no budget fields — verify defaults apply)
 	minimalConfig := `
-budget:
-  mode: daily
+logging:
+  level: info
 `
 	configPath := filepath.Join(tmpDir, "nightshift.yaml")
 	if err := os.WriteFile(configPath, []byte(minimalConfig), 0644); err != nil {

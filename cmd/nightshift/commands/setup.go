@@ -1197,9 +1197,6 @@ func (m *setupModel) applyProjects() {
 }
 
 func (m *setupModel) applyBudgetDefaults() {
-	if m.cfg.Budget.Mode == "" {
-		m.cfg.Budget.Mode = config.DefaultBudgetMode
-	}
 	if m.cfg.Budget.MaxPercent == 0 {
 		m.cfg.Budget.MaxPercent = config.DefaultMaxPercent
 	}
@@ -1209,8 +1206,6 @@ func (m *setupModel) applyBudgetDefaults() {
 func (m *setupModel) budgetFieldValue() string {
 	switch m.budgetCursor {
 	case 0:
-		return m.cfg.Budget.Mode
-	case 1:
 		return strconv.Itoa(m.cfg.Budget.MaxPercent)
 	default:
 		return ""
@@ -1221,11 +1216,6 @@ func (m *setupModel) applyBudgetEdit() error {
 	value := strings.TrimSpace(m.budgetInput.Value())
 	switch m.budgetCursor {
 	case 0:
-		if value != "daily" && value != "weekly" {
-			return fmt.Errorf("mode must be daily or weekly")
-		}
-		m.cfg.Budget.Mode = value
-	case 1:
 		v, err := strconv.Atoi(value)
 		if err != nil || v < 1 || v > 100 {
 			return fmt.Errorf("max_percent must be between 1 and 100")
@@ -1703,7 +1693,6 @@ func renderEnvChecks(cfg *config.Config) string {
 
 func renderBudgetFields(b *strings.Builder, m *setupModel) {
 	fields := []string{
-		fmt.Sprintf("Mode: %s", m.cfg.Budget.Mode),
 		fmt.Sprintf("Max percent: %d", m.cfg.Budget.MaxPercent),
 	}
 	for i, field := range fields {
@@ -2113,7 +2102,6 @@ func writeGlobalConfigToPath(cfg *config.Config, configPath string) error {
 	}
 
 	v.Set("schedule", cfg.Schedule)
-	v.Set("budget.mode", cfg.Budget.Mode)
 	v.Set("budget.max_percent", cfg.Budget.MaxPercent)
 
 	// Providers: set fields individually to match mapstructure tag names (fixes #20)

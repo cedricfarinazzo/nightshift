@@ -74,12 +74,7 @@ func runBudget(opts budgetOptions) error {
 		return printBudgetJSON(cfg, providerList, mgr)
 	}
 
-	mode := cfg.Budget.Mode
-	if mode == "" {
-		mode = config.DefaultBudgetMode
-	}
-
-	header := fmt.Sprintf("Budget Status (Live) (mode: %s)", mode)
+	header := "Budget Status (Live)"
 	fmt.Println(header)
 	fmt.Println(strings.Repeat("=", len(header)))
 	fmt.Println()
@@ -194,18 +189,11 @@ func printBudgetJSON(cfg *config.Config, providerList []string, mgr *budget.Mana
 	}
 
 	type OutputJSON struct {
-		Mode      string         `json:"mode"`
 		Providers []ProviderJSON `json:"providers"`
 		FetchedAt time.Time      `json:"fetched_at"`
 	}
 
-	budgetMode := cfg.Budget.Mode
-	if budgetMode == "" {
-		budgetMode = config.DefaultBudgetMode
-	}
-
 	out := OutputJSON{
-		Mode:      budgetMode,
 		FetchedAt: now,
 	}
 

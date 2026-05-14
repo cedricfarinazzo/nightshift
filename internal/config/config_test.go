@@ -22,17 +22,7 @@ func TestValidate_CronAndInterval(t *testing.T) {
 	}
 }
 
-func TestValidate_InvalidBudgetMode(t *testing.T) {
-	cfg := &Config{
-		Budget: BudgetConfig{
-			Mode: "invalid",
-		},
-	}
-	err := Validate(cfg)
-	if err != ErrInvalidBudgetMode {
-		t.Errorf("expected ErrInvalidBudgetMode, got %v", err)
-	}
-}
+
 
 
 func TestValidate_InvalidMaxPercent(t *testing.T) {
@@ -77,8 +67,7 @@ func TestValidate_ValidConfig(t *testing.T) {
 			Cron: "0 2 * * *",
 		},
 		Budget: BudgetConfig{
-			Mode:           "daily",
-			MaxPercent:     10,
+			MaxPercent: 10,
 		},
 		Logging: LoggingConfig{
 			Level:  "info",
@@ -199,7 +188,6 @@ func TestLoadFromPaths_WithYAML(t *testing.T) {
 schedule:
   cron: "0 3 * * *"
 budget:
-  mode: weekly
   max_percent: 20
 logging:
   level: debug
@@ -216,9 +204,6 @@ logging:
 
 	if cfg.Schedule.Cron != "0 3 * * *" {
 		t.Errorf("Schedule.Cron = %q, want %q", cfg.Schedule.Cron, "0 3 * * *")
-	}
-	if cfg.Budget.Mode != "weekly" {
-		t.Errorf("Budget.Mode = %q, want %q", cfg.Budget.Mode, "weekly")
 	}
 	if cfg.Budget.MaxPercent != 20 {
 		t.Errorf("Budget.MaxPercent = %d, want 20", cfg.Budget.MaxPercent)
@@ -239,7 +224,6 @@ func TestLoadFromPaths_MergeConfigs(t *testing.T) {
 	globalConfig := filepath.Join(globalDir, "config.yaml")
 	globalContent := `
 budget:
-  mode: daily
   max_percent: 75
 logging:
   level: info
@@ -277,9 +261,6 @@ logging:
 		t.Errorf("Logging.Level = %q, want debug (project override)", cfg.Logging.Level)
 	}
 	// Global value should still be present for non-overridden fields
-	if cfg.Budget.Mode != "daily" {
-		t.Errorf("Budget.Mode = %q, want daily (from global)", cfg.Budget.Mode)
-	}
 }
 
 func TestGetTaskInterval_Override(t *testing.T) {
@@ -367,9 +348,6 @@ func TestLoadFromPaths_Defaults(t *testing.T) {
 	}
 
 	// Check defaults are applied
-	if cfg.Budget.Mode != DefaultBudgetMode {
-		t.Errorf("Budget.Mode = %q, want %q", cfg.Budget.Mode, DefaultBudgetMode)
-	}
 	if cfg.Budget.MaxPercent != DefaultMaxPercent {
 		t.Errorf("Budget.MaxPercent = %d, want %d", cfg.Budget.MaxPercent, DefaultMaxPercent)
 	}
