@@ -160,7 +160,6 @@ func TestBackwardCompat_ValidationStillWorks(t *testing.T) {
 				Budget: BudgetConfig{
 					Mode:           "daily",
 					MaxPercent:     75,
-					ReservePercent: 5,
 				},
 				Logging: LoggingConfig{
 					Level:  "info",
@@ -317,20 +316,11 @@ budget:
 	if cfg.Budget.MaxPercent != DefaultMaxPercent {
 		t.Errorf("Budget.MaxPercent = %d, want %d (default)", cfg.Budget.MaxPercent, DefaultMaxPercent)
 	}
-	if cfg.Budget.ReservePercent != DefaultReservePercent {
-		t.Errorf("Budget.ReservePercent = %d, want %d (default)", cfg.Budget.ReservePercent, DefaultReservePercent)
-	}
-	if cfg.Budget.WeeklyTokens != DefaultWeeklyTokens {
-		t.Errorf("Budget.WeeklyTokens = %d, want %d (default)", cfg.Budget.WeeklyTokens, DefaultWeeklyTokens)
-	}
 	if cfg.Logging.Level != DefaultLogLevel {
 		t.Errorf("Logging.Level = %q, want %q (default)", cfg.Logging.Level, DefaultLogLevel)
 	}
 	if cfg.Logging.Format != DefaultLogFormat {
 		t.Errorf("Logging.Format = %q, want %q (default)", cfg.Logging.Format, DefaultLogFormat)
-	}
-	if cfg.Budget.BillingMode != DefaultBillingMode {
-		t.Errorf("Budget.BillingMode = %q, want %q (default)", cfg.Budget.BillingMode, DefaultBillingMode)
 	}
 }
 

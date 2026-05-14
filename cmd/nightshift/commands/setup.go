@@ -986,7 +986,7 @@ func (m *setupModel) handleBudgetInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.budgetCursor--
 		}
 	case "down", "j":
-		if m.budgetCursor < 7 {
+		if m.budgetCursor < 1 {
 			m.budgetCursor++
 		}
 	case "e":
@@ -1203,18 +1203,6 @@ func (m *setupModel) applyBudgetDefaults() {
 	if m.cfg.Budget.MaxPercent == 0 {
 		m.cfg.Budget.MaxPercent = config.DefaultMaxPercent
 	}
-	if m.cfg.Budget.ReservePercent == 0 {
-		m.cfg.Budget.ReservePercent = config.DefaultReservePercent
-	}
-	if m.cfg.Budget.BillingMode == "" {
-		m.cfg.Budget.BillingMode = config.DefaultBillingMode
-	}
-	if m.cfg.Budget.WeekStartDay == "" {
-		m.cfg.Budget.WeekStartDay = config.DefaultWeekStartDay
-	}
-	if m.cfg.Budget.WeeklyTokens == 0 {
-		m.cfg.Budget.WeeklyTokens = config.DefaultWeeklyTokens
-	}
 }
 
 
@@ -1224,12 +1212,6 @@ func (m *setupModel) budgetFieldValue() string {
 		return m.cfg.Budget.Mode
 	case 1:
 		return strconv.Itoa(m.cfg.Budget.MaxPercent)
-	case 2:
-		return strconv.Itoa(m.cfg.Budget.ReservePercent)
-	case 3:
-		return m.cfg.Budget.BillingMode
-	case 4:
-		return m.cfg.Budget.WeekStartDay
 	default:
 		return ""
 	}
@@ -1249,22 +1231,6 @@ func (m *setupModel) applyBudgetEdit() error {
 			return fmt.Errorf("max_percent must be between 1 and 100")
 		}
 		m.cfg.Budget.MaxPercent = v
-	case 2:
-		v, err := strconv.Atoi(value)
-		if err != nil || v < 0 || v > 100 {
-			return fmt.Errorf("reserve_percent must be between 0 and 100")
-		}
-		m.cfg.Budget.ReservePercent = v
-	case 3:
-		if value != "subscription" && value != "api" {
-			return fmt.Errorf("billing_mode must be subscription or api")
-		}
-		m.cfg.Budget.BillingMode = value
-	case 4:
-		if value != "monday" && value != "sunday" {
-			return fmt.Errorf("week_start_day must be monday or sunday")
-		}
-		m.cfg.Budget.WeekStartDay = value
 	}
 	return nil
 }
@@ -1739,9 +1705,6 @@ func renderBudgetFields(b *strings.Builder, m *setupModel) {
 	fields := []string{
 		fmt.Sprintf("Mode: %s", m.cfg.Budget.Mode),
 		fmt.Sprintf("Max percent: %d", m.cfg.Budget.MaxPercent),
-		fmt.Sprintf("Reserve percent: %d", m.cfg.Budget.ReservePercent),
-		fmt.Sprintf("Billing mode: %s", m.cfg.Budget.BillingMode),
-		fmt.Sprintf("Week start day: %s", m.cfg.Budget.WeekStartDay),
 	}
 	for i, field := range fields {
 		cursor := " "
@@ -2152,10 +2115,6 @@ func writeGlobalConfigToPath(cfg *config.Config, configPath string) error {
 	v.Set("schedule", cfg.Schedule)
 	v.Set("budget.mode", cfg.Budget.Mode)
 	v.Set("budget.max_percent", cfg.Budget.MaxPercent)
-	v.Set("budget.reserve_percent", cfg.Budget.ReservePercent)
-	v.Set("budget.weekly_tokens", cfg.Budget.WeeklyTokens)
-	v.Set("budget.billing_mode", cfg.Budget.BillingMode)
-	v.Set("budget.week_start_day", cfg.Budget.WeekStartDay)
 
 	// Providers: set fields individually to match mapstructure tag names (fixes #20)
 	v.Set("providers.claude.enabled", cfg.Providers.Claude.Enabled)

@@ -214,9 +214,6 @@ func MergeProjectConfig(globalCfg *config.Config, projectPath string) (*config.C
 	if v.IsSet("budget.max_percent") {
 		merged.Budget.MaxPercent = v.GetInt("budget.max_percent")
 	}
-	if v.IsSet("budget.reserve_percent") {
-		merged.Budget.ReservePercent = v.GetInt("budget.reserve_percent")
-	}
 
 	if v.IsSet("tasks.enabled") {
 		merged.Tasks.Enabled = v.GetStringSlice("tasks.enabled")

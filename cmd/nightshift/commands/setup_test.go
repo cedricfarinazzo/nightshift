@@ -31,23 +31,6 @@ func TestApplyBudgetEdit_MaxPercentBounds(t *testing.T) {
 	}
 }
 
-func TestApplyBudgetEdit_ReservePercentBounds(t *testing.T) {
-	m := &setupModel{
-		cfg:         &config.Config{},
-		budgetInput: textinput.New(),
-	}
-
-	m.budgetCursor = 2
-	m.budgetInput.SetValue("101")
-	if err := m.applyBudgetEdit(); err == nil {
-		t.Fatal("expected reserve_percent > 100 to fail")
-	}
-
-	m.budgetInput.SetValue("100")
-	if err := m.applyBudgetEdit(); err != nil {
-		t.Fatalf("expected reserve_percent=100 to pass: %v", err)
-	}
-}
 
 func TestHandleProjectsInput_RejectsFilePath(t *testing.T) {
 	tmpDir := t.TempDir()

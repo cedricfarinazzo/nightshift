@@ -19,7 +19,6 @@ func makeConfig() *config.Config {
 		Budget: config.BudgetConfig{
 			Mode:         "weekly",
 			MaxPercent:   80,
-			WeeklyTokens: 1_000_000,
 		},
 	}
 }

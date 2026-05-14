@@ -61,7 +61,6 @@ func TestSelectProvider_PreferenceOrder(t *testing.T) {
 		},
 		Budget: config.BudgetConfig{
 			MaxPercent:   75,
-			WeeklyTokens: 700000,
 		},
 	}
 
@@ -95,7 +94,6 @@ func TestSelectProvider_FallbackOnBudget(t *testing.T) {
 		},
 		Budget: config.BudgetConfig{
 			MaxPercent:   75,
-			WeeklyTokens: 700000,
 		},
 	}
 
@@ -147,7 +145,6 @@ func TestSelectProvider_AllBudgetExhausted(t *testing.T) {
 		},
 		Budget: config.BudgetConfig{
 			MaxPercent:   75,
-			WeeklyTokens: 700000,
 		},
 	}
 	claude := &mockUsage{name: "claude", pct: 100}
@@ -175,7 +172,6 @@ func TestSelectProvider_CLINotInPath(t *testing.T) {
 		},
 		Budget: config.BudgetConfig{
 			MaxPercent:   75,
-			WeeklyTokens: 700000,
 		},
 	}
 	claude := &mockUsage{name: "claude", pct: 0}
@@ -227,7 +223,6 @@ func newTestRunConfig() *config.Config {
 		},
 		Budget: config.BudgetConfig{
 			MaxPercent:   75,
-			WeeklyTokens: 700000,
 		},
 		Tasks: config.TasksConfig{
 			Enabled:    []string{},
@@ -433,7 +428,6 @@ func TestSelectProvider_IgnoreBudget_StillReturnsProvider(t *testing.T) {
 		},
 		Budget: config.BudgetConfig{
 			MaxPercent:   75,
-			WeeklyTokens: 700000,
 		},
 	}
 	// Both providers at 100% usage
@@ -466,7 +460,6 @@ func TestSelectProvider_IgnoreBudget_PopulatesAllowance(t *testing.T) {
 		},
 		Budget: config.BudgetConfig{
 			MaxPercent:   75,
-			WeeklyTokens: 700000,
 		},
 	}
 	claude := &mockUsage{name: "claude", pct: 100}
@@ -499,7 +492,6 @@ func TestSelectProvider_IgnoreBudget_False_StillRejectsBudget(t *testing.T) {
 		},
 		Budget: config.BudgetConfig{
 			MaxPercent:   75,
-			WeeklyTokens: 700000,
 		},
 	}
 	claude := &mockUsage{name: "claude", pct: 100}

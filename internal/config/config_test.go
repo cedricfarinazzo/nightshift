@@ -34,30 +34,6 @@ func TestValidate_InvalidBudgetMode(t *testing.T) {
 	}
 }
 
-func TestValidate_InvalidBillingMode(t *testing.T) {
-	cfg := &Config{
-		Budget: BudgetConfig{
-			BillingMode: "metered",
-		},
-	}
-	err := Validate(cfg)
-	if err != ErrInvalidBillingMode {
-		t.Errorf("expected ErrInvalidBillingMode, got %v", err)
-	}
-}
-
-
-func TestValidate_InvalidWeekStartDay(t *testing.T) {
-	cfg := &Config{
-		Budget: BudgetConfig{
-			WeekStartDay: "friday",
-		},
-	}
-	err := Validate(cfg)
-	if err != ErrInvalidWeekStartDay {
-		t.Errorf("expected ErrInvalidWeekStartDay, got %v", err)
-	}
-}
 
 func TestValidate_InvalidMaxPercent(t *testing.T) {
 	cfg := &Config{
@@ -103,7 +79,6 @@ func TestValidate_ValidConfig(t *testing.T) {
 		Budget: BudgetConfig{
 			Mode:           "daily",
 			MaxPercent:     10,
-			ReservePercent: 5,
 		},
 		Logging: LoggingConfig{
 			Level:  "info",
@@ -134,36 +109,6 @@ func TestExpandPath(t *testing.T) {
 	}
 }
 
-func TestGetProviderBudget(t *testing.T) {
-	cfg := &Config{
-		Budget: BudgetConfig{
-			WeeklyTokens: 700000,
-			PerProvider: map[string]int{
-				"claude": 800000,
-			},
-		},
-	}
-
-	// Test with per-provider override
-	if got := cfg.GetProviderBudget("claude"); got != 800000 {
-		t.Errorf("GetProviderBudget(claude) = %d, want 800000", got)
-	}
-
-	// Test fallback to weekly tokens
-	if got := cfg.GetProviderBudget("codex"); got != 700000 {
-		t.Errorf("GetProviderBudget(codex) = %d, want 700000", got)
-	}
-}
-
-func TestNormalizeBudgetConfig(t *testing.T) {
-	cfg := &Config{
-		Budget: BudgetConfig{
-			BillingMode: "api",
-		},
-	}
-	// normalizeBudgetConfig must not panic with api billing mode.
-	normalizeBudgetConfig(cfg)
-}
 
 func TestIsTaskEnabled(t *testing.T) {
 	cfg := &Config{
@@ -427,9 +372,6 @@ func TestLoadFromPaths_Defaults(t *testing.T) {
 	}
 	if cfg.Budget.MaxPercent != DefaultMaxPercent {
 		t.Errorf("Budget.MaxPercent = %d, want %d", cfg.Budget.MaxPercent, DefaultMaxPercent)
-	}
-	if cfg.Budget.WeeklyTokens != DefaultWeeklyTokens {
-		t.Errorf("Budget.WeeklyTokens = %d, want %d", cfg.Budget.WeeklyTokens, DefaultWeeklyTokens)
 	}
 	if cfg.Logging.Level != DefaultLogLevel {
 		t.Errorf("Logging.Level = %q, want %q", cfg.Logging.Level, DefaultLogLevel)
