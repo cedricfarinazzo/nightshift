@@ -139,10 +139,15 @@ func printProviderBudgetActive(
 			}
 			fmt.Printf("  %-8s %s %4s%s\n", label, bar, pct, resetStr)
 		}
-	} else if usedPct, err := mgr.GetUsedPercent(provName); err == nil {
-		bar := unicodeProgressBar(usedPct, 25)
-		pct := fmt.Sprintf("%.0f%%", usedPct)
+	} else if hcr, err := mgr.GetHourlyCapacity(ctx, provName); err == nil {
+		bar := unicodeProgressBar(hcr.BottleneckUsedPct, 25)
+		pct := fmt.Sprintf("%.0f%%", hcr.BottleneckUsedPct)
 		fmt.Printf("  Used     %s %4s\n", bar, pct)
+	}
+
+	if hcr, err := mgr.GetHourlyCapacity(ctx, provName); err == nil {
+		capBar := unicodeProgressBar(hcr.Capacity*100, 25)
+		fmt.Printf("  Capacity %s %3.0f%%  (bottleneck: %s)\n", capBar, hcr.Capacity*100, hcr.BottleneckWindow)
 	}
 
 	if pu.Credits != nil {
@@ -176,12 +181,14 @@ func printBudgetJSON(cfg *config.Config, providerList []string, mgr *budget.Mana
 	}
 
 	type ProviderJSON struct {
-		Provider  string      `json:"provider"`
-		Source    string      `json:"source"`
-		Quotas    []QuotaJSON `json:"quotas,omitempty"`
-		Credits   *float64    `json:"credits,omitempty"`
-		UsedPct   float64     `json:"used_pct"`
-		ResetTime *time.Time  `json:"reset_time,omitempty"`
+		Provider        string      `json:"provider"`
+		Source          string      `json:"source"`
+		Quotas          []QuotaJSON `json:"quotas,omitempty"`
+		Credits         *float64    `json:"credits,omitempty"`
+		UsedPct         float64     `json:"used_pct"`
+		HourlyCapacity  float64     `json:"hourly_capacity"`
+		BottleneckWindow string     `json:"bottleneck_window,omitempty"`
+		ResetTime       *time.Time  `json:"reset_time,omitempty"`
 	}
 
 	type OutputJSON struct {
@@ -214,8 +221,10 @@ func printBudgetJSON(cfg *config.Config, providerList []string, mgr *budget.Mana
 				ResetsAt:    q.ResetsAt,
 			})
 		}
-		if usedPct, err := mgr.GetUsedPercent(provName); err == nil {
-			pj.UsedPct = usedPct
+		if hcr, err := mgr.GetHourlyCapacity(ctx, provName); err == nil {
+			pj.UsedPct = hcr.BottleneckUsedPct
+			pj.HourlyCapacity = hcr.Capacity
+			pj.BottleneckWindow = hcr.BottleneckWindow
 		}
 		if pj.Source == "" {
 			pj.Source = "none"

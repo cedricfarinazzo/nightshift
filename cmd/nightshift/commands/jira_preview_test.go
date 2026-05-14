@@ -124,10 +124,11 @@ func TestRenderJiraPreviewText_BudgetSummary(t *testing.T) {
 		JiraProject:  "PROJ",
 		ConnectionOK: true,
 		Budget: &budget.AllowanceResult{
-			HourlyCapacity:    0.695,
+			HourlyCapacity:   0.695,
 			BottleneckUsedPct: 30.5,
-			Source:            "calibrated",
-			MaxPercent:        80,
+			BottleneckWindow: "seven_day",
+			Source:           "calibrated",
+			MaxPercent:       80,
 		},
 		Phases: []jiraPreviewPhase{},
 	}
@@ -140,6 +141,9 @@ func TestRenderJiraPreviewText_BudgetSummary(t *testing.T) {
 	if !strings.Contains(out, "calibrated") {
 		t.Errorf("expected budget source in summary:\n%s", out)
 	}
+	if !strings.Contains(out, "70%") {
+		t.Errorf("expected hourly capacity in summary:\n%s", out)
+	}
 }
 
 func TestRenderJiraPreviewText_BudgetExplain(t *testing.T) {
@@ -148,10 +152,11 @@ func TestRenderJiraPreviewText_BudgetExplain(t *testing.T) {
 		JiraProject:  "PROJ",
 		ConnectionOK: true,
 		Budget: &budget.AllowanceResult{
-			HourlyCapacity:    0.695,
+			HourlyCapacity:   0.695,
 			BottleneckUsedPct: 30.5,
-			Source:            "calibrated",
-			MaxPercent:        80,
+			BottleneckWindow: "seven_day",
+			Source:           "calibrated",
+			MaxPercent:       80,
 		},
 		Phases: []jiraPreviewPhase{},
 	}

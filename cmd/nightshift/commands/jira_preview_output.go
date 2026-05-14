@@ -62,8 +62,9 @@ func renderJiraPreviewText(result *jiraPreviewResult, opts jiraPreviewTextOption
 		if opts.Explain {
 			renderBudgetText(b, result.Budget, "  ")
 		} else {
-			fmt.Fprintf(b, "  %.0f%% capacity (bottleneck: %.1f%% used, limit: %d%%, source=%s)\n",
+			fmt.Fprintf(b, "  %.0f%% capacity  [%s: %.1f%% used, limit: %d%%, source=%s]\n",
 				result.Budget.HourlyCapacity*100,
+				result.Budget.BottleneckWindow,
 				result.Budget.BottleneckUsedPct,
 				result.Budget.MaxPercent,
 				result.Budget.Source)

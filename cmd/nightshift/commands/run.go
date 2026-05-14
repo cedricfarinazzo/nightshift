@@ -364,7 +364,7 @@ func selectProvider(cfg *config.Config, budgetMgr *budget.Manager, log *logging.
 			// Only include usage pct if allowance data is available (not a budget error).
 			usageDetail := r.Reason
 			if r.Allowance != nil {
-				usageDetail = fmt.Sprintf("%s (%.0f%% used)", r.Provider, r.Allowance.BottleneckUsedPct)
+				usageDetail = fmt.Sprintf("%s (%.0f%% capacity, %.0f%% used)", r.Provider, r.Allowance.HourlyCapacity*100, r.Allowance.BottleneckUsedPct)
 			}
 			budgetExhausted = append(budgetExhausted, usageDetail)
 			continue
@@ -532,8 +532,8 @@ func displayPreflight(w io.Writer, plan *preflightPlan) {
 	// Show provider info from first project that has one
 	for _, pp := range plan.projects {
 		if pp.provider != nil {
-			_, _ = fmt.Fprintf(w, "Provider: %s (%.1f%% used)\n",
-				pp.provider.name, pp.provider.allowance.BottleneckUsedPct)
+			_, _ = fmt.Fprintf(w, "Provider: %s (%.0f%% capacity, %.1f%% used)\n",
+				pp.provider.name, pp.provider.allowance.HourlyCapacity*100, pp.provider.allowance.BottleneckUsedPct)
 			break
 		}
 	}
@@ -659,7 +659,7 @@ func executeRun(ctx context.Context, p executeRunParams) error {
 			displayProjectHeaderColored(projectPath, choice.name, choice.allowance, len(pp.tasks), pp.tasks)
 		} else {
 			fmt.Printf("\n=== Project: %s ===\n", projectPath)
-			fmt.Printf("Provider: %s (%.1f%% used)\n", choice.name, choice.allowance.BottleneckUsedPct)
+			fmt.Printf("Provider: %s (%.0f%% capacity, %.1f%% used)\n", choice.name, choice.allowance.HourlyCapacity*100, choice.allowance.BottleneckUsedPct)
 
 			fmt.Printf("Selected %d task(s):\n", len(pp.tasks))
 			for i, st := range pp.tasks {

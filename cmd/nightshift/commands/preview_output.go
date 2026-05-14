@@ -75,8 +75,9 @@ func renderPreviewText(result *previewResult, opts previewTextOptions) string {
 			if model == "" {
 				model = "default"
 			}
-			line := fmt.Sprintf("    - %s: %.1f%% used (limit: %d%%, source=%s, model=%s)",
+			line := fmt.Sprintf("    - %s: %.0f%% capacity  %.1f%% used (limit: %d%%, source=%s, model=%s)",
 				summary.name,
+				summary.allowance.HourlyCapacity*100,
 				summary.allowance.BottleneckUsedPct,
 				summary.allowance.MaxPercent,
 				summary.allowance.Source,
