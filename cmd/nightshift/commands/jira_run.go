@@ -505,6 +505,8 @@ func createJiraAgent(cfg *config.Config, phase jira.PhaseConfig) (agents.Agent, 
 		if timeout > 0 {
 			extra = append(extra, agents.WithCodexDefaultTimeout(timeout))
 		}
+		// Jira always requires headless non-interactive execution.
+		extra = append(extra, agents.WithDangerouslyBypassApprovalsAndSandbox(true))
 		a := newCodexAgentFromConfig(cfg, extra...)
 		if !a.Available() {
 			return nil, fmt.Errorf("codex CLI not found in PATH")
@@ -533,6 +535,8 @@ func createJiraAgent(cfg *config.Config, phase jira.PhaseConfig) (agents.Agent, 
 		if timeout > 0 {
 			extra = append(extra, agents.WithDefaultTimeout(timeout))
 		}
+		// Jira always requires headless non-interactive execution.
+		extra = append(extra, agents.WithDangerouslySkipPermissions(true))
 		a := newClaudeAgentFromConfig(cfg, extra...)
 		if !a.Available() {
 			return nil, fmt.Errorf("claude CLI not found in PATH")
