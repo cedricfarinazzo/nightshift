@@ -96,9 +96,10 @@ func (p *codexActiveProvider) GetUsedPercent(mode string) (float64, error) {
 		p.setSource("none")
 		return 0, fmt.Errorf("codex api fetch failed: %w", err)
 	}
-	if resp == nil || resp.RateLimit == nil || resp.RateLimit.SecondaryWindow == nil {
+	if resp == nil || resp.RateLimit == nil {
 		p.setSource("none")
-		return 0, fmt.Errorf("codex: incomplete rate limit data in response")
+		log.Warn().Str("provider", "codex").Msg("budget: no rate limit data in response, assuming 0%")
+		return 0, nil
 	}
 	// Cache response for reuse by GetResetTime (1-minute TTL).
 	p.mu.Lock()
@@ -108,7 +109,18 @@ func (p *codexActiveProvider) GetUsedPercent(mode string) (float64, error) {
 		p.cacheTTL = 1 * time.Minute
 	}
 	p.mu.Unlock()
-	pct := resp.RateLimit.SecondaryWindow.UsedPercent
+	// Prefer secondary (weekly) window; fall back to primary (5h) window.
+	var pct float64
+	if resp.RateLimit.SecondaryWindow != nil {
+		pct = resp.RateLimit.SecondaryWindow.UsedPercent
+	} else if resp.RateLimit.PrimaryWindow != nil {
+		pct = resp.RateLimit.PrimaryWindow.UsedPercent
+		log.Debug().Str("provider", "codex").Msg("budget: no secondary window, using primary")
+	} else {
+		p.setSource("none")
+		log.Warn().Str("provider", "codex").Msg("budget: no rate limit windows in response, assuming 0%")
+		return 0, nil
+	}
 	p.setSource("api")
 	log.Debug().Str("provider", "codex").Str("source", "api").Float64("used_pct", pct).Msg("budget: usage from api")
 	return pct, nil
