@@ -142,10 +142,9 @@ type previewResult struct {
 	GeneratedAt    time.Time
 	Provider       string
 	TaskFilter     string
-	BudgetMode     string
-	MaxPercent     int
-	ReservePercent int
-	EnabledTasks   []string
+	BudgetMode   string
+	MaxPercent   int
+	EnabledTasks []string
 	ProjectCount   int
 	Runs           []previewRun
 	Providers      []providerBudgetSummary
@@ -273,19 +272,13 @@ func buildPreviewResult(cfg *config.Config, database *db.DB, projects []string, 
 	if maxPercent <= 0 {
 		maxPercent = config.DefaultMaxPercent
 	}
-	reservePercent := cfg.Budget.ReservePercent
-	if reservePercent < 0 {
-		reservePercent = config.DefaultReservePercent
-	}
-
 	result := &previewResult{
-		GeneratedAt:    time.Now(),
-		Provider:       provider,
-		TaskFilter:     taskFilter,
-		BudgetMode:     mode,
-		MaxPercent:     maxPercent,
-		ReservePercent: reservePercent,
-		EnabledTasks:   append([]string(nil), cfg.Tasks.Enabled...),
+		GeneratedAt:  time.Now(),
+		Provider:     provider,
+		TaskFilter:   taskFilter,
+		BudgetMode:   mode,
+		MaxPercent:   maxPercent,
+		EnabledTasks: append([]string(nil), cfg.Tasks.Enabled...),
 		ProjectCount:   len(projects),
 		Providers:      collectProviderBudgets(cfg, budgetMgr, ignoreBudget),
 		ConfigSources:  sources,
