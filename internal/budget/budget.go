@@ -210,8 +210,8 @@ func (m *Manager) Summary(provider string) (string, error) {
 //
 // The formula maximises quota ROI by pacing consumption to reach max_pct by reset:
 //   - exhausted (remaining ≤ 0): 0
-//   - nearly depleted (remaining < 15): absolute remaining fraction (no urgency boost)
 //   - expiring (reset < window/4): boost by time urgency — min(1, remaining/max * window/reset)
+//   - nearly depleted (remaining < 15): absolute remaining fraction (no urgency boost)
 //   - normal: pace-adjusted — min(1, remaining/max * max(1, ideal_rate/current_rate))
 func computeWindowCapacity(usedPct, maxPct, windowHours, resetHours float64) float64 {
 	const nearlyDepletedThreshold = 15.0
@@ -226,17 +226,19 @@ func computeWindowCapacity(usedPct, maxPct, windowHours, resetHours float64) flo
 
 	remainingFrac := remaining / maxPct
 
-	if remaining < nearlyDepletedThreshold {
-		return remainingFrac
-	}
-
 	if resetHours < windowHours/4 {
 		// Expiring window: boost urgency so remaining capacity is shown at full rate.
+		// Takes priority over nearly-depleted: no point conserving when window resets soon.
 		v := remainingFrac * windowHours / resetHours
 		if v > 1 {
 			return 1
 		}
 		return v
+	}
+
+	if remaining < nearlyDepletedThreshold {
+		// Nearly depleted with lots of time left: return raw fraction, no boost.
+		return remainingFrac
 	}
 
 	// Normal: pace-based. Boost when we should be consuming faster than current headroom rate.

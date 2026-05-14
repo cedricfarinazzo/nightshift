@@ -331,9 +331,9 @@ func TestComputeWindowCapacity(t *testing.T) {
 			wantMin: 0, wantMax: 0,
 		},
 		{
-			name: "nearly depleted",
+			name: "nearly depleted but expiring — gets boost",
 			usedPct: 80, maxPct: 90, windowHours: 5, resetHours: 0.5,
-			wantMin: 0, wantMax: 0.15, // 10/90 = 11%
+			wantMin: 1.0, wantMax: 1.0, // expiring fires first: (10/90)*5/0.5=1.11 → capped 1.0
 		},
 		{
 			name: "expiring with capacity — boost",
@@ -356,9 +356,14 @@ func TestComputeWindowCapacity(t *testing.T) {
 			wantMin: 0.45, wantMax: 0.55,
 		},
 		{
-			name: "weekly nearly done",
+			name: "weekly nearly done but expiring — gets boost",
 			usedPct: 85, maxPct: 90, windowHours: 168, resetHours: 10,
-			wantMin: 0, wantMax: 0.06,
+			wantMin: 0.9, wantMax: 1.0, // expiring (10h < 42h): (5/90)*168/10=0.93
+		},
+		{
+			name: "nearly depleted with time to go — no boost",
+			usedPct: 80, maxPct: 90, windowHours: 5, resetHours: 2,
+			wantMin: 0, wantMax: 0.15, // not expiring (2h > 1.25h): 10/90 = 11%
 		},
 	}
 
