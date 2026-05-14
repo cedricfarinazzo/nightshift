@@ -204,18 +204,18 @@ func checkBudget(cfg *config.Config, _ *db.DB, add func(string, checkStatus, str
 	budgetMgr := budget.NewManagerWithTracking(cfg)
 
 	if cfg.Providers.Claude.Enabled {
-		if allowance, err := budgetMgr.CalculateAllowance("claude"); err != nil {
+		if usedPct, err := budgetMgr.GetUsedPercent("claude"); err != nil {
 			add("budget.claude", statusFail, err.Error())
 		} else {
-			add("budget.claude", statusOK, fmt.Sprintf("%.1f%% used, %d tokens available", allowance.UsedPercent, allowance.Allowance))
+			add("budget.claude", statusOK, fmt.Sprintf("%.1f%% used", usedPct))
 		}
 	}
 
 	if cfg.Providers.Codex.Enabled {
-		if allowance, err := budgetMgr.CalculateAllowance("codex"); err != nil {
+		if usedPct, err := budgetMgr.GetUsedPercent("codex"); err != nil {
 			add("budget.codex", statusFail, err.Error())
 		} else {
-			add("budget.codex", statusOK, fmt.Sprintf("%.1f%% used, %d tokens available", allowance.UsedPercent, allowance.Allowance))
+			add("budget.codex", statusOK, fmt.Sprintf("%.1f%% used", usedPct))
 		}
 	}
 }

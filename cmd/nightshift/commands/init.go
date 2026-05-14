@@ -127,19 +127,8 @@ schedule:
 
 # Budget configuration
 #
-# How budget modes work:
-# - daily: Each night uses up to max_percent of that day's budget (weekly/7)
-# - weekly: Each night uses up to max_percent of the REMAINING weekly budget
-#
 budget:
-  mode: daily                    # daily | weekly
-  max_percent: 75                # Max % of budget per run (default: 75)
-  aggressive_end_of_week: false  # Weekly mode: ramp up in last 2 days
-  reserve_percent: 5             # Always keep this % in reserve
-  weekly_tokens: 700000          # Fallback weekly budget
-  # per_provider:                # Optional per-provider overrides
-  #   claude: 700000
-  #   codex: 500000
+  max_percent: 90                # Max % of quota to use (default: 90)
 
 # Provider configuration (usage tracking)
 providers:

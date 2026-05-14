@@ -107,20 +107,6 @@ func TestProviderDisplayName(t *testing.T) {
 	}
 }
 
-func TestProgressBar(t *testing.T) {
-	bar := progressBar(0, 10)
-	if !strings.Contains(bar, "0.0%") {
-		t.Errorf("0%% bar missing 0.0%%: %q", bar)
-	}
-	bar = progressBar(100, 10)
-	if !strings.Contains(bar, "100.0%") {
-		t.Errorf("100%% bar missing 100.0%%: %q", bar)
-	}
-	bar = progressBar(150, 10)
-	if !strings.Contains(bar, "150.0%") {
-		t.Errorf("over-budget bar should show real pct: %q", bar)
-	}
-}
 
 func TestBudgetJSONStructure(t *testing.T) {
 	// Inject a fake fetchProviderUsageFn

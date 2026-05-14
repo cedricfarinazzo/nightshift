@@ -12,7 +12,7 @@ Everything lands as a branch or PR. It never writes directly to your primary bra
 
 ## Features
 
-- **Budget-aware**: Uses remaining daily allotment, never exceeds configurable max (default 75%)
+- **Budget-aware**: Tracks provider usage via live API; never exceeds configurable max percent (default 90%)
 - **Multi-project**: Point it at your repos, it already knows what to look for
 - **Zero risk**: Everything is a PR — merge what surprises you, close the rest
 - **Great DX**: Thoughtful CLI defaults with clear output and reports
@@ -45,7 +45,7 @@ After installing, run the guided setup:
 nightshift setup
 ```
 
-This walks you through provider configuration, project selection, budget calibration, and daemon setup. Once complete you can preview what nightshift will do:
+This walks you through provider configuration, project selection, and daemon setup. Once complete you can preview what nightshift will do:
 
 ```bash
 nightshift preview
@@ -77,11 +77,9 @@ nightshift setup
 # Check environment and config health
 nightshift doctor
 
-# Budget status and calibration
+# Budget status
+nightshift budget
 nightshift budget --provider claude
-nightshift budget snapshot --local-only
-nightshift budget history -n 10
-nightshift budget calibrate
 
 # Browse and inspect available tasks
 nightshift task list
@@ -206,7 +204,7 @@ Full guide: [Configuration docs](https://nightshift.haplab.com/docs/configuratio
 
 Nightshift uses YAML config files to define:
 
-- Token budget limits
+- Provider usage budget limits
 - Target repositories
 - Task priorities
 - Schedule preferences
@@ -222,12 +220,7 @@ schedule:
   cron: "0 2 * * *"
 
 budget:
-  mode: daily
-  max_percent: 75
-  reserve_percent: 5
-  billing_mode: subscription
-  calibrate_enabled: true
-  snapshot_interval: 30m
+  max_percent: 90  # stop running when provider usage exceeds this %
 
 providers:
   preference:

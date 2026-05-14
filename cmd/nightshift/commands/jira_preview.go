@@ -31,8 +31,8 @@ func init() {
 	jiraPreviewCmd.Flags().Bool("json", false, "Output as JSON")
 	jiraPreviewCmd.Flags().Bool("plain", false, "Disable TUI pager")
 	jiraPreviewCmd.Flags().Bool("validate", false, "Run LLM validation on each ticket (costs tokens)")
-	jiraPreviewCmd.Flags().Bool("explain", false, "Show detailed budget breakdown")
 	jiraPreviewCmd.Flags().String("type", "", "Filter tickets by issue type (e.g. Bug, Story)")
+	jiraPreviewCmd.Flags().Bool("ignore-budget", false, "Bypass budget checks (use with caution)")
 	jiraCmd.AddCommand(jiraPreviewCmd)
 }
 
@@ -47,8 +47,9 @@ type jiraPreviewResult struct {
 	ExecutionOrder []string                `json:"execution_order"` // ready tickets only
 	FullOrder      []jiraPreviewOrderEntry `json:"full_order,omitempty"`
 	BlockedTickets []jiraPreviewBlocked    `json:"blocked_tickets,omitempty"`
-	Budget         *budget.AllowanceResult `json:"budget,omitempty"`
-	BudgetErr      string                  `json:"budget_err,omitempty"`
+	Budget          *budget.AllowanceResult      `json:"budget,omitempty"`
+	BudgetErr       string                       `json:"budget_err,omitempty"`
+	ProviderBudgets []jiraPreviewProviderBudget  `json:"provider_budgets,omitempty"`
 	SkippedTickets []jiraPreviewSkipped    `json:"skipped_tickets,omitempty"`
 	Phases         []jiraPreviewPhase      `json:"phases"`
 }
@@ -65,6 +66,14 @@ type jiraPreviewPhase struct {
 	Provider string `json:"provider"`
 	Model    string `json:"model"`
 	Timeout  string `json:"timeout,omitempty"`
+}
+
+type jiraPreviewProviderBudget struct {
+	Provider string                 `json:"provider"`
+	OK       bool                   `json:"ok"`
+	Phases   []string               `json:"phases"` // which phases use this provider
+	Allowance *budget.AllowanceResult `json:"allowance,omitempty"`
+	Reason   string                 `json:"reason,omitempty"` // non-empty when exhausted
 }
 
 type jiraPreviewTicket struct {
@@ -95,9 +104,9 @@ func runJiraPreview(cmd *cobra.Command, _ []string) error {
 	labelOverride, _ := cmd.Flags().GetString("label")
 	jsonOutput, _ := cmd.Flags().GetBool("json")
 	plainOutput, _ := cmd.Flags().GetBool("plain")
-	explain, _ := cmd.Flags().GetBool("explain")
 	runValidate, _ := cmd.Flags().GetBool("validate")
 	typeFilter, _ := cmd.Flags().GetString("type")
+	ignoreBudget, _ := cmd.Flags().GetBool("ignore-budget")
 
 	cfg, err := loadConfig("")
 	if err != nil {
@@ -149,14 +158,7 @@ func runJiraPreview(cmd *cobra.Command, _ []string) error {
 		if len(projects) == 0 {
 			return nil
 		}
-		p := projects[0]
-		jc := cfg.Jira
-		return []jiraPreviewPhase{
-			{Name: "validation", Provider: jc.EffectiveValidation(p).Provider, Model: jc.EffectiveValidation(p).Model, Timeout: jc.EffectiveValidation(p).Timeout},
-			{Name: "plan", Provider: jc.EffectivePlan(p).Provider, Model: jc.EffectivePlan(p).Model, Timeout: jc.EffectivePlan(p).Timeout},
-			{Name: "implement", Provider: jc.EffectiveImplement(p).Provider, Model: jc.EffectiveImplement(p).Model, Timeout: jc.EffectiveImplement(p).Timeout},
-			{Name: "review_fix", Provider: jc.EffectiveReviewFix(p).Provider, Model: jc.EffectiveReviewFix(p).Model, Timeout: jc.EffectiveReviewFix(p).Timeout},
-		}
+		return buildPhasesForProject(cfg.Jira, projects[0])
 	}
 
 	result := &jiraPreviewResult{
@@ -270,7 +272,7 @@ func runJiraPreview(cmd *cobra.Command, _ []string) error {
 		}
 	}
 
-	// Budget.
+	// Budget: check phase providers using CheckProviders for centralized enforcement.
 	if cfg.Jira.BudgetEnabled {
 		database, dbErr := db.Open(cfg.ExpandedDBPath())
 		if dbErr != nil {
@@ -279,15 +281,66 @@ func runJiraPreview(cmd *cobra.Command, _ []string) error {
 			defer func() { _ = database.Close() }()
 			budgetMgr := newBudgetManager(cfg, database)
 
-			provider := cfg.Jira.Implement.Provider
-			if provider == "" {
-				provider = "claude"
-			}
-			allowance, budgetErr := budgetMgr.CalculateAllowance(provider)
-			if budgetErr != nil {
-				result.BudgetErr = budgetErr.Error()
+			// Collect unique providers across all configured projects (all phases, worst case).
+			if len(projects) > 0 {
+				seen := map[string]bool{}
+				var allProviders []string
+				for _, proj := range projects {
+					for _, p := range jiraPhaseProviders(cfg.Jira, proj, false, false, false) {
+						if !seen[p] {
+							seen[p] = true
+							allProviders = append(allProviders, p)
+						}
+					}
+				}
+				budgetResults, _ := budgetMgr.CheckProviders(allProviders, ignoreBudget)
+
+				// Build per-provider phase mapping.
+				providerPhases := map[string][]string{}
+				if len(projects) > 0 {
+					phaseList := buildPhasesForProject(cfg.Jira, projects[0])
+					for _, ph := range phaseList {
+						prov := strings.ToLower(ph.Provider)
+						if prov == "" {
+							prov = "claude"
+						}
+						providerPhases[prov] = append(providerPhases[prov], ph.Name)
+					}
+				}
+
+				var exhausted []string
+				for _, r := range budgetResults {
+					pb := jiraPreviewProviderBudget{
+						Provider:  r.Provider,
+						OK:        r.OK,
+						Allowance: r.Allowance,
+						Reason:    r.Reason,
+						Phases:    providerPhases[r.Provider],
+					}
+					result.ProviderBudgets = append(result.ProviderBudgets, pb)
+					if r.Allowance != nil && result.Budget == nil {
+						result.Budget = r.Allowance
+					}
+					if !r.OK {
+						exhausted = append(exhausted, fmt.Sprintf("%s: %s", r.Provider, r.Reason))
+					}
+				}
+				if len(exhausted) > 0 {
+					result.BudgetErr = strings.Join(exhausted, "; ")
+				}
 			} else {
-				result.Budget = allowance
+				// Fallback: single provider check.
+				provider := cfg.Jira.Implement.Provider
+				if provider == "" {
+					provider = "claude"
+				}
+				budgetResults, _ := budgetMgr.CheckProviders([]string{provider}, ignoreBudget)
+				if len(budgetResults) > 0 && budgetResults[0].Allowance != nil {
+					result.Budget = budgetResults[0].Allowance
+					if !budgetResults[0].OK {
+						result.BudgetErr = budgetResults[0].Reason
+					}
+				}
 			}
 		}
 	}
@@ -296,7 +349,7 @@ func runJiraPreview(cmd *cobra.Command, _ []string) error {
 		return writeJiraPreviewJSON(cmd.OutOrStdout(), result)
 	}
 
-	text := renderJiraPreviewText(result, jiraPreviewTextOptions{Explain: explain})
+	text := renderJiraPreviewText(result)
 	return writePreviewText(cmd.OutOrStdout(), text, previewPagerOptions{Plain: plainOutput})
 }
 
@@ -320,6 +373,15 @@ func buildJiraPreviewTicket(t jira.Ticket) jiraPreviewTicket {
 		}
 	}
 	return pt
+}
+
+func buildPhasesForProject(jc jira.JiraConfig, p jira.ProjectConfig) []jiraPreviewPhase {
+	return []jiraPreviewPhase{
+		{Name: "validation", Provider: jc.EffectiveValidation(p).Provider, Model: jc.EffectiveValidation(p).Model, Timeout: jc.EffectiveValidation(p).Timeout},
+		{Name: "plan", Provider: jc.EffectivePlan(p).Provider, Model: jc.EffectivePlan(p).Model, Timeout: jc.EffectivePlan(p).Timeout},
+		{Name: "implement", Provider: jc.EffectiveImplement(p).Provider, Model: jc.EffectiveImplement(p).Model, Timeout: jc.EffectiveImplement(p).Timeout},
+		{Name: "review_fix", Provider: jc.EffectiveReviewFix(p).Provider, Model: jc.EffectiveReviewFix(p).Model, Timeout: jc.EffectiveReviewFix(p).Timeout},
+	}
 }
 
 // writeJiraPreviewJSON encodes the preview result as JSON.

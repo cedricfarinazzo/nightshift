@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"math"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -247,7 +246,7 @@ func runRun(cmd *cobra.Command, args []string) error {
 		log:          log,
 	}
 	if !dryRun {
-		params.report = newRunReport(time.Now(), calculateRunBudgetStart(cfg, budgetMgr, log))
+		params.report = newRunReport(time.Now())
 	}
 	return executeRun(ctx, params)
 }
@@ -281,6 +280,7 @@ type providerChoice struct {
 // selectProvider picks the best available provider with budget remaining.
 // Order is determined by providers.preference (default: claude, codex).
 // When ignoreBudget is true, budget-exhausted providers are still selected.
+// Delegates budget checking to budgetMgr.CheckProviders for centralized enforcement.
 func selectProvider(cfg *config.Config, budgetMgr *budget.Manager, log *logging.Logger, ignoreBudget bool) (*providerChoice, error) {
 	type candidate struct {
 		name      string
@@ -331,41 +331,56 @@ func selectProvider(cfg *config.Config, budgetMgr *budget.Manager, log *logging.
 		return nil, fmt.Errorf("no providers enabled in config")
 	}
 
-	var notInPath, budgetExhausted []string
+	// Filter candidates whose CLI binary is in PATH.
+	var notInPath []string
+	var available []candidate
 	for _, c := range candidates {
 		if _, err := exec.LookPath(c.binary); err != nil {
 			log.Infof("provider %s: CLI not in PATH, skipping", c.name)
 			notInPath = append(notInPath, c.name)
 			continue
 		}
-		allowance, err := budgetMgr.CalculateAllowance(c.name)
-		if err != nil {
-			log.Warnf("provider %s: budget error: %v", c.name, err)
-			continue
-		}
-		if allowance.Allowance <= 0 {
-			log.Infof("provider %s: budget exhausted (%.1f%% used)", c.name, allowance.UsedPercent)
-			if ignoreBudget {
-				log.Warnf("provider %s: ignoring exhausted budget per --ignore-budget", c.name)
-				return &providerChoice{
-					agent:     c.makeAgent(),
-					name:      c.name,
-					allowance: allowance,
-				}, nil
+		available = append(available, c)
+	}
+
+	if len(available) == 0 {
+		return nil, fmt.Errorf("CLI not in PATH: %s", strings.Join(notInPath, ", "))
+	}
+
+	// Build provider names in order for centralized budget check.
+	providerNames := make([]string, len(available))
+	candidateByName := make(map[string]candidate, len(available))
+	for i, c := range available {
+		providerNames[i] = c.name
+		candidateByName[c.name] = c
+	}
+
+	results, _ := budgetMgr.CheckProviders(providerNames, ignoreBudget)
+
+	var budgetExhausted []string
+	for _, r := range results {
+		if !r.OK {
+			log.Infof("provider %s: %s", r.Provider, r.Reason)
+			// Only include usage pct if allowance data is available (not a budget error).
+			usageDetail := r.Reason
+			if r.Allowance != nil {
+				usageDetail = fmt.Sprintf("%s (%.0f%% capacity, %.0f%% used)", r.Provider, r.Allowance.HourlyCapacity*100, r.Allowance.BottleneckUsedPct)
 			}
-			budgetExhausted = append(budgetExhausted, fmt.Sprintf("%s (%.0f%% used)", c.name, allowance.UsedPercent))
+			budgetExhausted = append(budgetExhausted, usageDetail)
 			continue
 		}
+		if r.Allowance == nil {
+			// Budget error case — already logged, skip.
+			continue
+		}
+		c := candidateByName[r.Provider]
 		return &providerChoice{
 			agent:     c.makeAgent(),
-			name:      c.name,
-			allowance: allowance,
+			name:      r.Provider,
+			allowance: r.Allowance,
 		}, nil
 	}
 
-	if len(notInPath) > 0 && len(budgetExhausted) == 0 {
-		return nil, fmt.Errorf("CLI not in PATH: %s", strings.Join(notInPath, ", "))
-	}
 	if len(budgetExhausted) > 0 && len(notInPath) == 0 {
 		return nil, fmt.Errorf("budget exhausted: %s", strings.Join(budgetExhausted, ", "))
 	}
@@ -466,11 +481,7 @@ func buildPreflight(p executeRunParams) (*preflightPlan, error) {
 				Project:    projectPath,
 			}}
 		} else if p.randomTask {
-			taskBudget := choice.allowance.Allowance
-			if p.ignoreBudget {
-				taskBudget = math.MaxInt64
-			}
-			if picked := p.selector.SelectRandom(taskBudget, projectPath); picked != nil {
+			if picked := p.selector.SelectRandom(projectPath); picked != nil {
 				selectedTasks = []tasks.ScoredTask{*picked}
 			}
 		} else {
@@ -478,11 +489,7 @@ func buildPreflight(p executeRunParams) (*preflightPlan, error) {
 			if n <= 0 {
 				n = 1
 			}
-			taskBudget := choice.allowance.Allowance
-			if p.ignoreBudget {
-				taskBudget = math.MaxInt64
-			}
-			selectedTasks = p.selector.SelectTopN(taskBudget, projectPath, n)
+			selectedTasks = p.selector.SelectTopN(projectPath, n)
 		}
 
 		pp := preflightProject{
@@ -492,10 +499,9 @@ func buildPreflight(p executeRunParams) (*preflightPlan, error) {
 		}
 
 		if len(selectedTasks) == 0 {
-			skipReason := "no tasks available within budget"
+			skipReason := "no tasks available"
 			allEnabled := p.selector.FilterEnabled(tasks.AllDefinitions())
-			inBudget := p.selector.FilterByBudget(allEnabled, choice.allowance.Allowance)
-			unassigned := p.selector.FilterUnassigned(inBudget, projectPath)
+			unassigned := p.selector.FilterUnassigned(allEnabled, projectPath)
 			afterCooldown := p.selector.FilterByCooldown(unassigned, projectPath)
 			cooledDown := len(unassigned) - len(afterCooldown)
 			if cooledDown > 0 {
@@ -526,9 +532,8 @@ func displayPreflight(w io.Writer, plan *preflightPlan) {
 	// Show provider info from first project that has one
 	for _, pp := range plan.projects {
 		if pp.provider != nil {
-			_, _ = fmt.Fprintf(w, "Provider: %s (%.1f%% budget used, %s mode)\n",
-				pp.provider.name, pp.provider.allowance.UsedPercent, pp.provider.allowance.Mode)
-			_, _ = fmt.Fprintf(w, "Budget: %d tokens remaining\n", pp.provider.allowance.Allowance)
+			_, _ = fmt.Fprintf(w, "Provider: %s (%.0f%% capacity, %.1f%% used)\n",
+				pp.provider.name, pp.provider.allowance.HourlyCapacity*100, pp.provider.allowance.BottleneckUsedPct)
 			break
 		}
 	}
@@ -654,9 +659,7 @@ func executeRun(ctx context.Context, p executeRunParams) error {
 			displayProjectHeaderColored(projectPath, choice.name, choice.allowance, len(pp.tasks), pp.tasks)
 		} else {
 			fmt.Printf("\n=== Project: %s ===\n", projectPath)
-			fmt.Printf("Provider: %s\n", choice.name)
-			fmt.Printf("Budget: %d tokens available (%.1f%% used, mode=%s)\n",
-				choice.allowance.Allowance, choice.allowance.UsedPercent, choice.allowance.Mode)
+			fmt.Printf("Provider: %s (%.0f%% capacity, %.1f%% used)\n", choice.name, choice.allowance.HourlyCapacity*100, choice.allowance.BottleneckUsedPct)
 
 			fmt.Printf("Selected %d task(s):\n", len(pp.tasks))
 			for i, st := range pp.tasks {

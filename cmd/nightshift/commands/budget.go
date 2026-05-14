@@ -74,12 +74,7 @@ func runBudget(opts budgetOptions) error {
 		return printBudgetJSON(cfg, providerList, mgr)
 	}
 
-	mode := cfg.Budget.Mode
-	if mode == "" {
-		mode = config.DefaultBudgetMode
-	}
-
-	header := fmt.Sprintf("Budget Status (Live) (mode: %s)", mode)
+	header := "Budget Status (Live)"
 	fmt.Println(header)
 	fmt.Println(strings.Repeat("=", len(header)))
 	fmt.Println()
@@ -107,8 +102,6 @@ func printProviderBudgetActive(
 
 	pu := fetchProviderUsageFn(ctx, provName)
 
-	result, allowanceErr := mgr.CalculateAllowance(provName)
-
 	srcLabel := strings.ToUpper(pu.Source)
 	if pu.Source == "none" || pu.Source == "" {
 		srcLabel = "N/A"
@@ -127,6 +120,8 @@ func printProviderBudgetActive(
 		}
 	}
 
+	hcr, hcrErr := mgr.GetHourlyCapacity(ctx, provName)
+
 	if len(pu.Quotas) > 0 {
 		for _, q := range pu.Quotas {
 			label := formatQuotaWindowLabel(q.Window)
@@ -141,10 +136,14 @@ func printProviderBudgetActive(
 			}
 			fmt.Printf("  %-8s %s %4s%s\n", label, bar, pct, resetStr)
 		}
-	} else if allowanceErr == nil {
-		bar := unicodeProgressBar(result.UsedPercent, 25)
-		pct := fmt.Sprintf("%.0f%%", result.UsedPercent)
+	} else if hcrErr == nil {
+		bar := unicodeProgressBar(hcr.BottleneckUsedPct, 25)
+		pct := fmt.Sprintf("%.0f%%", hcr.BottleneckUsedPct)
 		fmt.Printf("  Used     %s %4s\n", bar, pct)
+	}
+
+	if hcrErr == nil {
+		printHourlyCapacity(hcr)
 	}
 
 	if pu.Credits != nil {
@@ -155,7 +154,8 @@ func printProviderBudgetActive(
 		printCopilotPlan(ctx)
 	}
 
-	if pu.ResetTime != nil {
+	// Only show Reset line when no per-window reset info already displayed.
+	if pu.ResetTime != nil && (hcrErr != nil || len(hcr.Windows) == 0) {
 		fmt.Printf("  Reset:   %s\n", formatResetCountdown(*pu.ResetTime))
 	}
 
@@ -178,27 +178,22 @@ func printBudgetJSON(cfg *config.Config, providerList []string, mgr *budget.Mana
 	}
 
 	type ProviderJSON struct {
-		Provider  string      `json:"provider"`
-		Source    string      `json:"source"`
-		Quotas    []QuotaJSON `json:"quotas,omitempty"`
-		Credits   *float64    `json:"credits,omitempty"`
-		UsedPct   float64     `json:"used_pct"`
-		ResetTime *time.Time  `json:"reset_time,omitempty"`
+		Provider        string      `json:"provider"`
+		Source          string      `json:"source"`
+		Quotas          []QuotaJSON `json:"quotas,omitempty"`
+		Credits         *float64    `json:"credits,omitempty"`
+		UsedPct         float64     `json:"used_pct"`
+		HourlyCapacity  float64     `json:"hourly_capacity"`
+		BottleneckWindow string     `json:"bottleneck_window,omitempty"`
+		ResetTime       *time.Time  `json:"reset_time,omitempty"`
 	}
 
 	type OutputJSON struct {
-		Mode      string         `json:"mode"`
 		Providers []ProviderJSON `json:"providers"`
 		FetchedAt time.Time      `json:"fetched_at"`
 	}
 
-	budgetMode := cfg.Budget.Mode
-	if budgetMode == "" {
-		budgetMode = config.DefaultBudgetMode
-	}
-
 	out := OutputJSON{
-		Mode:      budgetMode,
 		FetchedAt: now,
 	}
 
@@ -216,10 +211,10 @@ func printBudgetJSON(cfg *config.Config, providerList []string, mgr *budget.Mana
 				ResetsAt:    q.ResetsAt,
 			})
 		}
-		// Compute UsedPct from manager for consistency with active tracking
-		result, err := mgr.CalculateAllowance(provName)
-		if err == nil {
-			pj.UsedPct = result.UsedPercent
+		if hcr, err := mgr.GetHourlyCapacity(ctx, provName); err == nil {
+			pj.UsedPct = hcr.BottleneckUsedPct
+			pj.HourlyCapacity = hcr.Capacity
+			pj.BottleneckWindow = hcr.BottleneckWindow
 		}
 		if pj.Source == "" {
 			pj.Source = "none"
@@ -246,32 +241,6 @@ func formatTokens64(tokens int64) string {
 	}
 	return fmt.Sprintf("%d", tokens)
 }
-
-
-func progressBar(percent float64, width int) string {
-	displayPercent := percent
-	if percent < 0 {
-		percent = 0
-	}
-	fillPercent := percent
-	if fillPercent > 100 {
-		fillPercent = 100
-	}
-
-	filled := int(fillPercent * float64(width) / 100)
-	empty := width - filled
-
-	bar := ""
-	for i := 0; i < filled; i++ {
-		bar += "#"
-	}
-	for i := 0; i < empty; i++ {
-		bar += "-"
-	}
-
-	return fmt.Sprintf("[%s] %.1f%%", bar, displayPercent)
-}
-
 // providerDisplayName returns a human-friendly provider name.
 func providerDisplayName(provName string) string {
 	switch provName {

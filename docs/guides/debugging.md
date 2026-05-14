@@ -85,16 +85,23 @@ gh extension list | grep copilot
 ### Budget exhausted — run skipped
 
 ```
-budget check: 0 tokens available (used 100%)
+budget exhausted: 100% used (limit: 90%)
 ```
 
 Check budget state:
 
 ```bash
-nightshift budget
+nightshift budget    # shows per-provider window usage and hourly capacity
 ```
 
-Possible causes: budget exhausted for today (resets weekly), `max_percent` too low, wrong `mode` (daily vs weekly). Check `~/.config/nightshift/config.yaml`.
+Possible causes: quota window (5-hour, weekly, or monthly) at or above `max_percent`. Budget resets when the provider's window resets — shown in `nightshift budget` output as "resets in Xh". Lower `max_percent` in `~/.config/nightshift/config.yaml` to leave more headroom.
+
+### Claude/Codex asking for approval mid-run (tasks)
+
+- **Claude**: set `dangerously_skip_permissions: true` under `providers.claude` in config
+- **Codex**: set `dangerously_bypass_approvals_and_sandbox: true` under `providers.codex`
+
+**Note**: for `nightshift jira run`, both flags are always forced on — the providers config section is irrelevant for Jira.
 
 ### Push rejected on Jira feature branch
 
@@ -119,11 +126,6 @@ The implement phase failed mid-run before the status transition. On the next run
 # or delete the stale workspace:
 rm -rf ~/.local/share/nightshift/jira-workspaces/PROJ-42/
 ```
-
-### Claude/Codex asking for approval mid-run
-
-- **Claude**: set `dangerously_skip_permissions: true` in config
-- **Codex**: `--dangerously-bypass-approvals-and-sandbox` is on by default; check that `dangerously_bypass_approvals_and_sandbox` is not `false` in config
 
 ### HTTPS remote fails silently
 

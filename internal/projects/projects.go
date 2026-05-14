@@ -156,52 +156,6 @@ func SortByPriority(projects []Project) []Project {
 	return sorted
 }
 
-// BudgetAllocation contains budget info for a project.
-type BudgetAllocation struct {
-	Project    Project
-	Tokens     int64   // Allocated token budget
-	Percentage float64 // Percentage of total budget
-}
-
-// AllocateBudget distributes the total budget across projects by priority weight.
-// Projects with higher priority get proportionally more budget.
-func AllocateBudget(projects []Project, totalBudget int64) []BudgetAllocation {
-	if len(projects) == 0 || totalBudget <= 0 {
-		return nil
-	}
-
-	// Calculate total priority weight (use priority+1 to avoid zero weight)
-	var totalWeight float64
-	for i := range projects {
-		projects[i].Weight = float64(projects[i].Priority + 1)
-		totalWeight += projects[i].Weight
-	}
-
-	// Normalize weights
-	for i := range projects {
-		projects[i].Weight /= totalWeight
-	}
-
-	// Allocate budget
-	allocations := make([]BudgetAllocation, len(projects))
-	var allocated int64
-
-	for i, proj := range projects {
-		tokens := int64(float64(totalBudget) * proj.Weight)
-		if i == len(projects)-1 {
-			// Give remainder to last project to avoid rounding loss
-			tokens = totalBudget - allocated
-		}
-		allocations[i] = BudgetAllocation{
-			Project:    proj,
-			Tokens:     tokens,
-			Percentage: proj.Weight * 100,
-		}
-		allocated += tokens
-	}
-
-	return allocations
-}
 
 // FilterProcessedToday removes projects that were already processed today.
 func FilterProcessedToday(projects []Project, s *state.State) []Project {
@@ -259,9 +213,6 @@ func MergeProjectConfig(globalCfg *config.Config, projectPath string) (*config.C
 
 	if v.IsSet("budget.max_percent") {
 		merged.Budget.MaxPercent = v.GetInt("budget.max_percent")
-	}
-	if v.IsSet("budget.reserve_percent") {
-		merged.Budget.ReservePercent = v.GetInt("budget.reserve_percent")
 	}
 
 	if v.IsSet("tasks.enabled") {

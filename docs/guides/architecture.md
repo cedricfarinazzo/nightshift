@@ -28,9 +28,7 @@ graph TD
     JiraOrch --> JiraAPI["Jira API\ngo-atlassian"]
     JiraOrch --> GitHub["GitHub\ngh CLI"]
 
-    Budget --> Snapshots["Snapshots\ninternal/snapshots"]
-    Budget --> Calibrator["Calibrator\ninternal/calibrator"]
-    Budget --> Tmux["tmux scraper\ninternal/tmux"]
+    Budget --> UsageAPI["Usage APIs\nAnthropic · OpenAI · GitHub"]
 ```
 
 ---
@@ -95,18 +93,15 @@ See `docs/guides/jira-pipeline.md` for detailed phase descriptions.
 
 ---
 
-## Budget Calculation
+## Budget Enforcement
 
-Budget is computed in `internal/budget/budget.go`:
+Budget is enforced in `internal/budget/budget.go` via live API percentage checks:
 
-1. **Snapshot** — collect local token counts + (if tmux available) scrape usage %
-2. **Calibrate** — infer total budget: `inferred = local_tokens / (scraped_pct / 100)`
-3. **Calculate available**:
-   - Daily mode: `available = (weekly_budget / 7) * (1 - reserve_percent/100)` × `max_percent/100`
-   - Weekly mode: `available = remaining_weekly * max_percent/100`
-4. **Aggressive end-of-week** (if enabled): multiply by 2× (≤2 days left) or 3× (last day)
+1. **Fetch** — call each provider's Usage API to get per-window utilisation (e.g. Claude: `five_hour`, `seven_day`, `monthly_limit`)
+2. **Compute hourly capacity** — `computeWindowCapacity` applied per window, minimum taken across all windows
+3. **Gate** — `OK = ignoreBudget || capacity > 0`; any positive capacity allows a run
 
-Budget is checked before each run. If insufficient, the run is skipped.
+The single config knob is `budget.max_percent` (default 90). No token arithmetic, no calibration, no modes. See `docs/guides/budget-internals.md` for the formula detail.
 
 ---
 

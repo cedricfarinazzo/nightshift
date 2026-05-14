@@ -38,6 +38,7 @@ func init() {
 	jiraRunCmd.Flags().Bool("todo-only", false, "Only process TODO tickets (skip feedback loop)")
 	jiraRunCmd.Flags().Bool("review-only", false, "Only process ON REVIEW feedback (skip TODO)")
 	jiraRunCmd.Flags().String("type", "", "Filter tickets by issue type (e.g. Bug, Story)")
+	jiraRunCmd.Flags().Bool("ignore-budget", false, "Bypass budget checks (use with caution)")
 }
 
 func runJira(cmd *cobra.Command, _ []string) error {
@@ -69,6 +70,7 @@ func runJira(cmd *cobra.Command, _ []string) error {
 	reviewOnly, _ := cmd.Flags().GetBool("review-only")
 	singleTicket, _ := cmd.Flags().GetString("ticket")
 	typeFilter, _ := cmd.Flags().GetString("type")
+	ignoreBudget, _ := cmd.Flags().GetBool("ignore-budget")
 
 	if todoOnly && reviewOnly {
 		return fmt.Errorf("--todo-only and --review-only are mutually exclusive")
@@ -110,6 +112,14 @@ func runJira(cmd *cobra.Command, _ []string) error {
 
 	printJiraPreflightSummary(cfg.Jira, skipValidation, typeFilter, statusMap)
 
+	// Budget gate: build manager once for all projects.
+	jiraBudgetMgr := newBudgetManager(cfg, runDB)
+
+	if ignoreBudget {
+		fmt.Println("WARNING: --ignore-budget is set, budget checks will be bypassed")
+		log.Warn("--ignore-budget active, bypassing budget checks")
+	}
+
 	var results []jira.TicketResult
 	var feedbackResults []jira.FeedbackResult
 	start := time.Now()
@@ -124,6 +134,23 @@ func runJira(cmd *cobra.Command, _ []string) error {
 		}
 	} else {
 		for _, proj := range cfg.Jira.Projects {
+			// Budget gate: check all phase providers before starting this project.
+			// TODO: move this to per-ticket checking based on resume state (VC-66 feedback).
+			providers := jiraPhaseProviders(cfg.Jira, proj, skipValidation, todoOnly, reviewOnly)
+			budgetResults, _ := jiraBudgetMgr.CheckProviders(providers, ignoreBudget)
+			blocked := false
+			for _, r := range budgetResults {
+				if !r.OK {
+					log.Warnf("project %s: provider %s: %s — skipping", proj.Key, r.Provider, r.Reason)
+					fmt.Printf("  ⏭  %s  skipped: provider %s %s (use --ignore-budget to override)\n", proj.Key, r.Provider, r.Reason)
+					blocked = true
+					break
+				}
+			}
+			if blocked {
+				continue
+			}
+
 			orch, err := buildOrchestrator(client, cfg, proj, skipValidation, runDB, runID)
 			if err != nil {
 				return err
@@ -478,6 +505,8 @@ func createJiraAgent(cfg *config.Config, phase jira.PhaseConfig) (agents.Agent, 
 		if timeout > 0 {
 			extra = append(extra, agents.WithCodexDefaultTimeout(timeout))
 		}
+		// Jira always requires headless non-interactive execution.
+		extra = append(extra, agents.WithDangerouslyBypassApprovalsAndSandbox(true))
 		a := newCodexAgentFromConfig(cfg, extra...)
 		if !a.Available() {
 			return nil, fmt.Errorf("codex CLI not found in PATH")
@@ -492,6 +521,8 @@ func createJiraAgent(cfg *config.Config, phase jira.PhaseConfig) (agents.Agent, 
 		if timeout > 0 {
 			extra = append(extra, agents.WithCopilotDefaultTimeout(timeout))
 		}
+		// Jira always requires headless non-interactive execution.
+		extra = append(extra, agents.WithCopilotDangerouslySkipPermissions(true))
 		a := newCopilotAgentFromConfig(cfg, "", extra...)
 		if !a.Available() {
 			return nil, fmt.Errorf("copilot CLI not found in PATH")
@@ -506,6 +537,8 @@ func createJiraAgent(cfg *config.Config, phase jira.PhaseConfig) (agents.Agent, 
 		if timeout > 0 {
 			extra = append(extra, agents.WithDefaultTimeout(timeout))
 		}
+		// Jira always requires headless non-interactive execution.
+		extra = append(extra, agents.WithDangerouslySkipPermissions(true))
 		a := newClaudeAgentFromConfig(cfg, extra...)
 		if !a.Available() {
 			return nil, fmt.Errorf("claude CLI not found in PATH")
@@ -627,4 +660,36 @@ func firstProjectKey(cfg jira.JiraConfig) string {
 // openDB opens the nightshift database; returns nil,err if it cannot be opened.
 func openDB() (*db.DB, error) {
 	return db.Open(db.DefaultPath())
+}
+
+// jiraPhaseProviders returns the unique provider names needed for the phases
+// that will actually run for a given project. Used by the budget gate to check
+// only the providers that matter for this execution path.
+func jiraPhaseProviders(jiracfg jira.JiraConfig, proj jira.ProjectConfig, skipValidation, todoOnly, reviewOnly bool) []string {
+	seen := map[string]bool{}
+	var providers []string
+	add := func(name string) {
+		if name == "" {
+			name = "claude"
+		}
+		name = strings.ToLower(name)
+		if !seen[name] {
+			seen[name] = true
+			providers = append(providers, name)
+		}
+	}
+
+	if !reviewOnly {
+		// TODO path: validate (optional), plan, implement.
+		if !skipValidation {
+			add(jiracfg.EffectiveValidation(proj).Provider)
+		}
+		add(jiracfg.EffectivePlan(proj).Provider)
+		add(jiracfg.EffectiveImplement(proj).Provider)
+	}
+	if !todoOnly {
+		// Review path: review-fix only.
+		add(jiracfg.EffectiveReviewFix(proj).Provider)
+	}
+	return providers
 }

@@ -93,19 +93,6 @@ func (s *Selector) FilterEnabled(tasks []TaskDefinition) []TaskDefinition {
 	return filtered
 }
 
-// FilterByBudget returns tasks that fit within the given budget.
-// Budget is in tokens.
-func (s *Selector) FilterByBudget(tasks []TaskDefinition, budget int64) []TaskDefinition {
-	filtered := make([]TaskDefinition, 0, len(tasks))
-	for _, t := range tasks {
-		_, max := t.EstimatedTokens()
-		if int64(max) <= budget {
-			filtered = append(filtered, t)
-		}
-	}
-	return filtered
-}
-
 // IsAssigned returns whether a task ID is currently assigned.
 func (s *Selector) IsAssigned(taskID string) bool {
 	if s.state == nil {
@@ -204,29 +191,18 @@ func (s *Selector) IsOnCooldown(taskType TaskType, project string) (bool, time.D
 	return true, interval - elapsed, interval
 }
 
-// SelectNext returns the best task for the given budget and project.
+// SelectNext returns the best task for the given project.
 // Returns nil if no suitable task is found.
-func (s *Selector) SelectNext(budget int64, project string) *ScoredTask {
-	// Start with all task definitions
+func (s *Selector) SelectNext(project string) *ScoredTask {
 	tasks := AllDefinitions()
-
-	// Filter: enabled tasks only
 	tasks = s.FilterEnabled(tasks)
-
-	// Filter: tasks within budget estimate
-	tasks = s.FilterByBudget(tasks, budget)
-
-	// Filter: unassigned tasks
 	tasks = s.FilterUnassigned(tasks, project)
-
-	// Filter: tasks not on cooldown
 	tasks = s.FilterByCooldown(tasks, project)
 
 	if len(tasks) == 0 {
 		return nil
 	}
 
-	// Score each task
 	scored := make([]ScoredTask, len(tasks))
 	for i, t := range tasks {
 		scored[i] = ScoredTask{
@@ -236,26 +212,17 @@ func (s *Selector) SelectNext(budget int64, project string) *ScoredTask {
 		}
 	}
 
-	// Sort by score descending
 	sort.Slice(scored, func(i, j int) bool {
 		return scored[i].Score > scored[j].Score
 	})
 
-	// Select top task that fits remaining budget
-	for _, st := range scored {
-		_, max := st.Definition.EstimatedTokens()
-		if int64(max) <= budget {
-			return &st
-		}
-	}
-
-	return nil
+	return &scored[0]
 }
 
 // SelectAndAssign selects the best task and marks it as assigned.
 // Returns the selected task or nil if none available.
-func (s *Selector) SelectAndAssign(budget int64, project string) *ScoredTask {
-	task := s.SelectNext(budget, project)
+func (s *Selector) SelectAndAssign(project string) *ScoredTask {
+	task := s.SelectNext(project)
 	if task == nil {
 		return nil
 	}
@@ -272,21 +239,11 @@ func makeTaskID(taskType, project string) string {
 	return taskType + ":" + project
 }
 
-// SelectTopN returns the top N tasks by score that fit within budget.
-func (s *Selector) SelectTopN(budget int64, project string, n int) []ScoredTask {
-	// Start with all task definitions
+// SelectTopN returns the top N tasks by score for a project.
+func (s *Selector) SelectTopN(project string, n int) []ScoredTask {
 	tasks := AllDefinitions()
-
-	// Filter: enabled tasks only
 	tasks = s.FilterEnabled(tasks)
-
-	// Filter: tasks within budget estimate
-	tasks = s.FilterByBudget(tasks, budget)
-
-	// Filter: unassigned tasks
 	tasks = s.FilterUnassigned(tasks, project)
-
-	// Filter: tasks not on cooldown
 	tasks = s.FilterByCooldown(tasks, project)
 
 	if len(tasks) == 0 {
@@ -316,23 +273,11 @@ func (s *Selector) SelectTopN(budget int64, project string, n int) []ScoredTask 
 }
 
 // SelectRandom returns a random task from the eligible pool.
-// It applies the same filter pipeline as SelectNext but picks randomly
-// instead of by highest score. The returned ScoredTask still has an
-// accurate Score for display purposes. Returns nil if no task is eligible.
-func (s *Selector) SelectRandom(budget int64, project string) *ScoredTask {
-	// Start with all task definitions
+// Returns nil if no task is eligible.
+func (s *Selector) SelectRandom(project string) *ScoredTask {
 	tasks := AllDefinitions()
-
-	// Filter: enabled tasks only
 	tasks = s.FilterEnabled(tasks)
-
-	// Filter: tasks within budget estimate
-	tasks = s.FilterByBudget(tasks, budget)
-
-	// Filter: unassigned tasks
 	tasks = s.FilterUnassigned(tasks, project)
-
-	// Filter: tasks not on cooldown
 	tasks = s.FilterByCooldown(tasks, project)
 
 	if len(tasks) == 0 {

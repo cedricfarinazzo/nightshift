@@ -479,10 +479,8 @@ type runSummary struct {
 	Completed       int
 	Failed          int
 	Skipped         int
-	TokensUsed      int
-	BudgetStart     int
-	BudgetRemaining int
-	Projects        map[string]int
+	TokensUsed int
+	Projects   map[string]int
 	Outputs         []string
 	Failures        []string
 	Skips           []string
@@ -493,10 +491,8 @@ func summarizeRun(results *reporting.RunResults) runSummary {
 	summary := runSummary{
 		Start:           results.StartTime,
 		End:             results.EndTime,
-		TokensUsed:      results.UsedBudget,
-		BudgetStart:     results.StartBudget,
-		BudgetRemaining: results.RemainingBudget,
-		Projects:        make(map[string]int),
+		TokensUsed: results.UsedBudget,
+		Projects:   make(map[string]int),
 		Tasks:           results.Tasks,
 	}
 
@@ -571,13 +567,6 @@ func renderReportOverview(styles reportStyles, runs []reportRun, opts reportOpti
 		summaryLines = append(summaryLines, durationLine)
 	}
 
-	if agg.hasBudget {
-		summaryLines = append(summaryLines, fmt.Sprintf("%s %s used / %s start",
-			styles.Label.Render("Budget:"),
-			formatTokensCompact(agg.tokensUsed),
-			formatTokensCompact(agg.budgetStart),
-		))
-	}
 	if agg.prCount > 0 {
 		prLabel := "PR created"
 		if agg.prCount > 1 {
@@ -607,14 +596,7 @@ func renderReportOverview(styles reportStyles, runs []reportRun, opts reportOpti
 			fmt.Sprintf("%s %d completed, %d failed, %d skipped",
 				styles.Label.Render("Tasks:"), summary.Completed, summary.Failed, summary.Skipped),
 		}
-		if summary.BudgetStart > 0 {
-			runLines = append(runLines, fmt.Sprintf("%s %s used / %s start (%s remaining)",
-				styles.Label.Render("Budget:"),
-				formatTokensCompact(summary.TokensUsed),
-				formatTokensCompact(summary.BudgetStart),
-				formatTokensCompact(summary.BudgetRemaining),
-			))
-		} else if summary.TokensUsed > 0 {
+		if summary.TokensUsed > 0 {
 			runLines = append(runLines, fmt.Sprintf("%s %s", styles.Label.Render("Tokens:"), formatTokensCompact(summary.TokensUsed)))
 		}
 
@@ -716,8 +698,6 @@ func renderWhatsNext(styles reportStyles, runs []reportRun) string {
 
 	totalCompleted := 0
 	totalTasks := 0
-	var totalBudgetStart, totalBudgetRemaining int
-
 	for _, run := range runs {
 		if run.results == nil {
 			continue
@@ -746,19 +726,6 @@ func renderWhatsNext(styles reportStyles, runs []reportRun) string {
 				}
 				items = append(items, styles.Error.Render(fmt.Sprintf("\u2192 Investigate failed: %s", detail)))
 			}
-		}
-
-		totalBudgetStart += run.results.StartBudget
-		totalBudgetRemaining += run.results.RemainingBudget
-	}
-
-	// Budget warning: remaining < 20% of start
-	if totalBudgetStart > 0 {
-		threshold := totalBudgetStart / 5
-		if totalBudgetRemaining < threshold {
-			items = append(items, styles.Warn.Render(fmt.Sprintf("\u2192 Budget low: %s remaining of %s start",
-				formatTokensCompact(totalBudgetRemaining),
-				formatTokensCompact(totalBudgetStart))))
 		}
 	}
 
@@ -895,17 +862,8 @@ func renderReportBudget(styles reportStyles, runs []reportRun) string {
 		b.WriteString(styles.Accent.Render(header))
 		b.WriteString("\n")
 
-		if summary.BudgetStart > 0 {
-			fmt.Fprintf(&b, "  %s %s used / %s start (%s remaining)\n",
-				styles.Label.Render("Budget:"),
-				formatTokensCompact(summary.TokensUsed),
-				formatTokensCompact(summary.BudgetStart),
-				formatTokensCompact(summary.BudgetRemaining),
-			)
-		} else if summary.TokensUsed > 0 {
+		if summary.TokensUsed > 0 {
 			fmt.Fprintf(&b, "  %s %s\n", styles.Label.Render("Tokens:"), formatTokensCompact(summary.TokensUsed))
-		} else {
-			b.WriteString("  No budget data recorded\n")
 		}
 
 		if i < len(runs)-1 {
@@ -920,9 +878,7 @@ type aggregateSummary struct {
 	failed        int
 	skipped       int
 	tokensUsed    int
-	budgetStart   int
-	outputCounts  map[string]int
-	hasBudget     bool
+	outputCounts map[string]int
 	outputs       []string
 	prCount       int
 	totalDuration time.Duration
@@ -944,10 +900,6 @@ func aggregateRuns(runs []reportRun) aggregateSummary {
 		agg.skipped += summary.Skipped
 		agg.tokensUsed += summary.TokensUsed
 		agg.totalDuration += summary.Duration
-		if summary.BudgetStart > 0 {
-			agg.budgetStart += summary.BudgetStart
-			agg.hasBudget = true
-		}
 		for _, task := range run.results.Tasks {
 			if strings.EqualFold(task.OutputType, "pr") && task.OutputRef != "" {
 				agg.prCount++
@@ -1121,11 +1073,6 @@ func parseRunReportMarkdown(content string) (*reporting.RunResults, error) {
 			}
 			continue
 		}
-		if strings.HasPrefix(line, "- Budget: ") {
-			budget := strings.TrimPrefix(line, "- Budget: ")
-			parseBudgetLine(results, budget)
-			continue
-		}
 		if strings.HasPrefix(line, "- Logs: ") {
 			results.LogPath = strings.TrimPrefix(line, "- Logs: ")
 			continue
@@ -1151,18 +1098,6 @@ func parseRunReportMarkdown(content string) (*reporting.RunResults, error) {
 	return results, nil
 }
 
-func parseBudgetLine(results *reporting.RunResults, budget string) {
-	parts := strings.Split(budget, ",")
-	if len(parts) < 3 {
-		return
-	}
-	start := parseTokenString(strings.TrimSpace(strings.TrimSuffix(parts[0], " start")))
-	used := parseTokenString(strings.TrimSpace(strings.TrimSuffix(parts[1], " used")))
-	remaining := parseTokenString(strings.TrimSpace(strings.TrimSuffix(parts[2], " remaining")))
-	results.StartBudget = start
-	results.UsedBudget = used
-	results.RemainingBudget = remaining
-}
 
 func parseTaskLine(line string, status string) reporting.TaskResult {
 	task := reporting.TaskResult{Status: status}
