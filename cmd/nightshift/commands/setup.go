@@ -2169,7 +2169,6 @@ func writeGlobalConfigToPath(cfg *config.Config, configPath string) error {
 		v.Set("jira.site", cfg.Jira.Site)
 		v.Set("jira.email", cfg.Jira.Email)
 		v.Set("jira.token_env", cfg.Jira.TokenEnv)
-		v.Set("jira.label", cfg.Jira.Label)
 		v.Set("jira.max_tickets", cfg.Jira.MaxTickets)
 		v.Set("jira.budget_enabled", cfg.Jira.BudgetEnabled)
 		if cfg.Jira.WorkspaceRoot != "" {
@@ -2195,13 +2194,16 @@ func writeGlobalConfigToPath(cfg *config.Config, configPath string) error {
 		v.Set("jira.review_fix.provider", cfg.Jira.ReviewFix.Provider)
 		v.Set("jira.review_fix.model", cfg.Jira.ReviewFix.Model)
 		v.Set("jira.review_fix.timeout", cfg.Jira.ReviewFix.Timeout)
+		v.Set("jira.systemd_enabled", cfg.Jira.SystemdEnabled)
+		if cfg.Jira.SystemdOnCalendar != "" {
+			v.Set("jira.systemd_on_calendar", cfg.Jira.SystemdOnCalendar)
+		}
 	} else {
 		// Explicitly zero out every jira leaf key so a previously enabled Jira config
 		// does not survive a disable-and-save round-trip.
 		v.Set("jira.site", "")
 		v.Set("jira.email", "")
 		v.Set("jira.token_env", "")
-		v.Set("jira.label", "")
 		v.Set("jira.max_tickets", 0)
 		v.Set("jira.budget_enabled", false)
 		v.Set("jira.projects", []interface{}{})
@@ -2217,18 +2219,8 @@ func writeGlobalConfigToPath(cfg *config.Config, configPath string) error {
 		v.Set("jira.review_fix.provider", "")
 		v.Set("jira.review_fix.model", "")
 		v.Set("jira.review_fix.timeout", "")
-	}
-
-	// Systemd integration — written unconditionally to prevent stale keys.
-	// When systemd is disabled (Enabled is false), all systemd.* keys are zeroed out.
-	if cfg.Systemd.Enabled {
-		v.Set("systemd.enabled", cfg.Systemd.Enabled)
-		if cfg.Systemd.OnCalendar != "" {
-			v.Set("systemd.on_calendar", cfg.Systemd.OnCalendar)
-		}
-	} else {
-		v.Set("systemd.enabled", false)
-		v.Set("systemd.on_calendar", "")
+		v.Set("jira.systemd_enabled", false)
+		v.Set("jira.systemd_on_calendar", "")
 	}
 
 	if err := v.WriteConfig(); err != nil {
@@ -2809,7 +2801,7 @@ func (m *setupModel) handleSystemdInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.systemdInput.Placeholder = "*-*-* 22:00:00"
 			m.systemdInput.Focus()
 		case "n", "N":
-			m.cfg.Systemd.Enabled = false
+			m.cfg.Jira.SystemdEnabled = false
 			if err := writeGlobalConfigToPath(m.cfg, m.configPath); err != nil {
 				m.systemdErr = err.Error()
 				return m, nil
@@ -2822,7 +2814,7 @@ func (m *setupModel) handleSystemdInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.systemdInput.Placeholder = "*-*-* 22:00:00"
 				m.systemdInput.Focus()
 			} else {
-				m.cfg.Systemd.Enabled = false
+				m.cfg.Jira.SystemdEnabled = false
 				if err := writeGlobalConfigToPath(m.cfg, m.configPath); err != nil {
 					m.systemdErr = err.Error()
 					return m, nil
@@ -2859,8 +2851,8 @@ func (m *setupModel) handleSystemdInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 // applyAndInstallSystemd writes systemd config and installs units.
 func (m *setupModel) applyAndInstallSystemd() tea.Cmd {
-	m.cfg.Systemd.Enabled = true
-	m.cfg.Systemd.OnCalendar = m.systemdOnCalendar
+	m.cfg.Jira.SystemdEnabled = true
+	m.cfg.Jira.SystemdOnCalendar = m.systemdOnCalendar
 	if err := writeGlobalConfigToPath(m.cfg, m.configPath); err != nil {
 		m.systemdErr = err.Error()
 		return nil

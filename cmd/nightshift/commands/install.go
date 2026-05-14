@@ -608,7 +608,7 @@ func installSystemdJiraWithExec(cfg *config.Config, run execRunner, w io.Writer)
 	}
 	fmt.Fprintf(w, "Installed %s\n", servicePath)
 
-	onCalendar := cfg.Systemd.OnCalendar
+	onCalendar := cfg.Jira.SystemdOnCalendar
 	if onCalendar == "" {
 		onCalendar = "*-*-* 22:00:00"
 	}

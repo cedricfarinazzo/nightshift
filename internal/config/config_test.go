@@ -544,20 +544,19 @@ func TestValidate_NoScheduleIsOK(t *testing.T) {
 	}
 }
 
-func TestValidate_SystemdConfig_enabled(t *testing.T) {
-	cfg := &Config{
-		Systemd: SystemdConfig{Enabled: true, OnCalendar: "*-*-* 22:00:00"},
-	}
+func TestValidate_JiraSystemd_enabled(t *testing.T) {
+	cfg := &Config{}
+	cfg.Jira.SystemdEnabled = true
+	cfg.Jira.SystemdOnCalendar = "*-*-* 22:00:00"
 	if err := Validate(cfg); err != nil {
-		t.Errorf("enabled systemd with OnCalendar should be valid, got %v", err)
+		t.Errorf("jira systemd enabled should be valid, got %v", err)
 	}
 }
 
-func TestValidate_SystemdConfig_disabled(t *testing.T) {
-	cfg := &Config{
-		Systemd: SystemdConfig{Enabled: false},
-	}
+func TestValidate_JiraSystemd_disabled(t *testing.T) {
+	cfg := &Config{}
+	cfg.Jira.SystemdEnabled = false
 	if err := Validate(cfg); err != nil {
-		t.Errorf("disabled systemd should pass validation, got %v", err)
+		t.Errorf("jira systemd disabled should pass validation, got %v", err)
 	}
 }

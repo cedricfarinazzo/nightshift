@@ -59,6 +59,10 @@ type JiraConfig struct {
 	// Behavior
 	DryRun     bool `mapstructure:"dry_run"`     // log actions but don't execute
 	MaxTickets int  `mapstructure:"max_tickets"` // max tickets per run (default: 10)
+
+	// Systemd user service for nightshift jira run
+	SystemdEnabled    bool   `mapstructure:"systemd_enabled"`     // install/use nightshift-jira.service
+	SystemdOnCalendar string `mapstructure:"systemd_on_calendar"` // systemd OnCalendar expression (default: *-*-* 22:00:00)
 }
 
 // RepoConfig defines a repository to work on.

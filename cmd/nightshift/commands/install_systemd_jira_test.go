@@ -61,8 +61,7 @@ func TestGenerateSystemdJiraService(t *testing.T) {
 	}
 
 	checks := []string{
-		"Restart=on-failure",
-		"RestartSec=60s",
+		"Type=oneshot",
 		"EnvironmentFile=-%h/.config/nightshift/env",
 		"SyslogIdentifier=nightshift-jira",
 		"After=network-online.target",
@@ -104,12 +103,9 @@ func TestInstallSystemdJira_writesFiles(t *testing.T) {
 	tmpHome := t.TempDir()
 	t.Setenv("HOME", tmpHome)
 
-	cfg := &config.Config{
-		Systemd: config.SystemdConfig{
-			Enabled:    true,
-			OnCalendar: "*-*-* 22:00:00",
-		},
-	}
+	cfg := &config.Config{}
+	cfg.Jira.SystemdEnabled = true
+	cfg.Jira.SystemdOnCalendar = "*-*-* 22:00:00"
 	tracker := &trackingExecCommand{}
 	if err := installSystemdJiraWithExec(cfg, tracker.run, io.Discard); err != nil {
 		t.Fatalf("installSystemdJira: %v", err)
@@ -132,12 +128,9 @@ func TestInstallSystemdJira_alwaysWritesTimer(t *testing.T) {
 	tmpHome := t.TempDir()
 	t.Setenv("HOME", tmpHome)
 
-	cfg := &config.Config{
-		Systemd: config.SystemdConfig{
-			Enabled:    true,
-			OnCalendar: "*-*-* 23:00:00",
-		},
-	}
+	cfg := &config.Config{}
+	cfg.Jira.SystemdEnabled = true
+	cfg.Jira.SystemdOnCalendar = "*-*-* 23:00:00"
 	if err := installSystemdJiraWithExec(cfg, fakeExecCommand, io.Discard); err != nil {
 		t.Fatalf("installSystemdJira: %v", err)
 	}

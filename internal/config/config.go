@@ -27,13 +27,6 @@ type Config struct {
 	Logging      LoggingConfig      `mapstructure:"logging"`
 	Reporting    ReportingConfig    `mapstructure:"reporting"`
 	Jira         jira.JiraConfig    `mapstructure:"jira"`
-	Systemd      SystemdConfig      `mapstructure:"systemd"`
-}
-
-// SystemdConfig defines systemd user service settings for nightshift jira run.
-type SystemdConfig struct {
-	Enabled    bool   `mapstructure:"enabled"`
-	OnCalendar string `mapstructure:"on_calendar"` // e.g. "*-*-* 22:00:00"
 }
 
 // ScheduleConfig defines when nightshift runs.
@@ -270,8 +263,8 @@ func setDefaults(v *viper.Viper) {
 	// Jira defaults
 	v.SetDefault("jira.budget_enabled", true)
 
-	// Systemd defaults
-	v.SetDefault("systemd.on_calendar", "*-*-* 22:00:00")
+	// Jira systemd defaults
+	v.SetDefault("jira.systemd_on_calendar", "*-*-* 22:00:00")
 }
 
 // loadConfigFile merges a YAML config file into viper.
