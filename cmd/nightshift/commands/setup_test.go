@@ -31,7 +31,6 @@ func TestApplyBudgetEdit_MaxPercentBounds(t *testing.T) {
 	}
 }
 
-
 func TestHandleProjectsInput_RejectsFilePath(t *testing.T) {
 	tmpDir := t.TempDir()
 	filePath := filepath.Join(tmpDir, "not-a-dir.txt")

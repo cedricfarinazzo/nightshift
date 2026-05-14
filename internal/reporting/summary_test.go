@@ -31,7 +31,7 @@ func TestGenerate(t *testing.T) {
 		Date:       testDate,
 		UsedBudget: 45234,
 		StartTime:  testDate.Add(-6 * time.Hour),
-		EndTime:         testDate,
+		EndTime:    testDate,
 		Tasks: []TaskResult{
 			{
 				Project:    "/home/user/projects/myproject",

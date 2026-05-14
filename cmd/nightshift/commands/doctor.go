@@ -254,7 +254,6 @@ func checkBudget(cfg *config.Config, _ *db.DB, add func(string, checkStatus, str
 	}
 }
 
-
 func printDoctorResults(results []checkResult) {
 	fmt.Println("Nightshift doctor")
 	fmt.Println("=================")

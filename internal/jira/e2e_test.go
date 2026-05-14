@@ -94,28 +94,23 @@ func TestE2E_FetchTodoTickets(t *testing.T) {
 	}
 }
 
-func TestE2E_FetchTodoTickets_SprintFilter(t *testing.T) {
+func TestE2E_FetchTodoTickets_Idempotent(t *testing.T) {
 	client := e2eClient(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	// Baseline: fetch without sprint filter.
-	baseline, err := client.FetchTodoTickets(ctx, e2eProject(), "")
+	// Two calls with the same project should return the same count.
+	first, err := client.FetchTodoTickets(ctx, e2eProject(), "")
 	if err != nil {
-		t.Fatalf("FetchTodoTickets (no filter): %v", err)
+		t.Fatalf("FetchTodoTickets (first): %v", err)
 	}
-
-	// With sprint filter: count should be ≤ baseline.
-	projWithSprint := e2eProject()
-	projWithSprint.RequireActiveSprint = true
-	withSprint, err := client.FetchTodoTickets(ctx, projWithSprint, "")
+	second, err := client.FetchTodoTickets(ctx, e2eProject(), "")
 	if err != nil {
-		t.Fatalf("FetchTodoTickets (sprint filter): %v", err)
+		t.Fatalf("FetchTodoTickets (second): %v", err)
 	}
-
-	t.Logf("FetchTodoTickets: baseline=%d sprint-filtered=%d", len(baseline), len(withSprint))
-	if len(withSprint) > len(baseline) {
-		t.Errorf("sprint-filtered count %d exceeds baseline %d", len(withSprint), len(baseline))
+	t.Logf("FetchTodoTickets: first=%d second=%d", len(first), len(second))
+	if len(first) != len(second) {
+		t.Errorf("non-deterministic: first=%d second=%d", len(first), len(second))
 	}
 }
 

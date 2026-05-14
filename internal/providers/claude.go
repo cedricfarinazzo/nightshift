@@ -271,7 +271,6 @@ func (c *Claude) getWeeklyUsageWithSource() (int64, string, error) {
 	return 0, "stats-cache", nil
 }
 
-
 // GetDailyStats returns usage stats for a specific date.
 func (c *Claude) GetDailyStats(date string) (*DailyStat, error) {
 	stats, err := c.ParseStatsCache()

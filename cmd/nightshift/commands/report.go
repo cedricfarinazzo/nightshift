@@ -473,27 +473,27 @@ func newReportStyles() reportStyles {
 }
 
 type runSummary struct {
-	Start           time.Time
-	End             time.Time
-	Duration        time.Duration
-	Completed       int
-	Failed          int
-	Skipped         int
+	Start      time.Time
+	End        time.Time
+	Duration   time.Duration
+	Completed  int
+	Failed     int
+	Skipped    int
 	TokensUsed int
 	Projects   map[string]int
-	Outputs         []string
-	Failures        []string
-	Skips           []string
-	Tasks           []reporting.TaskResult
+	Outputs    []string
+	Failures   []string
+	Skips      []string
+	Tasks      []reporting.TaskResult
 }
 
 func summarizeRun(results *reporting.RunResults) runSummary {
 	summary := runSummary{
-		Start:           results.StartTime,
-		End:             results.EndTime,
+		Start:      results.StartTime,
+		End:        results.EndTime,
 		TokensUsed: results.UsedBudget,
 		Projects:   make(map[string]int),
-		Tasks:           results.Tasks,
+		Tasks:      results.Tasks,
 	}
 
 	if !results.StartTime.IsZero() && !results.EndTime.IsZero() {
@@ -878,7 +878,7 @@ type aggregateSummary struct {
 	failed        int
 	skipped       int
 	tokensUsed    int
-	outputCounts map[string]int
+	outputCounts  map[string]int
 	outputs       []string
 	prCount       int
 	totalDuration time.Duration
@@ -1097,7 +1097,6 @@ func parseRunReportMarkdown(content string) (*reporting.RunResults, error) {
 	}
 	return results, nil
 }
-
 
 func parseTaskLine(line string, status string) reporting.TaskResult {
 	task := reporting.TaskResult{Status: status}

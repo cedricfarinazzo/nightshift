@@ -178,7 +178,6 @@ func (c *Copilot) IncrementRequestCount() error {
 	return c.SaveUsageData(data)
 }
 
-
 // GetMonthlyResetTime returns the timestamp when the monthly counter resets.
 // Copilot resets on the 1st of each month at 00:00:00 UTC.
 func (c *Copilot) GetMonthlyResetTime() time.Time {
@@ -217,7 +216,6 @@ func daysElapsedInMonth(t time.Time) float64 {
 	const minDays = 1.0 / 24.0 // 1 hour minimum
 	return math.Max(minDays, t.UTC().Sub(firstOfMonth(t)).Hours()/24.0)
 }
-
 
 // GetTodayTokens returns today's request count (for snapshot compatibility).
 // Note: Copilot tracks requests, not tokens. We return request count as "tokens".

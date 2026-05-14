@@ -70,7 +70,7 @@ func TestSelectProvider_PreferenceOrder(t *testing.T) {
 			Codex:      config.ProviderConfig{Enabled: true},
 		},
 		Budget: config.BudgetConfig{
-			MaxPercent:   75,
+			MaxPercent: 75,
 		},
 	}
 
@@ -103,7 +103,7 @@ func TestSelectProvider_FallbackOnBudget(t *testing.T) {
 			Codex:      config.ProviderConfig{Enabled: true},
 		},
 		Budget: config.BudgetConfig{
-			MaxPercent:   75,
+			MaxPercent: 75,
 		},
 	}
 
@@ -154,7 +154,7 @@ func TestSelectProvider_AllBudgetExhausted(t *testing.T) {
 			Codex:  config.ProviderConfig{Enabled: true},
 		},
 		Budget: config.BudgetConfig{
-			MaxPercent:   75,
+			MaxPercent: 75,
 		},
 	}
 	claude := &mockUsage{name: "claude", pct: 100}
@@ -181,7 +181,7 @@ func TestSelectProvider_CLINotInPath(t *testing.T) {
 			Codex:  config.ProviderConfig{Enabled: true},
 		},
 		Budget: config.BudgetConfig{
-			MaxPercent:   75,
+			MaxPercent: 75,
 		},
 	}
 	claude := &mockUsage{name: "claude", pct: 0}
@@ -232,7 +232,7 @@ func newTestRunConfig() *config.Config {
 			Codex:  config.ProviderConfig{Enabled: true},
 		},
 		Budget: config.BudgetConfig{
-			MaxPercent:   75,
+			MaxPercent: 75,
 		},
 		Tasks: config.TasksConfig{
 			Enabled:    []string{},
@@ -437,7 +437,7 @@ func TestSelectProvider_IgnoreBudget_StillReturnsProvider(t *testing.T) {
 			Codex:  config.ProviderConfig{Enabled: true},
 		},
 		Budget: config.BudgetConfig{
-			MaxPercent:   75,
+			MaxPercent: 75,
 		},
 	}
 	// Both providers at 100% usage
@@ -469,7 +469,7 @@ func TestSelectProvider_IgnoreBudget_PopulatesAllowance(t *testing.T) {
 			Codex:  config.ProviderConfig{Enabled: false},
 		},
 		Budget: config.BudgetConfig{
-			MaxPercent:   75,
+			MaxPercent: 75,
 		},
 	}
 	claude := &mockUsage{name: "claude", pct: 100}
@@ -501,7 +501,7 @@ func TestSelectProvider_IgnoreBudget_False_StillRejectsBudget(t *testing.T) {
 			Codex:  config.ProviderConfig{Enabled: true},
 		},
 		Budget: config.BudgetConfig{
-			MaxPercent:   75,
+			MaxPercent: 75,
 		},
 	}
 	claude := &mockUsage{name: "claude", pct: 100}

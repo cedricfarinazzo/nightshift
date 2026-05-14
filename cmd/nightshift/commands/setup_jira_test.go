@@ -20,7 +20,6 @@ func newJiraModel() *setupModel {
 		configPath:        os.TempDir() + "/nightshift-test-config.yaml",
 		jiraInput:         ti,
 		jiraTokenEnv:      "JIRA_API_TOKEN",
-		jiraLabel:         "nightshift",
 		jiraMaxTickets:    10,
 		jiraPhaseModelIdx: [4]int{0, 1, 1, 1},
 		jiraPhaseProvider: [4]string{"claude", "claude", "claude", "claude"},
@@ -189,35 +188,8 @@ func TestJiraTextInput_TokenEnvDefault(t *testing.T) {
 	if got.jiraTokenEnv != "JIRA_API_TOKEN" {
 		t.Fatalf("expected default JIRA_API_TOKEN, got %q", got.jiraTokenEnv)
 	}
-	if got.jiraSubStep != jiraSubStepProject {
-		t.Fatalf("expected sub-step %d, got %d", jiraSubStepProject, got.jiraSubStep)
-	}
-}
-
-func TestJiraTextInput_ProjectKeyUppercased(t *testing.T) {
-	m := newJiraModel()
-	m.jiraSubStep = jiraSubStepProject
-	m.jiraInput.SetValue("vc")
-
-	model, _ := m.handleJiraTextInput(enterMsg())
-	got := model.(*setupModel)
-	if got.jiraProjectKey != "VC" {
-		t.Fatalf("expected VC, got %q", got.jiraProjectKey)
-	}
-}
-
-func TestJiraTextInput_LabelDefault(t *testing.T) {
-	m := newJiraModel()
-	m.jiraSubStep = jiraSubStepLabel
-	m.jiraInput.SetValue("") // empty → default "nightshift"
-
-	model, _ := m.handleJiraTextInput(enterMsg())
-	got := model.(*setupModel)
-	if got.jiraLabel != "nightshift" {
-		t.Fatalf("expected default 'nightshift', got %q", got.jiraLabel)
-	}
-	if got.jiraSubStep != jiraSubStepRepos {
-		t.Fatalf("expected sub-step %d, got %d", jiraSubStepRepos, got.jiraSubStep)
+	if got.jiraSubStep != jiraSubStepProjects {
+		t.Fatalf("expected sub-step %d, got %d", jiraSubStepProjects, got.jiraSubStep)
 	}
 }
 
@@ -271,7 +243,6 @@ func TestJiraTextInput_MaxTicketsZeroRejected(t *testing.T) {
 
 func TestJiraRepoInput_RequiresAtLeastOneRepo(t *testing.T) {
 	m := newJiraModel()
-	m.jiraSubStep = jiraSubStepRepos
 	m.jiraRepos = nil
 
 	model, _ := m.handleJiraRepoInput(enterMsg())
@@ -283,7 +254,6 @@ func TestJiraRepoInput_RequiresAtLeastOneRepo(t *testing.T) {
 
 func TestJiraRepoInput_AddRepo(t *testing.T) {
 	m := newJiraModel()
-	m.jiraSubStep = jiraSubStepRepos
 	m.jiraRepos = nil
 
 	// Press 'a' to start adding
@@ -327,7 +297,6 @@ func TestJiraRepoInput_AddRepo(t *testing.T) {
 
 func TestJiraRepoInput_DeleteRepo(t *testing.T) {
 	m := newJiraModel()
-	m.jiraSubStep = jiraSubStepRepos
 	m.jiraRepos = []jiraRepoEntry{
 		{URL: "git@github.com:org/repo.git", BaseBranch: "main"},
 	}
@@ -342,7 +311,6 @@ func TestJiraRepoInput_DeleteRepo(t *testing.T) {
 
 func TestJiraRepoInput_CancelEditing(t *testing.T) {
 	m := newJiraModel()
-	m.jiraSubStep = jiraSubStepRepos
 	m.jiraRepoEditing = true
 	m.jiraRepoField = 0
 
@@ -355,7 +323,6 @@ func TestJiraRepoInput_CancelEditing(t *testing.T) {
 
 func TestJiraRepoInput_EnterAdvancesWithRepo(t *testing.T) {
 	m := newJiraModel()
-	m.jiraSubStep = jiraSubStepRepos
 	m.jiraRepos = []jiraRepoEntry{
 		{URL: "git@github.com:org/repo.git", BaseBranch: "main"},
 	}
@@ -500,12 +467,16 @@ func TestApplyJiraConfig_PopulatesFields(t *testing.T) {
 	m.jiraSite = "mysite"
 	m.jiraEmail = "user@example.com"
 	m.jiraTokenEnv = "MY_JIRA_TOKEN"
-	m.jiraProjectKey = "PROJ"
-	m.jiraLabel = "nightshift"
 	m.jiraMaxTickets = 5
 	m.jiraPhaseModelIdx = [4]int{0, 1, 1, 1}
-	m.jiraRepos = []jiraRepoEntry{
-		{URL: "git@github.com:org/repo.git", BaseBranch: "main"},
+	m.jiraProjects = []jiraProjectEntry{
+		{
+			Key:   "PROJ",
+			Label: "nightshift",
+			Repos: []jiraRepoEntry{
+				{URL: "git@github.com:org/repo.git", BaseBranch: "main"},
+			},
+		},
 	}
 
 	m.applyJiraConfig()
@@ -528,6 +499,9 @@ func TestApplyJiraConfig_PopulatesFields(t *testing.T) {
 	}
 	if cfg.Projects[0].Key != "PROJ" {
 		t.Errorf("Projects[0].Key = %q, want PROJ", cfg.Projects[0].Key)
+	}
+	if cfg.Projects[0].Label != "nightshift" {
+		t.Errorf("Projects[0].Label = %q, want nightshift", cfg.Projects[0].Label)
 	}
 	if len(cfg.Projects[0].Repos) != 1 {
 		t.Fatalf("expected 1 repo, got %d", len(cfg.Projects[0].Repos))

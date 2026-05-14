@@ -37,21 +37,21 @@ func init() {
 }
 
 type jiraPreviewResult struct {
-	GeneratedAt    time.Time               `json:"generated_at"`
-	JiraProject    string                  `json:"jira_project"`
-	JiraUser       string                  `json:"jira_user"`
-	ConnectionOK   bool                    `json:"connection_ok"`
-	ConnectionErr  string                  `json:"connection_err,omitempty"`
-	TodoTickets    []jiraPreviewTicket     `json:"todo_tickets"`
-	ReviewTickets  []jiraPreviewTicket     `json:"review_tickets"`
-	ExecutionOrder []string                `json:"execution_order"` // ready tickets only
-	FullOrder      []jiraPreviewOrderEntry `json:"full_order,omitempty"`
-	BlockedTickets []jiraPreviewBlocked    `json:"blocked_tickets,omitempty"`
-	Budget          *budget.AllowanceResult      `json:"budget,omitempty"`
-	BudgetErr       string                       `json:"budget_err,omitempty"`
-	ProviderBudgets []jiraPreviewProviderBudget  `json:"provider_budgets,omitempty"`
-	SkippedTickets []jiraPreviewSkipped    `json:"skipped_tickets,omitempty"`
-	Phases         []jiraPreviewPhase      `json:"phases"`
+	GeneratedAt     time.Time                   `json:"generated_at"`
+	JiraProject     string                      `json:"jira_project"`
+	JiraUser        string                      `json:"jira_user"`
+	ConnectionOK    bool                        `json:"connection_ok"`
+	ConnectionErr   string                      `json:"connection_err,omitempty"`
+	TodoTickets     []jiraPreviewTicket         `json:"todo_tickets"`
+	ReviewTickets   []jiraPreviewTicket         `json:"review_tickets"`
+	ExecutionOrder  []string                    `json:"execution_order"` // ready tickets only
+	FullOrder       []jiraPreviewOrderEntry     `json:"full_order,omitempty"`
+	BlockedTickets  []jiraPreviewBlocked        `json:"blocked_tickets,omitempty"`
+	Budget          *budget.AllowanceResult     `json:"budget,omitempty"`
+	BudgetErr       string                      `json:"budget_err,omitempty"`
+	ProviderBudgets []jiraPreviewProviderBudget `json:"provider_budgets,omitempty"`
+	SkippedTickets  []jiraPreviewSkipped        `json:"skipped_tickets,omitempty"`
+	Phases          []jiraPreviewPhase          `json:"phases"`
 }
 
 type jiraPreviewOrderEntry struct {
@@ -69,11 +69,11 @@ type jiraPreviewPhase struct {
 }
 
 type jiraPreviewProviderBudget struct {
-	Provider string                 `json:"provider"`
-	OK       bool                   `json:"ok"`
-	Phases   []string               `json:"phases"` // which phases use this provider
+	Provider  string                  `json:"provider"`
+	OK        bool                    `json:"ok"`
+	Phases    []string                `json:"phases"` // which phases use this provider
 	Allowance *budget.AllowanceResult `json:"allowance,omitempty"`
-	Reason   string                 `json:"reason,omitempty"` // non-empty when exhausted
+	Reason    string                  `json:"reason,omitempty"` // non-empty when exhausted
 }
 
 type jiraPreviewTicket struct {

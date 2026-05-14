@@ -233,8 +233,6 @@ type setupModel struct {
 	jiraSite          string
 	jiraEmail         string
 	jiraTokenEnv      string
-	jiraProjectKey    string
-	jiraLabel         string
 	jiraMaxTickets    int
 	jiraRepos         []jiraRepoEntry
 	jiraRepoCursor    int
@@ -249,11 +247,18 @@ type setupModel struct {
 	jiraPingErr       string
 	jiraErr           string
 
+	// Multi-project Jira state
+	jiraProjects            []jiraProjectEntry
+	jiraProjectCursor       int
+	jiraProjectEditMode     bool
+	jiraProjectEditSubStep  int // 0=key, 1=label, 2=repos
+	jiraEditProjectKey      string
+	jiraEditProjectLabel    string
+
 	// Systemd step state
 	systemdCursor     int // 0=yes, 1=no
-	systemdMode       string
 	systemdOnCalendar string
-	systemdSubStep    int // 0=enable prompt, 1=mode prompt, 2=oncalendar prompt
+	systemdSubStep    int // 0=enable prompt, 1=oncalendar prompt
 	systemdInput      textinput.Model
 	systemdErr        string
 
@@ -294,6 +299,12 @@ type openaiModelsFetchedMsg struct {
 type jiraRepoEntry struct {
 	URL        string
 	BaseBranch string
+}
+
+type jiraProjectEntry struct {
+	Key   string
+	Label string
+	Repos []jiraRepoEntry
 }
 
 type pathOption struct {
@@ -402,9 +413,7 @@ func newSetupModel() (*setupModel, error) {
 		jiraInput:         jiraInput,
 		jiraTokenEnv:      "JIRA_API_TOKEN",
 		systemdInput:      systemdInput,
-		systemdMode:       "schedule",
 		systemdOnCalendar: "*-*-* 22:00:00",
-		jiraLabel:         "nightshift",
 		jiraMaxTickets:    10,
 		jiraPhaseProvider: defaultJiraPhaseProviders(cfg.Providers.Preference),
 		jiraPhaseModelIdx: defaultJiraPhaseModelIdxs(cfg.Providers.Preference),
@@ -418,20 +427,21 @@ func newSetupModel() (*setupModel, error) {
 		if cfg.Jira.TokenEnv != "" {
 			model.jiraTokenEnv = cfg.Jira.TokenEnv
 		}
-		if cfg.Jira.Label != "" {
-			model.jiraLabel = cfg.Jira.Label
-		}
 		if cfg.Jira.MaxTickets > 0 {
 			model.jiraMaxTickets = cfg.Jira.MaxTickets
 		}
-		if len(cfg.Jira.Projects) > 0 {
-			model.jiraProjectKey = cfg.Jira.Projects[0].Key
-			for _, r := range cfg.Jira.Projects[0].Repos {
-				model.jiraRepos = append(model.jiraRepos, jiraRepoEntry{
+		for _, p := range cfg.Jira.Projects {
+			entry := jiraProjectEntry{
+				Key:   p.Key,
+				Label: p.Label,
+			}
+			for _, r := range p.Repos {
+				entry.Repos = append(entry.Repos, jiraRepoEntry{
 					URL:        r.URL,
 					BaseBranch: r.BaseBranch,
 				})
 			}
+			model.jiraProjects = append(model.jiraProjects, entry)
 		}
 		model.jiraPhaseModelIdx = [4]int{
 			jiraModelIndexForProvider(model.jiraPhaseProvider[0], cfg.Jira.Validation.Model),
@@ -831,6 +841,9 @@ func (m *setupModel) setStep(step setupStep) tea.Cmd {
 		m.jiraErr = ""
 		m.jiraInput.SetValue("")
 		m.jiraInput.Blur()
+		m.jiraProjectCursor = 0
+		m.jiraProjectEditMode = false
+		m.jiraProjectEditSubStep = 0
 	case stepSystemd:
 		m.systemdSubStep = 0
 		m.systemdErr = ""
@@ -1228,7 +1241,6 @@ func (m *setupModel) applyBudgetDefaults() {
 		m.cfg.Budget.MaxPercent = config.DefaultMaxPercent
 	}
 }
-
 
 func (m *setupModel) budgetFieldValue() string {
 	switch m.budgetCursor {
@@ -1926,7 +1938,6 @@ func makeTaskItems(cfg *config.Config, projects []string, preset setup.Preset) [
 	return items
 }
 
-
 func runPreviewCmd(cfg *config.Config, projects []string) tea.Cmd {
 	return func() tea.Msg {
 		output, err := buildSetupPreviewOutput(cfg, projects)
@@ -2212,13 +2223,11 @@ func writeGlobalConfigToPath(cfg *config.Config, configPath string) error {
 	// When systemd is disabled (Enabled is false), all systemd.* keys are zeroed out.
 	if cfg.Systemd.Enabled {
 		v.Set("systemd.enabled", cfg.Systemd.Enabled)
-		v.Set("systemd.mode", cfg.Systemd.Mode)
 		if cfg.Systemd.OnCalendar != "" {
 			v.Set("systemd.on_calendar", cfg.Systemd.OnCalendar)
 		}
 	} else {
 		v.Set("systemd.enabled", false)
-		v.Set("systemd.mode", "")
 		v.Set("systemd.on_calendar", "")
 	}
 
@@ -2310,12 +2319,10 @@ const (
 	jiraSubStepSite       = 1
 	jiraSubStepEmail      = 2
 	jiraSubStepTokenEnv   = 3
-	jiraSubStepProject    = 4
-	jiraSubStepLabel      = 5
-	jiraSubStepRepos      = 6
-	jiraSubStepPhases     = 7
-	jiraSubStepMaxTickets = 8
-	jiraSubStepPing       = 9
+	jiraSubStepProjects   = 4
+	jiraSubStepPhases     = 5
+	jiraSubStepMaxTickets = 6
+	jiraSubStepPing       = 7
 )
 
 // jiraModelIndex returns the index of model in the claude Jira model list, defaulting to 0.
@@ -2404,11 +2411,10 @@ func (m *setupModel) handleJiraInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch m.jiraSubStep {
 	case jiraSubStepEnable:
 		return m.handleJiraEnableInput(msg)
-	case jiraSubStepSite, jiraSubStepEmail, jiraSubStepTokenEnv,
-		jiraSubStepProject, jiraSubStepLabel, jiraSubStepMaxTickets:
+	case jiraSubStepSite, jiraSubStepEmail, jiraSubStepTokenEnv, jiraSubStepMaxTickets:
 		return m.handleJiraTextInput(msg)
-	case jiraSubStepRepos:
-		return m.handleJiraRepoInput(msg)
+	case jiraSubStepProjects:
+		return m.handleJiraProjectsInput(msg)
 	case jiraSubStepPhases:
 		return m.handleJiraPhaseInput(msg)
 	case jiraSubStepPing:
@@ -2439,12 +2445,7 @@ func (m *setupModel) handleJiraEnableInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) 
 			m.jiraErr = err.Error()
 			return m, nil
 		}
-		// Skip systemd step if systemd is unavailable
-		nextStep := stepSystemd
-		if !systemdAvailable() {
-			nextStep = stepPreview
-		}
-		return m, m.setStep(nextStep)
+		return m, m.setStep(stepPreview)
 	case "enter":
 		if m.jiraEnableCursor == 0 {
 			m.jiraEnabled = true
@@ -2458,12 +2459,7 @@ func (m *setupModel) handleJiraEnableInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) 
 				m.jiraErr = err.Error()
 				return m, nil
 			}
-			// Skip systemd step if systemd is unavailable
-			nextStep := stepSystemd
-			if !systemdAvailable() {
-				nextStep = stepPreview
-			}
-			return m, m.setStep(nextStep)
+			return m, m.setStep(stepPreview)
 		}
 	}
 	return m, nil
@@ -2508,26 +2504,7 @@ func (m *setupModel) handleJiraTextInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			m.jiraTokenEnv = value
 			m.jiraErr = ""
-			m.jiraSubStep = jiraSubStepProject
-			m.jiraInput.SetValue(m.jiraProjectKey)
-			m.jiraInput.Focus()
-		case jiraSubStepProject:
-			if value == "" {
-				m.jiraErr = "project key is required"
-				return m, nil
-			}
-			m.jiraProjectKey = strings.ToUpper(value)
-			m.jiraErr = ""
-			m.jiraSubStep = jiraSubStepLabel
-			m.jiraInput.SetValue(m.jiraLabel)
-			m.jiraInput.Focus()
-		case jiraSubStepLabel:
-			if value == "" {
-				value = "nightshift"
-			}
-			m.jiraLabel = value
-			m.jiraErr = ""
-			m.jiraSubStep = jiraSubStepRepos
+			m.jiraSubStep = jiraSubStepProjects
 			m.jiraInput.Blur()
 		case jiraSubStepMaxTickets:
 			if value == "" {
@@ -2636,6 +2613,122 @@ func (m *setupModel) handleJiraRepoInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m *setupModel) handleJiraProjectsInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.jiraProjectEditMode {
+		return m.handleJiraProjectEditInput(msg)
+	}
+	switch msg.String() {
+	case "up", "k":
+		if m.jiraProjectCursor > 0 {
+			m.jiraProjectCursor--
+		}
+	case "down", "j":
+		if m.jiraProjectCursor < len(m.jiraProjects)-1 {
+			m.jiraProjectCursor++
+		}
+	case "a":
+		m.jiraProjectEditMode = true
+		m.jiraProjectEditSubStep = 0
+		m.jiraEditProjectKey = ""
+		m.jiraEditProjectLabel = "nightshift"
+		m.jiraRepos = nil
+		m.jiraRepoCursor = 0
+		m.jiraRepoEditing = false
+		m.jiraErr = ""
+		m.jiraInput.SetValue("")
+		m.jiraInput.Placeholder = "PROJ"
+		m.jiraInput.Focus()
+	case "d":
+		if len(m.jiraProjects) > 0 {
+			m.jiraProjects = append(m.jiraProjects[:m.jiraProjectCursor], m.jiraProjects[m.jiraProjectCursor+1:]...)
+			if m.jiraProjectCursor >= len(m.jiraProjects) && m.jiraProjectCursor > 0 {
+				m.jiraProjectCursor--
+			}
+		}
+	case "enter":
+		if len(m.jiraProjects) == 0 {
+			m.jiraErr = "add at least one project"
+			return m, nil
+		}
+		m.jiraErr = ""
+		m.jiraSubStep = jiraSubStepPhases
+	}
+	return m, nil
+}
+
+func (m *setupModel) handleJiraProjectEditInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch m.jiraProjectEditSubStep {
+	case 0: // key
+		switch msg.String() {
+		case "esc":
+			m.jiraProjectEditMode = false
+			m.jiraErr = ""
+			m.jiraInput.Blur()
+		case "enter":
+			value := strings.ToUpper(strings.TrimSpace(m.jiraInput.Value()))
+			if value == "" {
+				m.jiraErr = "project key is required"
+				return m, nil
+			}
+			m.jiraEditProjectKey = value
+			m.jiraErr = ""
+			m.jiraProjectEditSubStep = 1
+			m.jiraInput.SetValue(m.jiraEditProjectLabel)
+			m.jiraInput.Placeholder = "nightshift"
+			m.jiraInput.Focus()
+		default:
+			var cmd tea.Cmd
+			m.jiraInput, cmd = m.jiraInput.Update(msg)
+			return m, cmd
+		}
+	case 1: // label
+		switch msg.String() {
+		case "esc":
+			m.jiraProjectEditSubStep = 0
+			m.jiraErr = ""
+			m.jiraInput.SetValue(m.jiraEditProjectKey)
+			m.jiraInput.Placeholder = "PROJ"
+			m.jiraInput.Focus()
+		case "enter":
+			value := strings.TrimSpace(m.jiraInput.Value())
+			if value == "" {
+				value = "nightshift"
+			}
+			m.jiraEditProjectLabel = value
+			m.jiraErr = ""
+			m.jiraProjectEditSubStep = 2
+			m.jiraInput.Blur()
+		default:
+			var cmd tea.Cmd
+			m.jiraInput, cmd = m.jiraInput.Update(msg)
+			return m, cmd
+		}
+	case 2: // repos
+		model, cmd := m.handleJiraRepoInput(msg)
+		mm := model.(*setupModel)
+		// When repos step is "done" (enter pressed with repos), it transitions to jiraSubStepPhases.
+		// Intercept that and instead finalise the project.
+		if mm.jiraSubStep == jiraSubStepPhases {
+			// Revert the substep change — we handle the transition ourselves.
+			mm.jiraSubStep = jiraSubStepProjects
+			// Append the new project.
+			mm.jiraProjects = append(mm.jiraProjects, jiraProjectEntry{
+				Key:   mm.jiraEditProjectKey,
+				Label: mm.jiraEditProjectLabel,
+				Repos: append([]jiraRepoEntry(nil), mm.jiraRepos...),
+			})
+			mm.jiraProjectCursor = len(mm.jiraProjects) - 1
+			mm.jiraProjectEditMode = false
+			mm.jiraProjectEditSubStep = 0
+			mm.jiraRepos = nil
+			mm.jiraRepoCursor = 0
+			mm.jiraErr = ""
+		}
+		return mm, cmd
+	}
+	return m, nil
+}
+
 func (m *setupModel) handleJiraPhaseInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "up", "k":
@@ -2682,10 +2775,9 @@ func (m *setupModel) handleJiraPingInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.jiraErr = err.Error()
 			return m, nil
 		}
-		// Skip systemd step if systemd is unavailable
-		nextStep := stepSystemd
-		if !systemdAvailable() {
-			nextStep = stepPreview
+		nextStep := stepPreview
+		if m.jiraEnabled && systemdAvailable() {
+			nextStep = stepSystemd
 		}
 		return m, m.setStep(nextStep)
 	}
@@ -2713,6 +2805,9 @@ func (m *setupModel) handleSystemdInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "y", "Y":
 			m.systemdCursor = 0
 			m.systemdSubStep = 1
+			m.systemdInput.SetValue(m.systemdOnCalendar)
+			m.systemdInput.Placeholder = "*-*-* 22:00:00"
+			m.systemdInput.Focus()
 		case "n", "N":
 			m.cfg.Systemd.Enabled = false
 			if err := writeGlobalConfigToPath(m.cfg, m.configPath); err != nil {
@@ -2723,6 +2818,9 @@ func (m *setupModel) handleSystemdInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "enter":
 			if m.systemdCursor == 0 {
 				m.systemdSubStep = 1
+				m.systemdInput.SetValue(m.systemdOnCalendar)
+				m.systemdInput.Placeholder = "*-*-* 22:00:00"
+				m.systemdInput.Focus()
 			} else {
 				m.cfg.Systemd.Enabled = false
 				if err := writeGlobalConfigToPath(m.cfg, m.configPath); err != nil {
@@ -2732,35 +2830,12 @@ func (m *setupModel) handleSystemdInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, m.setStep(stepPreview)
 			}
 		}
-	case 1: // mode prompt: schedule vs continuous
-		switch msg.String() {
-		case "up":
-			if m.systemdCursor > 0 {
-				m.systemdCursor--
-			}
-		case "down":
-			if m.systemdCursor < 1 {
-				m.systemdCursor++
-			}
-		case "enter":
-			if m.systemdCursor == 0 {
-				m.systemdMode = "schedule"
-				m.systemdCursor = 0
-				m.systemdSubStep = 2
-				m.systemdInput.SetValue(m.systemdOnCalendar)
-				m.systemdInput.Placeholder = "*-*-* 22:00:00"
-				m.systemdInput.Focus()
-			} else {
-				m.systemdMode = "continuous"
-				return m, m.applyAndInstallSystemd()
-			}
-		}
-	case 2: // OnCalendar prompt
+	case 1: // OnCalendar prompt
 		switch msg.String() {
 		case "esc":
 			m.systemdErr = ""
 			m.systemdInput.Blur()
-			m.systemdSubStep = 1
+			m.systemdSubStep = 0
 			m.systemdCursor = 0
 		case "enter":
 			val := strings.TrimSpace(m.systemdInput.Value())
@@ -2785,7 +2860,6 @@ func (m *setupModel) handleSystemdInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // applyAndInstallSystemd writes systemd config and installs units.
 func (m *setupModel) applyAndInstallSystemd() tea.Cmd {
 	m.cfg.Systemd.Enabled = true
-	m.cfg.Systemd.Mode = m.systemdMode
 	m.cfg.Systemd.OnCalendar = m.systemdOnCalendar
 	if err := writeGlobalConfigToPath(m.cfg, m.configPath); err != nil {
 		m.systemdErr = err.Error()
@@ -2820,17 +2894,6 @@ func renderSystemdStep(b *strings.Builder, m *setupModel) {
 		}
 		b.WriteString("\nUse ↑/↓ to select, Enter to confirm, or press y/n.\n")
 	case 1:
-		b.WriteString("Run mode:\n\n")
-		options := []string{"schedule (timer-based, recommended)", "continuous (always running)"}
-		for i, opt := range options {
-			cursor := " "
-			if i == m.systemdCursor {
-				cursor = ">"
-			}
-			fmt.Fprintf(b, " %s %s\n", cursor, opt)
-		}
-		b.WriteString("\nUse ↑/↓ to select, Enter to confirm.\n")
-	case 2:
 		b.WriteString("OnCalendar schedule:\n\n")
 		b.WriteString(m.systemdInput.View() + "\n")
 		if m.systemdErr != "" {
@@ -2850,16 +2913,28 @@ func (m *setupModel) applyJiraConfig() {
 		return
 	}
 
-	repos := make([]jiraconfig.RepoConfig, 0, len(m.jiraRepos))
-	for _, r := range m.jiraRepos {
-		branch := r.BaseBranch
-		if branch == "" {
-			branch = "main"
+	projects := make([]jiraconfig.ProjectConfig, 0, len(m.jiraProjects))
+	for _, jp := range m.jiraProjects {
+		repos := make([]jiraconfig.RepoConfig, 0, len(jp.Repos))
+		for _, r := range jp.Repos {
+			branch := r.BaseBranch
+			if branch == "" {
+				branch = "main"
+			}
+			repos = append(repos, jiraconfig.RepoConfig{
+				Name:       repoNameFromURL(r.URL),
+				URL:        r.URL,
+				BaseBranch: branch,
+			})
 		}
-		repos = append(repos, jiraconfig.RepoConfig{
-			Name:       repoNameFromURL(r.URL),
-			URL:        r.URL,
-			BaseBranch: branch,
+		label := jp.Label
+		if label == "" {
+			label = "nightshift"
+		}
+		projects = append(projects, jiraconfig.ProjectConfig{
+			Key:   jp.Key,
+			Label: label,
+			Repos: repos,
 		})
 	}
 
@@ -2886,17 +2961,13 @@ func (m *setupModel) applyJiraConfig() {
 		Site:          m.jiraSite,
 		Email:         m.jiraEmail,
 		TokenEnv:      m.jiraTokenEnv,
-		Label:         m.jiraLabel,
 		MaxTickets:    m.jiraMaxTickets,
 		BudgetEnabled: true,
-		Projects: []jiraconfig.ProjectConfig{{
-			Key:   m.jiraProjectKey,
-			Repos: repos,
-		}},
-		Validation: phases[0],
-		Plan:       phases[1],
-		Implement:  phases[2],
-		ReviewFix:  phases[3],
+		Projects:      projects,
+		Validation:    phases[0],
+		Plan:          phases[1],
+		Implement:     phases[2],
+		ReviewFix:     phases[3],
 	}
 }
 
@@ -2927,12 +2998,6 @@ func jiraProjectsToMaps(projects []jiraconfig.ProjectConfig) []map[string]interf
 		}
 		if proj.Label != "" {
 			p["label"] = proj.Label
-		}
-		if proj.RequireActiveSprint {
-			p["require_active_sprint"] = proj.RequireActiveSprint
-		}
-		if proj.BoardType != "" {
-			p["board_type"] = proj.BoardType
 		}
 		if proj.BoardID > 0 {
 			p["board_id"] = proj.BoardID
@@ -3021,28 +3086,8 @@ func renderJiraStep(b *strings.Builder, m *setupModel) {
 		}
 		b.WriteString("\nPress Enter to continue.\n")
 
-	case jiraSubStepProject:
-		b.WriteString("Jira project key\n")
-		b.WriteString(styleNote.Render("e.g. PROJ or VC"))
-		b.WriteString("\n\n")
-		b.WriteString(m.jiraInput.View() + "\n")
-		if m.jiraErr != "" {
-			b.WriteString(styleWarn.Render("Error: "+m.jiraErr) + "\n")
-		}
-		b.WriteString("\nPress Enter to continue.\n")
-
-	case jiraSubStepLabel:
-		b.WriteString("Ticket label filter\n")
-		b.WriteString(styleNote.Render("Only tickets with this label will be processed (default: nightshift)"))
-		b.WriteString("\n\n")
-		b.WriteString(m.jiraInput.View() + "\n")
-		if m.jiraErr != "" {
-			b.WriteString(styleWarn.Render("Error: "+m.jiraErr) + "\n")
-		}
-		b.WriteString("\nPress Enter to continue.\n")
-
-	case jiraSubStepRepos:
-		renderJiraReposStep(b, m)
+	case jiraSubStepProjects:
+		renderJiraProjectsStep(b, m)
 
 	case jiraSubStepPhases:
 		renderJiraPhasesStep(b, m)
@@ -3073,6 +3118,55 @@ func renderJiraStep(b *strings.Builder, m *setupModel) {
 		if !m.jiraPinging {
 			b.WriteString("\nPress Enter to save and continue.\n")
 		}
+	}
+}
+
+func renderJiraProjectsStep(b *strings.Builder, m *setupModel) {
+	if m.jiraProjectEditMode {
+		renderJiraProjectEditStep(b, m)
+		return
+	}
+	b.WriteString("Jira projects\n")
+	b.WriteString("Use ↑/↓ to navigate, 'a' to add, 'd' to delete.\n\n")
+	if len(m.jiraProjects) == 0 {
+		b.WriteString(styleDim.Render("  (no projects configured)") + "\n")
+	}
+	for i, proj := range m.jiraProjects {
+		cursor := " "
+		if i == m.jiraProjectCursor {
+			cursor = ">"
+		}
+		repoCount := len(proj.Repos)
+		fmt.Fprintf(b, " %s %s  [label: %s, %d repo(s)]\n", cursor, proj.Key, proj.Label, repoCount)
+	}
+	if m.jiraErr != "" {
+		b.WriteString("\n" + styleWarn.Render("Error: "+m.jiraErr) + "\n")
+	}
+	b.WriteString("\nPress Enter to continue.\n")
+}
+
+func renderJiraProjectEditStep(b *strings.Builder, m *setupModel) {
+	switch m.jiraProjectEditSubStep {
+	case 0:
+		b.WriteString("Project key\n")
+		b.WriteString(styleNote.Render("e.g. PROJ or VC"))
+		b.WriteString("\n\n")
+		b.WriteString(m.jiraInput.View() + "\n")
+		if m.jiraErr != "" {
+			b.WriteString(styleWarn.Render("Error: "+m.jiraErr) + "\n")
+		}
+		b.WriteString("\nPress Enter to continue, Esc to cancel.\n")
+	case 1:
+		b.WriteString("Ticket label filter\n")
+		b.WriteString(styleNote.Render("Only tickets with this label will be processed (default: nightshift)"))
+		b.WriteString("\n\n")
+		b.WriteString(m.jiraInput.View() + "\n")
+		if m.jiraErr != "" {
+			b.WriteString(styleWarn.Render("Error: "+m.jiraErr) + "\n")
+		}
+		b.WriteString("\nPress Enter to continue, Esc to go back.\n")
+	case 2:
+		renderJiraReposStep(b, m)
 	}
 }
 

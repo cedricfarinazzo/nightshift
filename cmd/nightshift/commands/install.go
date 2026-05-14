@@ -601,7 +601,6 @@ func installSystemdJiraWithExec(cfg *config.Config, run execRunner, w io.Writer)
 		return fmt.Errorf("creating systemd directory: %w", err)
 	}
 
-	// Write service unit (always — both schedule and continuous modes need it).
 	servicePath := filepath.Join(systemdDir, systemdJiraServiceName)
 	service := generateSystemdJiraService()
 	if err := os.WriteFile(servicePath, []byte(service), 0644); err != nil {
@@ -609,27 +608,20 @@ func installSystemdJiraWithExec(cfg *config.Config, run execRunner, w io.Writer)
 	}
 	fmt.Fprintf(w, "Installed %s\n", servicePath)
 
-	// Write timer unit only in schedule mode.
-	mode := strings.ToLower(cfg.Systemd.Mode)
-	if mode == "" {
-		mode = "schedule"
+	onCalendar := cfg.Systemd.OnCalendar
+	if onCalendar == "" {
+		onCalendar = "*-*-* 22:00:00"
 	}
-	if mode == "schedule" {
-		onCalendar := cfg.Systemd.OnCalendar
-		if onCalendar == "" {
-			onCalendar = "*-*-* 22:00:00"
-		}
-		// Reject OnCalendar values containing newlines to prevent injection
-		if strings.ContainsAny(onCalendar, "\r\n") {
-			return fmt.Errorf("OnCalendar value contains invalid characters")
-		}
-		timerPath := filepath.Join(systemdDir, systemdJiraTimerName)
-		timer := generateSystemdJiraTimer(onCalendar)
-		if err := os.WriteFile(timerPath, []byte(timer), 0644); err != nil {
-			return fmt.Errorf("writing jira timer file: %w", err)
-		}
-		fmt.Fprintf(w, "Installed %s\n", timerPath)
+	// Reject OnCalendar values containing newlines to prevent injection
+	if strings.ContainsAny(onCalendar, "\r\n") {
+		return fmt.Errorf("OnCalendar value contains invalid characters")
 	}
+	timerPath := filepath.Join(systemdDir, systemdJiraTimerName)
+	timer := generateSystemdJiraTimer(onCalendar)
+	if err := os.WriteFile(timerPath, []byte(timer), 0644); err != nil {
+		return fmt.Errorf("writing jira timer file: %w", err)
+	}
+	fmt.Fprintf(w, "Installed %s\n", timerPath)
 
 	// Reload systemd so it picks up the new units.
 	if err := run("systemctl", "--user", "daemon-reload"); err != nil {
@@ -637,13 +629,8 @@ func installSystemdJiraWithExec(cfg *config.Config, run execRunner, w io.Writer)
 	}
 
 	fmt.Fprintf(w, "systemd daemon reloaded.\n")
-	if mode == "schedule" {
-		fmt.Fprintf(w, "To enable and start:\n")
-		fmt.Fprintf(w, "  systemctl --user enable --now nightshift-jira.timer\n")
-	} else {
-		fmt.Fprintf(w, "To enable and start:\n")
-		fmt.Fprintf(w, "  systemctl --user enable --now nightshift-jira.service\n")
-	}
+	fmt.Fprintf(w, "To enable and start:\n")
+	fmt.Fprintf(w, "  systemctl --user enable --now nightshift-jira.timer\n")
 	return nil
 }
 
@@ -677,10 +664,8 @@ After=network-online.target
 Wants=network-online.target
 
 [Service]
-Type=simple
+Type=oneshot
 ExecStart=%s
-Restart=on-failure
-RestartSec=60s
 Environment=HOME=%%h
 EnvironmentFile=-%%h/.config/nightshift/env
 StandardOutput=journal

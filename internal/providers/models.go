@@ -46,9 +46,11 @@ func FetchAnthropicModels(ctx context.Context, apiKey string) ([]string, error) 
 		}
 
 		var page struct {
-			Data    []struct{ ID string `json:"id"` } `json:"data"`
-			HasMore bool                              `json:"has_more"`
-			LastID  string                            `json:"last_id"`
+			Data []struct {
+				ID string `json:"id"`
+			} `json:"data"`
+			HasMore bool   `json:"has_more"`
+			LastID  string `json:"last_id"`
 		}
 		if err := json.NewDecoder(resp.Body).Decode(&page); err != nil {
 			_ = resp.Body.Close()
@@ -93,7 +95,9 @@ func FetchOpenAIModels(ctx context.Context, apiKey string) ([]string, error) {
 	}
 
 	var body struct {
-		Data []struct{ ID string `json:"id"` } `json:"data"`
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
 		return nil, fmt.Errorf("decode openai models: %w", err)

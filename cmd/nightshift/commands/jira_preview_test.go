@@ -120,11 +120,11 @@ func TestRenderJiraPreviewText_ReviewTickets(t *testing.T) {
 
 func TestRenderJiraPreviewText_BudgetSummary(t *testing.T) {
 	allowance := &budget.AllowanceResult{
-		HourlyCapacity:   0.695,
+		HourlyCapacity:    0.695,
 		BottleneckUsedPct: 30.5,
-		BottleneckWindow: "seven_day",
-		Source:           "calibrated",
-		MaxPercent:       80,
+		BottleneckWindow:  "seven_day",
+		Source:            "calibrated",
+		MaxPercent:        80,
 	}
 	result := &jiraPreviewResult{
 		GeneratedAt:  time.Now(),
@@ -155,11 +155,11 @@ func TestRenderJiraPreviewText_BudgetSection(t *testing.T) {
 		JiraProject:  "PROJ",
 		ConnectionOK: true,
 		Budget: &budget.AllowanceResult{
-			HourlyCapacity:   0.695,
+			HourlyCapacity:    0.695,
 			BottleneckUsedPct: 30.5,
-			BottleneckWindow: "seven_day",
-			Source:           "calibrated",
-			MaxPercent:       80,
+			BottleneckWindow:  "seven_day",
+			Source:            "calibrated",
+			MaxPercent:        80,
 		},
 		Phases: []jiraPreviewPhase{},
 	}

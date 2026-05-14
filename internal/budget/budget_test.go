@@ -61,7 +61,6 @@ func (m *mockCodexProvider) GetResetTime(mode string) (time.Time, error) {
 	return m.resetTime, m.err
 }
 
-
 func TestCheckProviders_OK(t *testing.T) {
 	cfg := &config.Config{
 		Budget: config.BudgetConfig{
@@ -299,90 +298,90 @@ func TestComputeWindowCapacity(t *testing.T) {
 		wantMax     float64 // capacity should be <= wantMax
 	}{
 		{
-			name: "exhausted window",
+			name:    "exhausted window",
 			usedPct: 95, maxPct: 90, windowHours: 5, resetHours: 1,
 			wantMin: 0, wantMax: 0,
 		},
 		{
-			name: "nearly depleted but expiring — gets boost",
+			name:    "nearly depleted but expiring — gets boost",
 			usedPct: 80, maxPct: 90, windowHours: 5, resetHours: 0.5,
 			wantMin: 1.0, wantMax: 1.0, // expiring fires first: (10/90)*5/0.5=1.11 → capped 1.0
 		},
 		{
-			name: "expiring with capacity — boost",
+			name:    "expiring with capacity — boost",
 			usedPct: 50, maxPct: 90, windowHours: 5, resetHours: 0.5,
 			wantMin: 0.9, wantMax: 1.0, // capped at 1.0
 		},
 		{
-			name: "behind pace — boost",
+			name:    "behind pace — boost",
 			usedPct: 20, maxPct: 90, windowHours: 5, resetHours: 2,
 			wantMin: 0.7, wantMax: 1.0,
 		},
 		{
-			name: "on pace",
+			name:    "on pace",
 			usedPct: 45, maxPct: 90, windowHours: 5, resetHours: 2.5,
 			wantMin: 0.45, wantMax: 0.6,
 		},
 		{
-			name: "weekly on pace",
+			name:    "weekly on pace",
 			usedPct: 46, maxPct: 90, windowHours: 168, resetHours: 83,
 			wantMin: 0.45, wantMax: 0.55,
 		},
 		{
-			name: "weekly nearly done but expiring — gets boost",
+			name:    "weekly nearly done but expiring — gets boost",
 			usedPct: 85, maxPct: 90, windowHours: 168, resetHours: 10,
 			wantMin: 0.9, wantMax: 1.0, // expiring (10h < 42h): (5/90)*168/10=0.93
 		},
 		{
-			name: "nearly depleted with time to go — no boost",
+			name:    "nearly depleted with time to go — no boost",
 			usedPct: 80, maxPct: 90, windowHours: 5, resetHours: 2,
 			wantMin: 0, wantMax: 0.12, // not expiring (2h > 1.25h): 10/90 = 11.1%
 		},
 		// Boundary: remaining exactly at nearlyDepletedThreshold (15.0) — NOT < 15, goes to pace check.
 		{
-			name: "remaining exactly at threshold — pace branch",
+			name:    "remaining exactly at threshold — pace branch",
 			usedPct: 75, maxPct: 90, windowHours: 5, resetHours: 2,
 			wantMin: 0.15, wantMax: 1.0, // 15/90=16.7% × paceFactor; pace check fires, not nearly-depleted
 		},
 		// Boundary: remaining just below threshold (14.9) — nearly-depleted fires.
 		{
-			name: "remaining just below threshold — nearly-depleted branch",
+			name:    "remaining just below threshold — nearly-depleted branch",
 			usedPct: 75.1, maxPct: 90, windowHours: 5, resetHours: 2,
 			wantMin: 0, wantMax: 0.167, // not expiring; 14.9/90 = 16.6% raw fraction
 		},
 		// Boundary: resetHours exactly at windowHours/4 — NOT < window/4, goes to pace check.
 		{
-			name: "reset exactly at window/4 boundary — pace branch",
+			name:    "reset exactly at window/4 boundary — pace branch",
 			usedPct: 45, maxPct: 90, windowHours: 5, resetHours: 1.25,
 			wantMin: 0.4, wantMax: 1.0, // (5/4=1.25): not expiring, pace fires
 		},
 		// Boundary: resetHours just below windowHours/4 — expiring fires.
 		{
-			name: "reset just below window/4 — expiring branch",
+			name:    "reset just below window/4 — expiring branch",
 			usedPct: 45, maxPct: 90, windowHours: 5, resetHours: 1.24,
 			wantMin: 0.9, wantMax: 1.0, // expiring: (45/90)*5/1.24 ≈ 2.0 → capped 1.0
 		},
 		// Normal: ahead of pace (headroomRate > idealRate) — no boost.
 		{
-			name: "ahead of pace — no boost",
+			name:    "ahead of pace — no boost",
 			usedPct: 10, maxPct: 90, windowHours: 5, resetHours: 4,
 			wantMin: 0.85, wantMax: 0.9, // headroom=80/4=20 > ideal=90/5=18; paceFactor=1; (80/90)=88.9%
 		},
 		// exhausted exactly at limit.
 		{
-			name: "used equals max — exhausted",
+			name:    "used equals max — exhausted",
 			usedPct: 90, maxPct: 90, windowHours: 5, resetHours: 1,
 			wantMin: 0, wantMax: 0,
 		},
 		// zero resetHours guard: should not divide by zero.
 		{
-			name: "zero resetHours — guarded",
+			name:    "zero resetHours — guarded",
 			usedPct: 50, maxPct: 90, windowHours: 5, resetHours: 0,
 			wantMin: 0.9, wantMax: 1.0, // resetHours clamped to 0.01 → expiring → capped 1.0
 		},
 		// monthly window (720h), well within pace.
 		{
-			name: "monthly window on pace",
+			name:    "monthly window on pace",
 			usedPct: 45, maxPct: 90, windowHours: 720, resetHours: 360,
 			wantMin: 0.45, wantMax: 0.6, // symmetric midpoint, pace factor ≈ 1
 		},

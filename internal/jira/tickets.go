@@ -49,18 +49,12 @@ const searchPageSize = 50
 const acKeyword = "acceptance criteria"
 
 // buildTodoJQL constructs the JQL query for FetchTodoTickets.
-// When proj.RequireActiveSprint is true, sprint filtering depends on BoardType:
-//   - "scrum" (default): AND sprint in openSprints() — excludes backlog and unstarted sprints
-//   - "kanban" + BoardID > 0: no sprint filter needed — FetchTodoTickets uses the Agile board API
-//   - "kanban" + no BoardID: no sprint filter — falls back to label-only JQL
+// Builds: project = X AND statusCategory = "To Do" AND labels = Y [AND issuetype = Z] ORDER BY created ASC
 func buildTodoJQL(proj ProjectConfig, issueType string) string {
 	jql := fmt.Sprintf(
 		`project = "%s" AND statusCategory = "To Do" AND labels = "%s"`,
 		proj.Key, proj.Label,
 	)
-	if proj.RequireActiveSprint && proj.BoardType != "kanban" {
-		jql += ` AND sprint in openSprints()`
-	}
 	if issueType != "" {
 		jql += fmt.Sprintf(` AND issuetype = "%s"`, issueType)
 	}
@@ -69,59 +63,28 @@ func buildTodoJQL(proj ProjectConfig, issueType string) string {
 
 // FetchTodoTickets fetches issues in the "To Do" status category filtered by the project's label.
 // If issueType is non-empty, further filters by issue type (case-insensitive).
-// For kanban projects with a board_id configured and require_active_sprint=true, uses the
-// Agile board API so only board items (not backlog) are returned.
+// When proj.BoardID > 0, tickets in the board's backlog are excluded from results.
 func (c *Client) FetchTodoTickets(ctx context.Context, proj ProjectConfig, issueType string) ([]Ticket, error) {
-	if proj.BoardType == "kanban" && proj.BoardID > 0 && proj.RequireActiveSprint {
-		return c.fetchKanbanBoardTickets(ctx, proj, issueType)
-	}
 	jql := buildTodoJQL(proj, issueType)
 	tickets, err := c.fetchTickets(ctx, jql)
 	if err != nil {
 		return nil, err
 	}
-	return c.fetchParentDescriptions(ctx, tickets), nil
-}
-
-// fetchKanbanBoardTickets uses the Agile board API to return only issues on the
-// Kanban board (not in the backlog), filtered by label and status category.
-//
-// The Jira board/{id}/issue endpoint returns ALL issues associated with the board
-// including backlog items. To get only "on board" (non-backlog) items we subtract
-// the keys returned by board/{id}/backlog.
-func (c *Client) fetchKanbanBoardTickets(ctx context.Context, proj ProjectConfig, issueType string) ([]Ticket, error) {
-	jql := fmt.Sprintf(`statusCategory = "To Do" AND labels = "%s"`, proj.Label)
-	if issueType != "" {
-		jql += fmt.Sprintf(` AND issuetype = "%s"`, issueType)
-	}
-	opts := &model.IssueOptionScheme{
-		JQL:    jql,
-		Fields: []string{"summary", "description", "comment", "labels", "status", "issuelinks", "reporter", "assignee", "issuetype", "parent"},
-	}
-
-	// Collect backlog keys so we can exclude them.
-	backlogKeys, err := c.fetchBoardBacklogKeys(ctx, proj.BoardID, opts)
-	if err != nil {
-		return nil, err
-	}
-
-	const pageSize = 50
-	var tickets []Ticket
-	startAt := 0
-	for {
-		page, _, err := c.agile.Board.Issues(ctx, proj.BoardID, opts, startAt, pageSize)
-		if err != nil {
-			return nil, fmt.Errorf("jira: board %d issues: %w", proj.BoardID, err)
+	if proj.BoardID > 0 {
+		opts := &model.IssueOptionScheme{
+			Fields: []string{"summary"},
 		}
-		for _, issue := range page.Issues {
-			if !backlogKeys[issue.Key] {
-				tickets = append(tickets, issueToTicketV2(issue))
+		backlogKeys, err := c.fetchBoardBacklogKeys(ctx, proj.BoardID, opts)
+		if err != nil {
+			return nil, err
+		}
+		filtered := tickets[:0]
+		for _, t := range tickets {
+			if !backlogKeys[t.Key] {
+				filtered = append(filtered, t)
 			}
 		}
-		startAt += len(page.Issues)
-		if len(page.Issues) < pageSize {
-			break
-		}
+		tickets = filtered
 	}
 	return c.fetchParentDescriptions(ctx, tickets), nil
 }

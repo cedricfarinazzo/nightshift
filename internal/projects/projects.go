@@ -156,7 +156,6 @@ func SortByPriority(projects []Project) []Project {
 	return sorted
 }
 
-
 // FilterProcessedToday removes projects that were already processed today.
 func FilterProcessedToday(projects []Project, s *state.State) []Project {
 	var filtered []Project

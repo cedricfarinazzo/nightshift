@@ -48,11 +48,11 @@ type AnthropicClient struct {
 	store      CredentialStore
 	userAgent  string
 
-	cacheMu     sync.Mutex
-	cache       map[string]cacheEntry
-	cacheTTL    time.Duration
-	clockFn     func() time.Time
-	inFlight    singleflight.Group
+	cacheMu  sync.Mutex
+	cache    map[string]cacheEntry
+	cacheTTL time.Duration
+	clockFn  func() time.Time
+	inFlight singleflight.Group
 }
 
 // Option configures an AnthropicClient.

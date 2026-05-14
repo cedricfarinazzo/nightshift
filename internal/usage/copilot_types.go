@@ -20,15 +20,15 @@ type CopilotQuotaMap map[string]CopilotQuotaSnapshot
 // copilotAPIResponse is the raw JSON from api.github.com/copilot_internal/user.
 // Both premium and free plan fields are present; normalize() unifies them.
 type copilotAPIResponse struct {
-	Login          string                     `json:"login"`
-	CopilotPlan    string                     `json:"copilot_plan"`
-	AccessTypeSKU  string                     `json:"access_type_sku"`
-	QuotaResetDate string                     `json:"quota_reset_date"`
+	Login          string `json:"login"`
+	CopilotPlan    string `json:"copilot_plan"`
+	AccessTypeSKU  string `json:"access_type_sku"`
+	QuotaResetDate string `json:"quota_reset_date"`
 	// Premium plan
 	QuotaSnapshots map[string]CopilotQuotaSnapshot `json:"quota_snapshots"`
 	// Free plan
-	LimitedUserQuotas map[string]int          `json:"limited_user_quotas"`
-	MonthlyQuotas     map[string]int          `json:"monthly_quotas"`
+	LimitedUserQuotas map[string]int `json:"limited_user_quotas"`
+	MonthlyQuotas     map[string]int `json:"monthly_quotas"`
 }
 
 // CopilotUserResponse is the normalized, caller-facing response.

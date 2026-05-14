@@ -107,7 +107,6 @@ func TestInstallSystemdJira_writesFiles(t *testing.T) {
 	cfg := &config.Config{
 		Systemd: config.SystemdConfig{
 			Enabled:    true,
-			Mode:       "schedule",
 			OnCalendar: "*-*-* 22:00:00",
 		},
 	}
@@ -129,14 +128,14 @@ func TestInstallSystemdJira_writesFiles(t *testing.T) {
 	}
 }
 
-func TestInstallSystemdJira_continuousMode_noTimer(t *testing.T) {
+func TestInstallSystemdJira_alwaysWritesTimer(t *testing.T) {
 	tmpHome := t.TempDir()
 	t.Setenv("HOME", tmpHome)
 
 	cfg := &config.Config{
 		Systemd: config.SystemdConfig{
-			Enabled: true,
-			Mode:    "continuous",
+			Enabled:    true,
+			OnCalendar: "*-*-* 23:00:00",
 		},
 	}
 	if err := installSystemdJiraWithExec(cfg, fakeExecCommand, io.Discard); err != nil {
@@ -147,7 +146,7 @@ func TestInstallSystemdJira_continuousMode_noTimer(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(systemdDir, systemdJiraServiceName)); err != nil {
 		t.Errorf("expected service file to exist")
 	}
-	if _, err := os.Stat(filepath.Join(systemdDir, systemdJiraTimerName)); err == nil {
-		t.Errorf("timer file must NOT exist in continuous mode")
+	if _, err := os.Stat(filepath.Join(systemdDir, systemdJiraTimerName)); err != nil {
+		t.Errorf("expected timer file to exist")
 	}
 }

@@ -178,14 +178,14 @@ func printBudgetJSON(cfg *config.Config, providerList []string, mgr *budget.Mana
 	}
 
 	type ProviderJSON struct {
-		Provider        string      `json:"provider"`
-		Source          string      `json:"source"`
-		Quotas          []QuotaJSON `json:"quotas,omitempty"`
-		Credits         *float64    `json:"credits,omitempty"`
-		UsedPct         float64     `json:"used_pct"`
-		HourlyCapacity  float64     `json:"hourly_capacity"`
-		BottleneckWindow string     `json:"bottleneck_window,omitempty"`
-		ResetTime       *time.Time  `json:"reset_time,omitempty"`
+		Provider         string      `json:"provider"`
+		Source           string      `json:"source"`
+		Quotas           []QuotaJSON `json:"quotas,omitempty"`
+		Credits          *float64    `json:"credits,omitempty"`
+		UsedPct          float64     `json:"used_pct"`
+		HourlyCapacity   float64     `json:"hourly_capacity"`
+		BottleneckWindow string      `json:"bottleneck_window,omitempty"`
+		ResetTime        *time.Time  `json:"reset_time,omitempty"`
 	}
 
 	type OutputJSON struct {
@@ -231,7 +231,6 @@ func printBudgetJSON(cfg *config.Config, providerList []string, mgr *budget.Mana
 	return nil
 }
 
-
 func formatTokens64(tokens int64) string {
 	if tokens >= 1000000 {
 		return fmt.Sprintf("%.1fM", float64(tokens)/1000000)
@@ -241,6 +240,7 @@ func formatTokens64(tokens int64) string {
 	}
 	return fmt.Sprintf("%d", tokens)
 }
+
 // providerDisplayName returns a human-friendly provider name.
 func providerDisplayName(provName string) string {
 	switch provName {

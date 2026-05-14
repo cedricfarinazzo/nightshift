@@ -10,12 +10,12 @@ func ptrI64(v int64) *int64    { return &v }
 
 func TestExtractAnthropicCost(t *testing.T) {
 	tests := []struct {
-		name         string
-		resp         AnthropicQuotaResponse
-		wantNil      bool
-		wantTotal    *float64
-		wantUsed     *float64
-		wantRem      *float64
+		name      string
+		resp      AnthropicQuotaResponse
+		wantNil   bool
+		wantTotal *float64
+		wantUsed  *float64
+		wantRem   *float64
 	}{
 		{
 			name:    "empty response",
@@ -136,11 +136,11 @@ func TestExtractCodexCost(t *testing.T) {
 
 func TestExtractCopilotCost(t *testing.T) {
 	tests := []struct {
-		name         string
-		resp         *CopilotUserResponse
-		wantNil      bool
-		wantOverage  int
-		wantRem      float64
+		name        string
+		resp        *CopilotUserResponse
+		wantNil     bool
+		wantOverage int
+		wantRem     float64
 	}{
 		{name: "nil resp", resp: nil, wantNil: true},
 		{name: "no quotas", resp: &CopilotUserResponse{Quotas: CopilotQuotaMap{}}, wantNil: true},

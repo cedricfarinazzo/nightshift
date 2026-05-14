@@ -5,12 +5,12 @@ import "time"
 // CostSnapshot holds monetary cost data captured from a provider API at a point in time.
 type CostSnapshot struct {
 	Provider     string
-	TotalBudget  *float64  // monthly limit (Anthropic) or nil
-	Used         *float64  // credits consumed (Anthropic used_credits)
-	Remaining    *float64  // credits remaining (Codex credits.balance)
-	OverageCount int       // Copilot overage_count
-	Currency     string    // "USD" or "credits"
-	Period       string    // "monthly", "balance"
+	TotalBudget  *float64 // monthly limit (Anthropic) or nil
+	Used         *float64 // credits consumed (Anthropic used_credits)
+	Remaining    *float64 // credits remaining (Codex credits.balance)
+	OverageCount int      // Copilot overage_count
+	Currency     string   // "USD" or "credits"
+	Period       string   // "monthly", "balance"
 	CapturedAt   time.Time
 }
 

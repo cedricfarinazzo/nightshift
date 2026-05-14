@@ -476,7 +476,6 @@ func runScheduledTasks(ctx context.Context, cfg *config.Config, database *db.DB,
 	return nil
 }
 
-
 func runDaemonStop(cmd *cobra.Command, args []string) error {
 	running, pid := isDaemonRunning()
 	if !running {

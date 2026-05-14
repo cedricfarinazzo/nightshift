@@ -35,25 +35,25 @@ type TaskResult struct {
 
 // RunResults holds all results from a nightshift run.
 type RunResults struct {
-	Date            time.Time             `json:"date"`
-	UsedBudget      int                   `json:"used_budget"`
-	Tasks           []TaskResult          `json:"tasks"`
-	StartTime       time.Time             `json:"start_time"`
-	EndTime         time.Time             `json:"end_time"`
-	LogPath         string                `json:"log_path,omitempty"`
-	CostSnapshots   []usage.CostSnapshot  `json:"cost_snapshots,omitempty"`
+	Date          time.Time            `json:"date"`
+	UsedBudget    int                  `json:"used_budget"`
+	Tasks         []TaskResult         `json:"tasks"`
+	StartTime     time.Time            `json:"start_time"`
+	EndTime       time.Time            `json:"end_time"`
+	LogPath       string               `json:"log_path,omitempty"`
+	CostSnapshots []usage.CostSnapshot `json:"cost_snapshots,omitempty"`
 }
 
 // Summary represents a generated morning summary.
 type Summary struct {
-	Date            time.Time
-	Content         string
-	ProjectCounts   map[string]int
-	CompletedTasks  []TaskResult
-	SkippedTasks    []TaskResult
-	FailedTasks     []TaskResult
-	BudgetUsed int
-	CostSnapshots   []usage.CostSnapshot
+	Date           time.Time
+	Content        string
+	ProjectCounts  map[string]int
+	CompletedTasks []TaskResult
+	SkippedTasks   []TaskResult
+	FailedTasks    []TaskResult
+	BudgetUsed     int
+	CostSnapshots  []usage.CostSnapshot
 }
 
 // CostSnapshotProvider retrieves cost snapshots from persistent storage for delta calculations.
@@ -89,13 +89,13 @@ func (g *Generator) Generate(results *RunResults) (*Summary, error) {
 	}
 
 	summary := &Summary{
-		Date:            results.Date,
-		BudgetUsed:    results.UsedBudget,
-		ProjectCounts:   make(map[string]int),
-		CompletedTasks:  make([]TaskResult, 0),
-		SkippedTasks:    make([]TaskResult, 0),
-		FailedTasks:     make([]TaskResult, 0),
-		CostSnapshots:   results.CostSnapshots,
+		Date:           results.Date,
+		BudgetUsed:     results.UsedBudget,
+		ProjectCounts:  make(map[string]int),
+		CompletedTasks: make([]TaskResult, 0),
+		SkippedTasks:   make([]TaskResult, 0),
+		FailedTasks:    make([]TaskResult, 0),
+		CostSnapshots:  results.CostSnapshots,
 	}
 
 	// Categorize tasks and count by project

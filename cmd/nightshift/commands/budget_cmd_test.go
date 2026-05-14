@@ -107,7 +107,6 @@ func TestProviderDisplayName(t *testing.T) {
 	}
 }
 
-
 func TestBudgetJSONStructure(t *testing.T) {
 	// Inject a fake fetchProviderUsageFn
 	orig := fetchProviderUsageFn

@@ -438,12 +438,12 @@ type previewJSONConfigSource struct {
 }
 
 type previewJSONProviderBudget struct {
-	Provider        string  `json:"provider"`
-	HourlyCapacity  float64 `json:"hourly_capacity"`
-	BottleneckUsed  float64 `json:"bottleneck_used_pct"`
-	MaxPercent      int     `json:"max_percent"`
-	Source          string  `json:"source"`
-	Error           string  `json:"error,omitempty"`
+	Provider       string  `json:"provider"`
+	HourlyCapacity float64 `json:"hourly_capacity"`
+	BottleneckUsed float64 `json:"bottleneck_used_pct"`
+	MaxPercent     int     `json:"max_percent"`
+	Source         string  `json:"source"`
+	Error          string  `json:"error,omitempty"`
 }
 
 type previewJSONRun struct {

@@ -327,7 +327,6 @@ func TestClaudeProvider_GetWeeklyUsage(t *testing.T) {
 	}
 }
 
-
 func TestClaudeProvider_GetDailyStats(t *testing.T) {
 	tmpDir := t.TempDir()
 	statsPath := filepath.Join(tmpDir, "stats-cache.json")

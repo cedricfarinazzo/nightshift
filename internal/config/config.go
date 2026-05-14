@@ -33,7 +33,6 @@ type Config struct {
 // SystemdConfig defines systemd user service settings for nightshift jira run.
 type SystemdConfig struct {
 	Enabled    bool   `mapstructure:"enabled"`
-	Mode       string `mapstructure:"mode"`        // "schedule" | "continuous"
 	OnCalendar string `mapstructure:"on_calendar"` // e.g. "*-*-* 22:00:00"
 }
 
@@ -145,12 +144,12 @@ type ReportingConfig struct {
 
 // Default values for configuration.
 const (
-	DefaultMaxPercent = 90
-	DefaultLogLevel   = "info"
-	DefaultLogFormat         = "json"
-	DefaultClaudeDataPath    = "~/.claude"
-	DefaultCodexDataPath     = "~/.codex"
-	DefaultCopilotDataPath   = "~/.copilot"
+	DefaultMaxPercent      = 90
+	DefaultLogLevel        = "info"
+	DefaultLogFormat       = "json"
+	DefaultClaudeDataPath  = "~/.claude"
+	DefaultCodexDataPath   = "~/.codex"
+	DefaultCopilotDataPath = "~/.copilot"
 )
 
 // DefaultLogPath returns the default log path.
@@ -272,7 +271,6 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("jira.budget_enabled", true)
 
 	// Systemd defaults
-	v.SetDefault("systemd.mode", "schedule")
 	v.SetDefault("systemd.on_calendar", "*-*-* 22:00:00")
 }
 
@@ -317,13 +315,11 @@ func expandPath(path string) string {
 
 // Validation errors
 var (
-	ErrCronAndInterval          = errors.New("cron and interval are mutually exclusive")
+	ErrCronAndInterval   = errors.New("cron and interval are mutually exclusive")
 	ErrInvalidMaxPercent = errors.New("max_percent must be between 1 and 100")
 	ErrInvalidLogLevel   = errors.New("log level must be debug, info, warn, or error")
-	ErrInvalidLogFormat         = errors.New("log format must be json or text")
-	ErrNoSchedule               = errors.New("either cron or interval must be specified")
-
-	ErrInvalidSystemdMode           = errors.New("systemd mode must be 'schedule' or 'continuous'")
+	ErrInvalidLogFormat  = errors.New("log format must be json or text")
+	ErrNoSchedule        = errors.New("either cron or interval must be specified")
 
 	ErrCustomTaskMissingType        = errors.New("custom task: type is required")
 	ErrCustomTaskMissingName        = errors.New("custom task: name is required")
@@ -349,7 +345,6 @@ func Validate(cfg *Config) error {
 	if cfg.Budget.MaxPercent < 0 || cfg.Budget.MaxPercent > 100 {
 		return ErrInvalidMaxPercent
 	}
-
 
 	// Log level validation
 	if cfg.Logging.Level != "" {
@@ -394,14 +389,6 @@ func Validate(cfg *Config) error {
 	// Custom task validation
 	if err := validateCustomTasks(cfg.Tasks.Custom); err != nil {
 		return err
-	}
-
-	// Systemd mode validation
-	if cfg.Systemd.Enabled {
-		mode := strings.ToLower(cfg.Systemd.Mode)
-		if mode != "schedule" && mode != "continuous" {
-			return ErrInvalidSystemdMode
-		}
 	}
 
 	return nil
@@ -474,7 +461,6 @@ func normalizeBudgetConfig(cfg *Config) {
 }
 
 // Helper methods for accessing configuration
-
 
 // IsTaskEnabled checks if a task type is enabled.
 func (c *Config) IsTaskEnabled(task string) bool {

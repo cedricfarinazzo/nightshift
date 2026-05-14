@@ -11,7 +11,6 @@ import (
 	"os/exec"
 	"strings"
 	"time"
-
 )
 
 // Version is injected by the caller at startup to populate User-Agent headers.
@@ -19,8 +18,8 @@ import (
 var Version = "unknown"
 
 const (
-	defaultCopilotAPIURL = "https://api.github.com/copilot_internal/user"
-	copilotTimeout       = 30 * time.Second
+	defaultCopilotAPIURL  = "https://api.github.com/copilot_internal/user"
+	copilotTimeout        = 30 * time.Second
 	tokenDiscoveryTimeout = 5 * time.Second
 )
 

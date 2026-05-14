@@ -13,8 +13,8 @@ import (
 )
 
 const (
-	codexOAuthURL  = "https://auth.openai.com/oauth/token"
-	codexClientID  = "app_EMoamEEZ73f0CkXaXp7hrann"
+	codexOAuthURL   = "https://auth.openai.com/oauth/token"
+	codexClientID   = "app_EMoamEEZ73f0CkXaXp7hrann"
 	codexOAuthScope = "openid profile email offline_access"
 )
 

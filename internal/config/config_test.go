@@ -22,9 +22,6 @@ func TestValidate_CronAndInterval(t *testing.T) {
 	}
 }
 
-
-
-
 func TestValidate_InvalidMaxPercent(t *testing.T) {
 	cfg := &Config{
 		Budget: BudgetConfig{
@@ -97,7 +94,6 @@ func TestExpandPath(t *testing.T) {
 		}
 	}
 }
-
 
 func TestIsTaskEnabled(t *testing.T) {
 	cfg := &Config{
@@ -548,31 +544,20 @@ func TestValidate_NoScheduleIsOK(t *testing.T) {
 	}
 }
 
-func TestValidate_SystemdConfig_validModes(t *testing.T) {
-	for _, mode := range []string{"schedule", "continuous"} {
-		cfg := &Config{
-			Systemd: SystemdConfig{Enabled: true, Mode: mode},
-		}
-		if err := Validate(cfg); err != nil {
-			t.Errorf("mode %q should be valid, got %v", mode, err)
-		}
-	}
-}
-
-func TestValidate_SystemdConfig_invalidMode(t *testing.T) {
+func TestValidate_SystemdConfig_enabled(t *testing.T) {
 	cfg := &Config{
-		Systemd: SystemdConfig{Enabled: true, Mode: "daemon"},
-	}
-	if err := Validate(cfg); err != ErrInvalidSystemdMode {
-		t.Errorf("expected ErrInvalidSystemdMode, got %v", err)
-	}
-}
-
-func TestValidate_SystemdConfig_disabledIgnoresMode(t *testing.T) {
-	cfg := &Config{
-		Systemd: SystemdConfig{Enabled: false, Mode: "daemon"},
+		Systemd: SystemdConfig{Enabled: true, OnCalendar: "*-*-* 22:00:00"},
 	}
 	if err := Validate(cfg); err != nil {
-		t.Errorf("disabled systemd should skip mode validation, got %v", err)
+		t.Errorf("enabled systemd with OnCalendar should be valid, got %v", err)
+	}
+}
+
+func TestValidate_SystemdConfig_disabled(t *testing.T) {
+	cfg := &Config{
+		Systemd: SystemdConfig{Enabled: false},
+	}
+	if err := Validate(cfg); err != nil {
+		t.Errorf("disabled systemd should pass validation, got %v", err)
 	}
 }
