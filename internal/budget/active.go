@@ -94,11 +94,6 @@ func (p *anthropicActiveProvider) GetHourlyCapacity(ctx context.Context, maxPerc
 	return result, nil
 }
 
-func (p *anthropicActiveProvider) LastUsedPercentSource() string {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return p.src
-}
 
 func (p *anthropicActiveProvider) setSource(s string) {
 	p.mu.Lock()
@@ -205,11 +200,6 @@ func (p *codexActiveProvider) GetResetTime(mode string) (time.Time, error) {
 	return time.Time{}, nil
 }
 
-func (p *codexActiveProvider) LastUsedPercentSource() string {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return p.src
-}
 
 func (p *codexActiveProvider) setSource(s string) {
 	p.mu.Lock()
@@ -325,11 +315,6 @@ func (p *copilotActiveProvider) GetResetTime(mode string) (time.Time, error) {
 	return time.Time{}, nil
 }
 
-func (p *copilotActiveProvider) LastUsedPercentSource() string {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return p.src
-}
 
 func (p *copilotActiveProvider) setSource(s string) {
 	p.mu.Lock()

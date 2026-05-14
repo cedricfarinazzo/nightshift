@@ -237,7 +237,6 @@ func TestAnthropicActiveProvider_Concurrent(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			_, _ = p.GetHourlyCapacity(context.Background(), 80)
-			_ = p.LastUsedPercentSource()
 		}()
 	}
 	wg.Wait()

@@ -125,6 +125,8 @@ func printProviderBudgetActive(
 		}
 	}
 
+	hcr, hcrErr := mgr.GetHourlyCapacity(ctx, provName)
+
 	if len(pu.Quotas) > 0 {
 		for _, q := range pu.Quotas {
 			label := formatQuotaWindowLabel(q.Window)
@@ -139,13 +141,13 @@ func printProviderBudgetActive(
 			}
 			fmt.Printf("  %-8s %s %4s%s\n", label, bar, pct, resetStr)
 		}
-	} else if hcr, err := mgr.GetHourlyCapacity(ctx, provName); err == nil {
+	} else if hcrErr == nil {
 		bar := unicodeProgressBar(hcr.BottleneckUsedPct, 25)
 		pct := fmt.Sprintf("%.0f%%", hcr.BottleneckUsedPct)
 		fmt.Printf("  Used     %s %4s\n", bar, pct)
 	}
 
-	if hcr, err := mgr.GetHourlyCapacity(ctx, provName); err == nil {
+	if hcrErr == nil {
 		printHourlyCapacity(hcr)
 	}
 
@@ -157,11 +159,9 @@ func printProviderBudgetActive(
 		printCopilotPlan(ctx)
 	}
 
-	// Only show Reset line when we have no per-window reset info already displayed.
-	if pu.ResetTime != nil {
-		if hcr, err := mgr.GetHourlyCapacity(ctx, provName); err != nil || len(hcr.Windows) == 0 {
-			fmt.Printf("  Reset:   %s\n", formatResetCountdown(*pu.ResetTime))
-		}
+	// Only show Reset line when no per-window reset info already displayed.
+	if pu.ResetTime != nil && (hcrErr != nil || len(hcr.Windows) == 0) {
+		fmt.Printf("  Reset:   %s\n", formatResetCountdown(*pu.ResetTime))
 	}
 
 	return nil
@@ -253,32 +253,6 @@ func formatTokens64(tokens int64) string {
 	}
 	return fmt.Sprintf("%d", tokens)
 }
-
-
-func progressBar(percent float64, width int) string {
-	displayPercent := percent
-	if percent < 0 {
-		percent = 0
-	}
-	fillPercent := percent
-	if fillPercent > 100 {
-		fillPercent = 100
-	}
-
-	filled := int(fillPercent * float64(width) / 100)
-	empty := width - filled
-
-	bar := ""
-	for i := 0; i < filled; i++ {
-		bar += "#"
-	}
-	for i := 0; i < empty; i++ {
-		bar += "-"
-	}
-
-	return fmt.Sprintf("[%s] %.1f%%", bar, displayPercent)
-}
-
 // providerDisplayName returns a human-friendly provider name.
 func providerDisplayName(provName string) string {
 	switch provName {

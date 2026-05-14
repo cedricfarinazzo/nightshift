@@ -63,7 +63,6 @@ type Manager struct {
 	claude  ClaudeUsageProvider
 	codex   CodexUsageProvider
 	copilot CopilotUsageProvider
-	nowFunc func() time.Time // for testing
 }
 
 // NewManager creates a budget manager with the given configuration and providers.
@@ -73,7 +72,6 @@ func NewManager(cfg *config.Config, claude ClaudeUsageProvider, codex CodexUsage
 		claude:  claude,
 		codex:   codex,
 		copilot: copilot,
-		nowFunc: time.Now,
 	}
 	for _, opt := range opts {
 		opt(mgr)
@@ -241,12 +239,15 @@ func computeWindowCapacity(usedPct, maxPct, windowHours, resetHours float64) flo
 		return v
 	}
 
-	// Normal: pace-based. Boost when behind pace (current rate < ideal rate).
+	// Normal: pace-based. Boost when we should be consuming faster than current headroom rate.
+	// idealRate: target consumption rate to exhaust maxPct by window end.
+	// headroomRate: remaining capacity per hour left — how hard we can still run.
+	// When idealRate > headroomRate we need to run harder to hit the target → boost.
 	idealRate := maxPct / windowHours
-	currentRate := remaining / resetHours
+	headroomRate := remaining / resetHours
 	paceFactor := 1.0
-	if currentRate > 0 && idealRate > currentRate {
-		paceFactor = idealRate / currentRate
+	if headroomRate > 0 && idealRate > headroomRate {
+		paceFactor = idealRate / headroomRate
 	}
 	v := remainingFrac * paceFactor
 	if v > 1 {
