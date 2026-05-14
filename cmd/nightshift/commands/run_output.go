@@ -220,10 +220,7 @@ func displayPreflightColored(plan *preflightPlan) {
 			fmt.Printf("  %s %s %s\n",
 				s.Label.Render("Provider:"),
 				s.Value.Render(pp.provider.name),
-				s.Muted.Render(fmt.Sprintf("(%.1f%% used, %s)", pp.provider.allowance.UsedPercent, pp.provider.allowance.Mode)))
-			fmt.Printf("  %s %s\n",
-				s.Label.Render("Budget:"),
-				s.Value.Render(fmt.Sprintf("%d tokens remaining", pp.provider.allowance.Allowance)))
+				s.Muted.Render(fmt.Sprintf("(%.0f%% capacity, %.1f%% used)", pp.provider.allowance.HourlyCapacity*100, pp.provider.allowance.BottleneckUsedPct)))
 			break
 		}
 	}
@@ -316,7 +313,7 @@ func displayProjectHeaderColored(projectPath, providerName string, allowance *bu
 	fmt.Printf("  %s %s\n", s.Label.Render("Provider:"), s.Value.Render(providerName))
 	if allowance != nil {
 		fmt.Printf("  %s %s\n", s.Label.Render("Budget:"),
-			s.Value.Render(fmt.Sprintf("%d tokens available (%.1f%% used, mode=%s)", allowance.Allowance, allowance.UsedPercent, allowance.Mode)))
+			s.Value.Render(fmt.Sprintf("%.0f%% capacity  %.1f%% used (limit: %d%%)", allowance.HourlyCapacity*100, allowance.BottleneckUsedPct, allowance.MaxPercent)))
 	}
 
 	fmt.Printf("\n  %s\n", s.Phase.Render(fmt.Sprintf("Selected %d task(s):", taskCount)))

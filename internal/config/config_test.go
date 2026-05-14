@@ -22,42 +22,8 @@ func TestValidate_CronAndInterval(t *testing.T) {
 	}
 }
 
-func TestValidate_InvalidBudgetMode(t *testing.T) {
-	cfg := &Config{
-		Budget: BudgetConfig{
-			Mode: "invalid",
-		},
-	}
-	err := Validate(cfg)
-	if err != ErrInvalidBudgetMode {
-		t.Errorf("expected ErrInvalidBudgetMode, got %v", err)
-	}
-}
-
-func TestValidate_InvalidBillingMode(t *testing.T) {
-	cfg := &Config{
-		Budget: BudgetConfig{
-			BillingMode: "metered",
-		},
-	}
-	err := Validate(cfg)
-	if err != ErrInvalidBillingMode {
-		t.Errorf("expected ErrInvalidBillingMode, got %v", err)
-	}
-}
 
 
-func TestValidate_InvalidWeekStartDay(t *testing.T) {
-	cfg := &Config{
-		Budget: BudgetConfig{
-			WeekStartDay: "friday",
-		},
-	}
-	err := Validate(cfg)
-	if err != ErrInvalidWeekStartDay {
-		t.Errorf("expected ErrInvalidWeekStartDay, got %v", err)
-	}
-}
 
 func TestValidate_InvalidMaxPercent(t *testing.T) {
 	cfg := &Config{
@@ -101,9 +67,7 @@ func TestValidate_ValidConfig(t *testing.T) {
 			Cron: "0 2 * * *",
 		},
 		Budget: BudgetConfig{
-			Mode:           "daily",
-			MaxPercent:     10,
-			ReservePercent: 5,
+			MaxPercent: 10,
 		},
 		Logging: LoggingConfig{
 			Level:  "info",
@@ -134,36 +98,6 @@ func TestExpandPath(t *testing.T) {
 	}
 }
 
-func TestGetProviderBudget(t *testing.T) {
-	cfg := &Config{
-		Budget: BudgetConfig{
-			WeeklyTokens: 700000,
-			PerProvider: map[string]int{
-				"claude": 800000,
-			},
-		},
-	}
-
-	// Test with per-provider override
-	if got := cfg.GetProviderBudget("claude"); got != 800000 {
-		t.Errorf("GetProviderBudget(claude) = %d, want 800000", got)
-	}
-
-	// Test fallback to weekly tokens
-	if got := cfg.GetProviderBudget("codex"); got != 700000 {
-		t.Errorf("GetProviderBudget(codex) = %d, want 700000", got)
-	}
-}
-
-func TestNormalizeBudgetConfig(t *testing.T) {
-	cfg := &Config{
-		Budget: BudgetConfig{
-			BillingMode: "api",
-		},
-	}
-	// normalizeBudgetConfig must not panic with api billing mode.
-	normalizeBudgetConfig(cfg)
-}
 
 func TestIsTaskEnabled(t *testing.T) {
 	cfg := &Config{
@@ -254,7 +188,6 @@ func TestLoadFromPaths_WithYAML(t *testing.T) {
 schedule:
   cron: "0 3 * * *"
 budget:
-  mode: weekly
   max_percent: 20
 logging:
   level: debug
@@ -271,9 +204,6 @@ logging:
 
 	if cfg.Schedule.Cron != "0 3 * * *" {
 		t.Errorf("Schedule.Cron = %q, want %q", cfg.Schedule.Cron, "0 3 * * *")
-	}
-	if cfg.Budget.Mode != "weekly" {
-		t.Errorf("Budget.Mode = %q, want %q", cfg.Budget.Mode, "weekly")
 	}
 	if cfg.Budget.MaxPercent != 20 {
 		t.Errorf("Budget.MaxPercent = %d, want 20", cfg.Budget.MaxPercent)
@@ -294,7 +224,6 @@ func TestLoadFromPaths_MergeConfigs(t *testing.T) {
 	globalConfig := filepath.Join(globalDir, "config.yaml")
 	globalContent := `
 budget:
-  mode: daily
   max_percent: 75
 logging:
   level: info
@@ -332,9 +261,6 @@ logging:
 		t.Errorf("Logging.Level = %q, want debug (project override)", cfg.Logging.Level)
 	}
 	// Global value should still be present for non-overridden fields
-	if cfg.Budget.Mode != "daily" {
-		t.Errorf("Budget.Mode = %q, want daily (from global)", cfg.Budget.Mode)
-	}
 }
 
 func TestGetTaskInterval_Override(t *testing.T) {
@@ -422,14 +348,8 @@ func TestLoadFromPaths_Defaults(t *testing.T) {
 	}
 
 	// Check defaults are applied
-	if cfg.Budget.Mode != DefaultBudgetMode {
-		t.Errorf("Budget.Mode = %q, want %q", cfg.Budget.Mode, DefaultBudgetMode)
-	}
 	if cfg.Budget.MaxPercent != DefaultMaxPercent {
 		t.Errorf("Budget.MaxPercent = %d, want %d", cfg.Budget.MaxPercent, DefaultMaxPercent)
-	}
-	if cfg.Budget.WeeklyTokens != DefaultWeeklyTokens {
-		t.Errorf("Budget.WeeklyTokens = %d, want %d", cfg.Budget.WeeklyTokens, DefaultWeeklyTokens)
 	}
 	if cfg.Logging.Level != DefaultLogLevel {
 		t.Errorf("Logging.Level = %q, want %q", cfg.Logging.Level, DefaultLogLevel)

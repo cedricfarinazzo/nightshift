@@ -261,7 +261,7 @@ func runScheduledTasks(ctx context.Context, cfg *config.Config, database *db.DB,
 
 	budgetMgr := budget.NewManagerWithTracking(cfg)
 
-	report := newRunReport(time.Now(), calculateRunBudgetStart(cfg, budgetMgr, log))
+	report := newRunReport(time.Now())
 
 	// Resolve projects
 	projects, err := resolveProjects(cfg, "")
@@ -302,12 +302,6 @@ func runScheduledTasks(ctx context.Context, cfg *config.Config, database *db.DB,
 			break
 		}
 
-		allowance := choice.allowance
-		if allowance.Allowance <= 0 {
-			log.Info("budget exhausted")
-			break
-		}
-
 		orch := orchestrator.New(
 			orchestrator.WithAgent(choice.agent),
 			orchestrator.WithConfig(orchestrator.Config{
@@ -318,7 +312,7 @@ func runScheduledTasks(ctx context.Context, cfg *config.Config, database *db.DB,
 		)
 
 		// Select tasks
-		selectedTasks := selector.SelectTopN(allowance.Allowance, projectPath, 5)
+		selectedTasks := selector.SelectTopN(projectPath, 5)
 		if len(selectedTasks) == 0 {
 			if report != nil {
 				report.addTask(reporting.TaskResult{
@@ -326,7 +320,7 @@ func runScheduledTasks(ctx context.Context, cfg *config.Config, database *db.DB,
 					TaskType:   "",
 					Title:      "No tasks selected",
 					Status:     "skipped",
-					SkipReason: "no tasks available within budget",
+					SkipReason: "no tasks available",
 				})
 			}
 			continue
@@ -335,7 +329,6 @@ func runScheduledTasks(ctx context.Context, cfg *config.Config, database *db.DB,
 		log.InfoCtx("processing project", map[string]any{
 			"project":  projectPath,
 			"tasks":    len(selectedTasks),
-			"budget":   allowance.Allowance,
 			"provider": choice.name,
 		})
 

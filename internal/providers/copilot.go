@@ -178,50 +178,6 @@ func (c *Copilot) IncrementRequestCount() error {
 	return c.SaveUsageData(data)
 }
 
-// GetUsedPercent returns the used percentage based on mode and monthly request limit.
-// mode: "daily" or "weekly" (Copilot resets monthly, so both modes use the same calculation)
-// monthlyLimit: maximum premium requests per month (typically from plan limit)
-//
-// Note: GitHub Copilot resets monthly on the 1st at 00:00:00 UTC, not daily or weekly.
-// For daily mode, we estimate daily usage as (monthly_requests / days_in_month).
-// For weekly mode, we estimate weekly usage similarly.
-func (c *Copilot) GetUsedPercent(mode string, monthlyLimit int64) (float64, error) {
-	if monthlyLimit <= 0 {
-		return 0, fmt.Errorf("invalid monthly limit: %d", monthlyLimit)
-	}
-
-	requests, err := c.GetRequestCount()
-	if err != nil {
-		return 0, err
-	}
-
-	now := time.Now().UTC()
-
-	switch mode {
-	case "daily":
-		// For daily mode, we calculate what portion of today's allocation has been used.
-		// Daily allocation = monthly_limit / days_in_month.
-		// Today's estimate = monthly_requests / days_elapsed (average per elapsed day).
-		daysInMonth := daysInCurrentMonth(now)
-		dailyAllocation := float64(monthlyLimit) / float64(daysInMonth)
-		if dailyAllocation <= 0 {
-			return 0, nil
-		}
-
-		daysElapsed := daysElapsedInMonth(now)
-		todayEstimate := float64(requests) / daysElapsed
-
-		return (todayEstimate / dailyAllocation) * 100, nil
-
-	case "weekly":
-		// For weekly mode, we treat it as a longer period within the month
-		// This is an approximation since Copilot resets monthly
-		return (float64(requests) / float64(monthlyLimit)) * 100, nil
-
-	default:
-		return 0, fmt.Errorf("invalid mode: %s (must be 'daily' or 'weekly')", mode)
-	}
-}
 
 // GetMonthlyResetTime returns the timestamp when the monthly counter resets.
 // Copilot resets on the 1st of each month at 00:00:00 UTC.
@@ -262,14 +218,6 @@ func daysElapsedInMonth(t time.Time) float64 {
 	return math.Max(minDays, t.UTC().Sub(firstOfMonth(t)).Hours()/24.0)
 }
 
-// daysInCurrentMonth returns the number of days in the month of the given time.
-func daysInCurrentMonth(t time.Time) int {
-	t = t.UTC()
-	// Get the first day of next month, then subtract 1 day to get last day of current month
-	firstOfNext := time.Date(t.Year(), t.Month()+1, 1, 0, 0, 0, 0, time.UTC)
-	lastOfCurrent := firstOfNext.Add(-24 * time.Hour)
-	return lastOfCurrent.Day()
-}
 
 // GetTodayTokens returns today's request count (for snapshot compatibility).
 // Note: Copilot tracks requests, not tokens. We return request count as "tokens".

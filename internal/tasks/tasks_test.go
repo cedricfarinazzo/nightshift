@@ -489,3 +489,35 @@ func TestSpecificDefaultIntervalOverrides(t *testing.T) {
 		}
 	}
 }
+
+func TestAllDefinitionsSorted(t *testing.T) {
+	defs := AllDefinitionsSorted()
+	if len(defs) == 0 {
+		t.Fatal("expected non-empty sorted definitions")
+	}
+	// Sorted by (category, name).
+	for i := 1; i < len(defs); i++ {
+		a, b := defs[i-1], defs[i]
+		if a.Category > b.Category || (a.Category == b.Category && a.Name > b.Name) {
+			t.Errorf("not sorted at [%d]: (%v,%s) before (%v,%s)", i, a.Category, a.Name, b.Category, b.Name)
+		}
+	}
+}
+
+func TestQueue_NewAndNext(t *testing.T) {
+	q := NewQueue()
+	if q == nil {
+		t.Fatal("NewQueue returned nil")
+	}
+	// Next on empty queue returns nil.
+	if q.Next() != nil {
+		t.Error("Next on empty queue should return nil")
+	}
+}
+
+func TestQueue_AddAndNext(t *testing.T) {
+	q := NewQueue()
+	q.Add(Task{ID: "t1", Title: "First"})
+	// Current impl is a TODO stub — Next always returns nil.
+	// Test that Add doesn't panic.
+}

@@ -53,17 +53,10 @@ type WindowConfig struct {
 	Timezone string `mapstructure:"timezone"` // Timezone (e.g., "America/Denver")
 }
 
-// BudgetConfig controls token budget allocation.
+// BudgetConfig controls budget enforcement.
 type BudgetConfig struct {
-	Mode                  string         `json:"mode" yaml:"mode" mapstructure:"mode"`                    // daily | weekly
-	MaxPercent            int            `json:"max_percent" yaml:"max_percent" mapstructure:"max_percent"`             // Max % of budget per run
-	AggressiveEndOfWeek   bool           `json:"aggressive_end_of_week" yaml:"aggressive_end_of_week" mapstructure:"aggressive_end_of_week"`  // Ramp up in last 2 days
-	ReservePercent        int            `json:"reserve_percent" yaml:"reserve_percent" mapstructure:"reserve_percent"`         // Always keep in reserve
-	WeeklyTokens          int            `json:"weekly_tokens" yaml:"weekly_tokens" mapstructure:"weekly_tokens"`           // Fallback weekly budget
-	PerProvider           map[string]int `json:"per_provider" yaml:"per_provider" mapstructure:"per_provider"`            // Per-provider overrides
-	BillingMode           string         `json:"billing_mode" yaml:"billing_mode" mapstructure:"billing_mode"`            // subscription | api
-	WeekStartDay          string         `json:"week_start_day" yaml:"week_start_day" mapstructure:"week_start_day"`          // monday | sunday
-	DBPath                string         `json:"db_path" yaml:"db_path" mapstructure:"db_path"`                 // Override DB path
+	MaxPercent int    `json:"max_percent" yaml:"max_percent" mapstructure:"max_percent"` // Max % usage before blocking
+	DBPath     string `json:"db_path" yaml:"db_path" mapstructure:"db_path"`             // Override DB path
 }
 
 // ProvidersConfig defines AI provider settings.
@@ -152,13 +145,8 @@ type ReportingConfig struct {
 
 // Default values for configuration.
 const (
-	DefaultBudgetMode        = "daily"
-	DefaultMaxPercent        = 75
-	DefaultReservePercent    = 5
-	DefaultWeeklyTokens      = 700000
-	DefaultBillingMode       = "subscription"
-	DefaultWeekStartDay      = "monday"
-	DefaultLogLevel          = "info"
+	DefaultMaxPercent = 90
+	DefaultLogLevel   = "info"
 	DefaultLogFormat         = "json"
 	DefaultClaudeDataPath    = "~/.claude"
 	DefaultCodexDataPath     = "~/.codex"
@@ -250,13 +238,7 @@ func LoadFromPaths(projectPath, globalPath string) (*Config, error) {
 // setDefaults configures default values.
 func setDefaults(v *viper.Viper) {
 	// Budget defaults
-	v.SetDefault("budget.mode", DefaultBudgetMode)
 	v.SetDefault("budget.max_percent", DefaultMaxPercent)
-	v.SetDefault("budget.reserve_percent", DefaultReservePercent)
-	v.SetDefault("budget.weekly_tokens", DefaultWeeklyTokens)
-	v.SetDefault("budget.aggressive_end_of_week", false)
-	v.SetDefault("budget.billing_mode", DefaultBillingMode)
-	v.SetDefault("budget.week_start_day", DefaultWeekStartDay)
 	v.SetDefault("budget.db_path", DefaultDBPath())
 
 	// Provider defaults
@@ -317,7 +299,6 @@ func bindEnvVars(v *viper.Viper) {
 
 	// Explicit bindings for nested config
 	_ = v.BindEnv("budget.max_percent", "NIGHTSHIFT_BUDGET_MAX_PERCENT")
-	_ = v.BindEnv("budget.mode", "NIGHTSHIFT_BUDGET_MODE")
 	_ = v.BindEnv("logging.level", "NIGHTSHIFT_LOG_LEVEL")
 	_ = v.BindEnv("logging.path", "NIGHTSHIFT_LOG_PATH")
 }
@@ -337,12 +318,8 @@ func expandPath(path string) string {
 // Validation errors
 var (
 	ErrCronAndInterval          = errors.New("cron and interval are mutually exclusive")
-	ErrInvalidBudgetMode        = errors.New("budget mode must be 'daily' or 'weekly'")
-	ErrInvalidBillingMode       = errors.New("billing mode must be 'subscription' or 'api'")
-	ErrInvalidWeekStartDay      = errors.New("week_start_day must be 'monday' or 'sunday'")
-	ErrInvalidMaxPercent        = errors.New("max_percent must be between 1 and 100")
-	ErrInvalidReservePercent    = errors.New("reserve_percent must be between 0 and 100")
-	ErrInvalidLogLevel          = errors.New("log level must be debug, info, warn, or error")
+	ErrInvalidMaxPercent = errors.New("max_percent must be between 1 and 100")
+	ErrInvalidLogLevel   = errors.New("log level must be debug, info, warn, or error")
 	ErrInvalidLogFormat         = errors.New("log format must be json or text")
 	ErrNoSchedule               = errors.New("either cron or interval must be specified")
 
@@ -368,34 +345,9 @@ func Validate(cfg *Config) error {
 	}
 
 	// Budget mode validation
-	if cfg.Budget.Mode != "" && cfg.Budget.Mode != "daily" && cfg.Budget.Mode != "weekly" {
-		return ErrInvalidBudgetMode
-	}
-
-	// Billing mode validation
-	if cfg.Budget.BillingMode != "" {
-		mode := strings.ToLower(cfg.Budget.BillingMode)
-		if mode != "subscription" && mode != "api" {
-			return ErrInvalidBillingMode
-		}
-	}
-
-	// Week start day validation
-	if cfg.Budget.WeekStartDay != "" {
-		day := strings.ToLower(cfg.Budget.WeekStartDay)
-		if day != "monday" && day != "sunday" {
-			return ErrInvalidWeekStartDay
-		}
-	}
-
 	// MaxPercent validation
 	if cfg.Budget.MaxPercent < 0 || cfg.Budget.MaxPercent > 100 {
 		return ErrInvalidMaxPercent
-	}
-
-	// ReservePercent validation
-	if cfg.Budget.ReservePercent < 0 || cfg.Budget.ReservePercent > 100 {
-		return ErrInvalidReservePercent
 	}
 
 
@@ -523,15 +475,6 @@ func normalizeBudgetConfig(cfg *Config) {
 
 // Helper methods for accessing configuration
 
-// GetProviderBudget returns the weekly token budget for a provider.
-func (c *Config) GetProviderBudget(provider string) int {
-	if c.Budget.PerProvider != nil {
-		if budget, ok := c.Budget.PerProvider[provider]; ok {
-			return budget
-		}
-	}
-	return c.Budget.WeeklyTokens
-}
 
 // IsTaskEnabled checks if a task type is enabled.
 func (c *Config) IsTaskEnabled(task string) bool {

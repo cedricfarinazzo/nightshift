@@ -25,8 +25,18 @@ type mockUsage struct {
 
 func (m *mockUsage) Name() string { return m.name }
 
-func (m *mockUsage) GetUsedPercent(mode string, weeklyBudget int64) (float64, error) {
-	return m.pct, nil
+func (m *mockUsage) GetHourlyCapacity(_ context.Context, maxPercent int) (budget.HourlyCapacityResult, error) {
+	remaining := float64(maxPercent) - m.pct
+	var cap float64
+	if remaining > 0 {
+		cap = remaining / float64(maxPercent)
+	}
+	return budget.HourlyCapacityResult{
+		Capacity:          cap,
+		BottleneckWindow:  "mock",
+		BottleneckUsedPct: m.pct,
+		Source:            "api",
+	}, nil
 }
 
 type mockCodexUsage struct {
@@ -60,9 +70,7 @@ func TestSelectProvider_PreferenceOrder(t *testing.T) {
 			Codex:      config.ProviderConfig{Enabled: true},
 		},
 		Budget: config.BudgetConfig{
-			Mode:         "daily",
 			MaxPercent:   75,
-			WeeklyTokens: 700000,
 		},
 	}
 
@@ -95,9 +103,7 @@ func TestSelectProvider_FallbackOnBudget(t *testing.T) {
 			Codex:      config.ProviderConfig{Enabled: true},
 		},
 		Budget: config.BudgetConfig{
-			Mode:         "daily",
 			MaxPercent:   75,
-			WeeklyTokens: 700000,
 		},
 	}
 
@@ -148,9 +154,7 @@ func TestSelectProvider_AllBudgetExhausted(t *testing.T) {
 			Codex:  config.ProviderConfig{Enabled: true},
 		},
 		Budget: config.BudgetConfig{
-			Mode:         "daily",
 			MaxPercent:   75,
-			WeeklyTokens: 700000,
 		},
 	}
 	claude := &mockUsage{name: "claude", pct: 100}
@@ -177,9 +181,7 @@ func TestSelectProvider_CLINotInPath(t *testing.T) {
 			Codex:  config.ProviderConfig{Enabled: true},
 		},
 		Budget: config.BudgetConfig{
-			Mode:         "daily",
 			MaxPercent:   75,
-			WeeklyTokens: 700000,
 		},
 	}
 	claude := &mockUsage{name: "claude", pct: 0}
@@ -230,9 +232,7 @@ func newTestRunConfig() *config.Config {
 			Codex:  config.ProviderConfig{Enabled: true},
 		},
 		Budget: config.BudgetConfig{
-			Mode:         "daily",
 			MaxPercent:   75,
-			WeeklyTokens: 700000,
 		},
 		Tasks: config.TasksConfig{
 			Enabled:    []string{},
@@ -341,7 +341,7 @@ func TestMaxTasks_DefaultLimitsToOne(t *testing.T) {
 	// In dry-run, tasks are selected but not executed.
 	// The key assertion: with maxTasks=1, SelectTopN(budget, project, 1)
 	// should return at most 1 task. We verify by running SelectTopN directly.
-	selected := selector.SelectTopN(1_000_000, project, 1)
+	selected := selector.SelectTopN(project, 1)
 	if len(selected) > 1 {
 		t.Fatalf("SelectTopN(1) returned %d tasks, want <= 1", len(selected))
 	}
@@ -379,7 +379,7 @@ func TestMaxTasks_OverrideToN(t *testing.T) {
 	}
 
 	// Verify SelectTopN with n=3 returns more than 1 when tasks exist
-	selected := selector.SelectTopN(1_000_000, project, 3)
+	selected := selector.SelectTopN(project, 3)
 	if len(selected) > 3 {
 		t.Fatalf("SelectTopN(3) returned %d tasks, want <= 3", len(selected))
 	}
@@ -437,9 +437,7 @@ func TestSelectProvider_IgnoreBudget_StillReturnsProvider(t *testing.T) {
 			Codex:  config.ProviderConfig{Enabled: true},
 		},
 		Budget: config.BudgetConfig{
-			Mode:         "daily",
 			MaxPercent:   75,
-			WeeklyTokens: 700000,
 		},
 	}
 	// Both providers at 100% usage
@@ -471,9 +469,7 @@ func TestSelectProvider_IgnoreBudget_PopulatesAllowance(t *testing.T) {
 			Codex:  config.ProviderConfig{Enabled: false},
 		},
 		Budget: config.BudgetConfig{
-			Mode:         "daily",
 			MaxPercent:   75,
-			WeeklyTokens: 700000,
 		},
 	}
 	claude := &mockUsage{name: "claude", pct: 100}
@@ -488,8 +484,8 @@ func TestSelectProvider_IgnoreBudget_PopulatesAllowance(t *testing.T) {
 	if choice.allowance == nil {
 		t.Fatal("allowance should be populated even when ignoring budget")
 	}
-	if choice.allowance.UsedPercent != 100 {
-		t.Fatalf("UsedPercent = %.1f, want 100", choice.allowance.UsedPercent)
+	if choice.allowance.BottleneckUsedPct != 100 {
+		t.Fatalf("BottleneckUsedPct = %.1f, want 100", choice.allowance.BottleneckUsedPct)
 	}
 }
 
@@ -505,9 +501,7 @@ func TestSelectProvider_IgnoreBudget_False_StillRejectsBudget(t *testing.T) {
 			Codex:  config.ProviderConfig{Enabled: true},
 		},
 		Budget: config.BudgetConfig{
-			Mode:         "daily",
 			MaxPercent:   75,
-			WeeklyTokens: 700000,
 		},
 	}
 	claude := &mockUsage{name: "claude", pct: 100}
@@ -626,9 +620,7 @@ func TestDisplayPreflight_OutputFormat(t *testing.T) {
 				provider: &providerChoice{
 					name: "claude",
 					allowance: &budget.AllowanceResult{
-						Allowance:   27700,
-						UsedPercent: 72.3,
-						Mode:        "daily",
+						BottleneckUsedPct: 72.3,
 					},
 				},
 			},
@@ -642,9 +634,7 @@ func TestDisplayPreflight_OutputFormat(t *testing.T) {
 	checks := []string{
 		"Preflight Summary",
 		"Provider: claude",
-		"72.3% budget used",
-		"daily mode",
-		"27700 tokens remaining",
+		"72.3% used",
 		"Projects (1 of 1)",
 		"my-project",
 		"Linter Fixes",
@@ -676,9 +666,7 @@ func TestDisplayPreflight_IgnoreBudgetWarning(t *testing.T) {
 				provider: &providerChoice{
 					name: "claude",
 					allowance: &budget.AllowanceResult{
-						Allowance:   0,
-						UsedPercent: 100,
-						Mode:        "daily",
+						BottleneckUsedPct: 100,
 					},
 				},
 			},
@@ -731,9 +719,7 @@ func TestDisplayPreflight_MultipleTasks(t *testing.T) {
 				provider: &providerChoice{
 					name: "claude",
 					allowance: &budget.AllowanceResult{
-						Allowance:   500000,
-						UsedPercent: 10.0,
-						Mode:        "daily",
+						BottleneckUsedPct: 10.0,
 					},
 				},
 			},
@@ -775,9 +761,7 @@ func TestDisplayPreflight_SkippedSection(t *testing.T) {
 				provider: &providerChoice{
 					name: "claude",
 					allowance: &budget.AllowanceResult{
-						Allowance:   50000,
-						UsedPercent: 20.0,
-						Mode:        "daily",
+						BottleneckUsedPct: 20.0,
 					},
 				},
 			},
@@ -1159,9 +1143,7 @@ func TestDisplayPreflight_ShowsBranch(t *testing.T) {
 				provider: &providerChoice{
 					name: "claude",
 					allowance: &budget.AllowanceResult{
-						Allowance:   50000,
-						UsedPercent: 20.0,
-						Mode:        "daily",
+						BottleneckUsedPct: 20.0,
 					},
 				},
 			},
@@ -1195,9 +1177,7 @@ func TestDisplayPreflight_NoBranch(t *testing.T) {
 				provider: &providerChoice{
 					name: "claude",
 					allowance: &budget.AllowanceResult{
-						Allowance:   50000,
-						UsedPercent: 20.0,
-						Mode:        "daily",
+						BottleneckUsedPct: 20.0,
 					},
 				},
 			},
@@ -1245,9 +1225,7 @@ func TestDisplayPreflight_NoWarningsWhenBudgetRespected(t *testing.T) {
 				provider: &providerChoice{
 					name: "claude",
 					allowance: &budget.AllowanceResult{
-						Allowance:   50000,
-						UsedPercent: 20.0,
-						Mode:        "daily",
+						BottleneckUsedPct: 20.0,
 					},
 				},
 			},

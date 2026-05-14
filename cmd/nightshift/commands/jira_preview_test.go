@@ -25,7 +25,7 @@ func TestRenderJiraPreviewText_ConnectionOK(t *testing.T) {
 			{Name: "review_fix", Provider: "claude", Model: "claude-sonnet-4-6"},
 		},
 	}
-	out := renderJiraPreviewText(result, jiraPreviewTextOptions{})
+	out := renderJiraPreviewText(result)
 	for _, want := range []string{"OK", "PROJ", "user@example.com", "Phase Assignments"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q in output:\n%s", want, out)
@@ -40,7 +40,7 @@ func TestRenderJiraPreviewText_ConnectionFailed(t *testing.T) {
 		ConnectionErr: "401 Unauthorized",
 		Phases:        []jiraPreviewPhase{},
 	}
-	out := renderJiraPreviewText(result, jiraPreviewTextOptions{})
+	out := renderJiraPreviewText(result)
 	if !strings.Contains(out, "FAILED") {
 		t.Errorf("expected FAILED in output:\n%s", out)
 	}
@@ -67,7 +67,7 @@ func TestRenderJiraPreviewText_TodoTickets(t *testing.T) {
 		ExecutionOrder: []string{"PROJ-1"},
 		Phases:         []jiraPreviewPhase{},
 	}
-	out := renderJiraPreviewText(result, jiraPreviewTextOptions{})
+	out := renderJiraPreviewText(result)
 	for _, want := range []string{"PROJ-1", "Fix the thing", "feature/PROJ-1", "score 8.0/10"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q in output:\n%s", want, out)
@@ -90,7 +90,7 @@ func TestRenderJiraPreviewText_BlockedTickets(t *testing.T) {
 		},
 		Phases: []jiraPreviewPhase{},
 	}
-	out := renderJiraPreviewText(result, jiraPreviewTextOptions{})
+	out := renderJiraPreviewText(result)
 	if !strings.Contains(out, "PROJ-2") {
 		t.Errorf("missing blocked ticket key:\n%s", out)
 	}
@@ -112,52 +112,59 @@ func TestRenderJiraPreviewText_ReviewTickets(t *testing.T) {
 		},
 		Phases: []jiraPreviewPhase{},
 	}
-	out := renderJiraPreviewText(result, jiraPreviewTextOptions{})
+	out := renderJiraPreviewText(result)
 	if !strings.Contains(out, "PROJ-3") || !strings.Contains(out, "Needs rework") {
 		t.Errorf("review ticket not shown:\n%s", out)
 	}
 }
 
 func TestRenderJiraPreviewText_BudgetSummary(t *testing.T) {
-	allowance := int64(500000)
+	allowance := &budget.AllowanceResult{
+		HourlyCapacity:   0.695,
+		BottleneckUsedPct: 30.5,
+		BottleneckWindow: "seven_day",
+		Source:           "calibrated",
+		MaxPercent:       80,
+	}
 	result := &jiraPreviewResult{
 		GeneratedAt:  time.Now(),
 		JiraProject:  "PROJ",
 		ConnectionOK: true,
-		Budget: &budget.AllowanceResult{
-			Allowance:    allowance,
-			UsedPercent:  30.5,
-			BudgetSource: "calibrated",
+		Budget:       allowance,
+		ProviderBudgets: []jiraPreviewProviderBudget{
+			{Provider: "claude", OK: true, Allowance: allowance, Phases: []string{"plan", "implement"}},
 		},
 		Phases: []jiraPreviewPhase{},
 	}
 
-	// Without --explain: show summary line only.
-	out := renderJiraPreviewText(result, jiraPreviewTextOptions{Explain: false})
+	out := renderJiraPreviewText(result)
 	if !strings.Contains(out, "30.5%") {
 		t.Errorf("expected used percent in summary:\n%s", out)
 	}
-	if !strings.Contains(out, "calibrated") {
-		t.Errorf("expected budget source in summary:\n%s", out)
+	if !strings.Contains(out, "claude") {
+		t.Errorf("expected provider name in budget:\n%s", out)
+	}
+	if !strings.Contains(out, "70%") {
+		t.Errorf("expected hourly capacity in summary:\n%s", out)
 	}
 }
 
-func TestRenderJiraPreviewText_BudgetExplain(t *testing.T) {
-	allowance := int64(500000)
+func TestRenderJiraPreviewText_BudgetSection(t *testing.T) {
 	result := &jiraPreviewResult{
 		GeneratedAt:  time.Now(),
 		JiraProject:  "PROJ",
 		ConnectionOK: true,
 		Budget: &budget.AllowanceResult{
-			Allowance:    allowance,
-			UsedPercent:  30.5,
-			BudgetSource: "calibrated",
+			HourlyCapacity:   0.695,
+			BottleneckUsedPct: 30.5,
+			BottleneckWindow: "seven_day",
+			Source:           "calibrated",
+			MaxPercent:       80,
 		},
 		Phases: []jiraPreviewPhase{},
 	}
 
-	// With --explain: should show expanded budget section.
-	out := renderJiraPreviewText(result, jiraPreviewTextOptions{Explain: true})
+	out := renderJiraPreviewText(result)
 	if !strings.Contains(out, "Budget") {
 		t.Errorf("expected Budget section:\n%s", out)
 	}
@@ -171,9 +178,9 @@ func TestRenderJiraPreviewText_BudgetError(t *testing.T) {
 		BudgetErr:    "db not found",
 		Phases:       []jiraPreviewPhase{},
 	}
-	out := renderJiraPreviewText(result, jiraPreviewTextOptions{})
-	if !strings.Contains(out, "budget unavailable") {
-		t.Errorf("expected budget unavailable message:\n%s", out)
+	out := renderJiraPreviewText(result)
+	if !strings.Contains(out, "db not found") {
+		t.Errorf("expected budget error message:\n%s", out)
 	}
 }
 
@@ -187,7 +194,7 @@ func TestRenderJiraPreviewText_SkippedTickets(t *testing.T) {
 		},
 		Phases: []jiraPreviewPhase{},
 	}
-	out := renderJiraPreviewText(result, jiraPreviewTextOptions{})
+	out := renderJiraPreviewText(result)
 	if !strings.Contains(out, "Skipped") {
 		t.Errorf("expected Skipped section:\n%s", out)
 	}
@@ -203,7 +210,7 @@ func TestRenderJiraPreviewText_NoTodoTickets(t *testing.T) {
 		ConnectionOK: true,
 		Phases:       []jiraPreviewPhase{},
 	}
-	out := renderJiraPreviewText(result, jiraPreviewTextOptions{})
+	out := renderJiraPreviewText(result)
 	if !strings.Contains(out, "none") {
 		t.Errorf("expected 'none' when no todo tickets:\n%s", out)
 	}
@@ -221,7 +228,7 @@ func TestRenderJiraPreviewText_PhaseAssignments(t *testing.T) {
 			{Name: "review_fix", Provider: "claude", Model: "claude-sonnet-4-6", Timeout: "20m"},
 		},
 	}
-	out := renderJiraPreviewText(result, jiraPreviewTextOptions{})
+	out := renderJiraPreviewText(result)
 	for _, want := range []string{
 		"validation", "plan", "implement", "review_fix",
 		"claude", "codex", "copilot",
@@ -331,7 +338,6 @@ func TestJiraPreviewCmd_Flags(t *testing.T) {
 		{"json"},
 		{"plain"},
 		{"validate"},
-		{"explain"},
 		{"type"},
 	}
 	for _, f := range flags {

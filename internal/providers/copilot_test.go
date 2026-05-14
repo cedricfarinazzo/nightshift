@@ -202,69 +202,6 @@ func TestCopilot_IncrementRequestCount(t *testing.T) {
 	}
 }
 
-func TestCopilot_GetUsedPercent_Daily(t *testing.T) {
-	tmpDir := t.TempDir()
-	provider := NewCopilotWithPath(tmpDir)
-
-	// Set up test data: 20 requests made
-	now := time.Now().UTC()
-	testData := &CopilotUsageData{
-		RequestCount: 20,
-		LastReset:    firstOfMonth(now),
-		Month:        now.Format("2006-01"),
-	}
-	if err := provider.SaveUsageData(testData); err != nil {
-		t.Fatal(err)
-	}
-
-	// Monthly limit: 500 requests
-	monthlyLimit := int64(500)
-
-	// Get daily used percent
-	pct, err := provider.GetUsedPercent("daily", monthlyLimit)
-	if err != nil {
-		t.Fatalf("GetUsedPercent() error: %v", err)
-	}
-
-	// Daily allocation = 500 / days_in_month
-	// Today's estimate = 20 / days_elapsed
-	// Percent = (today_estimate / daily_allocation) * 100
-	// Can exceed 100% if daily usage exceeds allocation (e.g. early in month)
-	if pct < 0 {
-		t.Errorf("GetUsedPercent(daily) = %.2f, want >= 0", pct)
-	}
-}
-
-func TestCopilot_GetUsedPercent_Weekly(t *testing.T) {
-	tmpDir := t.TempDir()
-	provider := NewCopilotWithPath(tmpDir)
-
-	// Set up test data: 100 requests made
-	now := time.Now().UTC()
-	testData := &CopilotUsageData{
-		RequestCount: 100,
-		LastReset:    firstOfMonth(now),
-		Month:        now.Format("2006-01"),
-	}
-	if err := provider.SaveUsageData(testData); err != nil {
-		t.Fatal(err)
-	}
-
-	// Monthly limit: 500 requests
-	monthlyLimit := int64(500)
-
-	// Get weekly used percent
-	pct, err := provider.GetUsedPercent("weekly", monthlyLimit)
-	if err != nil {
-		t.Fatalf("GetUsedPercent() error: %v", err)
-	}
-
-	// For weekly mode, percent = (requests / monthly_limit) * 100
-	expectedPct := float64(100) / float64(500) * 100 // 20%
-	if pct < expectedPct-1 || pct > expectedPct+1 {
-		t.Errorf("GetUsedPercent(weekly) = %.2f, want ~%.2f", pct, expectedPct)
-	}
-}
 
 func TestCopilot_GetMonthlyResetTime(t *testing.T) {
 	tmpDir := t.TempDir()
@@ -380,22 +317,3 @@ func TestDaysElapsedInMonth(t *testing.T) {
 	}
 }
 
-func TestDaysInCurrentMonth(t *testing.T) {
-	tests := []struct {
-		input    time.Time
-		expected int
-	}{
-		{time.Date(2026, 1, 15, 0, 0, 0, 0, time.UTC), 31},  // January
-		{time.Date(2026, 2, 10, 0, 0, 0, 0, time.UTC), 28},  // February (non-leap)
-		{time.Date(2024, 2, 10, 0, 0, 0, 0, time.UTC), 29},  // February (leap year)
-		{time.Date(2026, 4, 5, 0, 0, 0, 0, time.UTC), 30},   // April
-		{time.Date(2026, 12, 25, 0, 0, 0, 0, time.UTC), 31}, // December
-	}
-
-	for _, tt := range tests {
-		result := daysInCurrentMonth(tt.input)
-		if result != tt.expected {
-			t.Errorf("daysInCurrentMonth(%v) = %d, want %d", tt.input, result, tt.expected)
-		}
-	}
-}
