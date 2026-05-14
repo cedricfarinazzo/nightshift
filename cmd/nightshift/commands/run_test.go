@@ -25,8 +25,18 @@ type mockUsage struct {
 
 func (m *mockUsage) Name() string { return m.name }
 
-func (m *mockUsage) GetUsedPercent(mode string) (float64, error) {
-	return m.pct, nil
+func (m *mockUsage) GetHourlyCapacity(_ context.Context, maxPercent int) (budget.HourlyCapacityResult, error) {
+	remaining := float64(maxPercent) - m.pct
+	var cap float64
+	if remaining > 0 {
+		cap = remaining / float64(maxPercent)
+	}
+	return budget.HourlyCapacityResult{
+		Capacity:          cap,
+		BottleneckWindow:  "mock",
+		BottleneckUsedPct: m.pct,
+		Source:            "api",
+	}, nil
 }
 
 type mockCodexUsage struct {
@@ -474,8 +484,8 @@ func TestSelectProvider_IgnoreBudget_PopulatesAllowance(t *testing.T) {
 	if choice.allowance == nil {
 		t.Fatal("allowance should be populated even when ignoring budget")
 	}
-	if choice.allowance.UsedPercent != 100 {
-		t.Fatalf("UsedPercent = %.1f, want 100", choice.allowance.UsedPercent)
+	if choice.allowance.BottleneckUsedPct != 100 {
+		t.Fatalf("BottleneckUsedPct = %.1f, want 100", choice.allowance.BottleneckUsedPct)
 	}
 }
 
@@ -610,7 +620,7 @@ func TestDisplayPreflight_OutputFormat(t *testing.T) {
 				provider: &providerChoice{
 					name: "claude",
 					allowance: &budget.AllowanceResult{
-						UsedPercent: 72.3,
+						BottleneckUsedPct: 72.3,
 					},
 				},
 			},
@@ -656,7 +666,7 @@ func TestDisplayPreflight_IgnoreBudgetWarning(t *testing.T) {
 				provider: &providerChoice{
 					name: "claude",
 					allowance: &budget.AllowanceResult{
-						UsedPercent: 100,
+						BottleneckUsedPct: 100,
 					},
 				},
 			},
@@ -709,7 +719,7 @@ func TestDisplayPreflight_MultipleTasks(t *testing.T) {
 				provider: &providerChoice{
 					name: "claude",
 					allowance: &budget.AllowanceResult{
-						UsedPercent: 10.0,
+						BottleneckUsedPct: 10.0,
 					},
 				},
 			},
@@ -751,7 +761,7 @@ func TestDisplayPreflight_SkippedSection(t *testing.T) {
 				provider: &providerChoice{
 					name: "claude",
 					allowance: &budget.AllowanceResult{
-						UsedPercent: 20.0,
+						BottleneckUsedPct: 20.0,
 					},
 				},
 			},
@@ -1133,7 +1143,7 @@ func TestDisplayPreflight_ShowsBranch(t *testing.T) {
 				provider: &providerChoice{
 					name: "claude",
 					allowance: &budget.AllowanceResult{
-						UsedPercent: 20.0,
+						BottleneckUsedPct: 20.0,
 					},
 				},
 			},
@@ -1167,7 +1177,7 @@ func TestDisplayPreflight_NoBranch(t *testing.T) {
 				provider: &providerChoice{
 					name: "claude",
 					allowance: &budget.AllowanceResult{
-						UsedPercent: 20.0,
+						BottleneckUsedPct: 20.0,
 					},
 				},
 			},
@@ -1215,7 +1225,7 @@ func TestDisplayPreflight_NoWarningsWhenBudgetRespected(t *testing.T) {
 				provider: &providerChoice{
 					name: "claude",
 					allowance: &budget.AllowanceResult{
-						UsedPercent: 20.0,
+						BottleneckUsedPct: 20.0,
 					},
 				},
 			},

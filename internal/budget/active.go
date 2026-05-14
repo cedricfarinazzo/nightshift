@@ -29,6 +29,16 @@ type ProviderUsage struct {
 	FetchedAt time.Time
 }
 
+// anthropicWindowDefs maps known Anthropic quota keys to their window durations.
+var anthropicWindowDefs = []struct {
+	key         string
+	windowHours float64
+}{
+	{"five_hour", 5},
+	{"seven_day", 168},
+	{"monthly_limit", 720},
+}
+
 // anthropicActiveProvider fetches usage from the Anthropic API.
 type anthropicActiveProvider struct {
 	client *usage.AnthropicClient
@@ -38,25 +48,51 @@ type anthropicActiveProvider struct {
 
 func (p *anthropicActiveProvider) Name() string { return "claude" }
 
-func (p *anthropicActiveProvider) GetUsedPercent(mode string) (float64, error) {
+func (p *anthropicActiveProvider) GetHourlyCapacity(ctx context.Context, maxPercent int) (HourlyCapacityResult, error) {
 	if p.client == nil {
 		p.setSource("none")
-		return 0, fmt.Errorf("anthropic client not initialized")
+		return HourlyCapacityResult{Source: "none"}, fmt.Errorf("anthropic client not initialized")
 	}
-	resp, err := p.client.FetchQuotas(context.Background())
+	resp, err := p.client.FetchQuotas(ctx)
 	if err != nil {
 		log.Warn().Err(err).Str("provider", "claude").Msg("budget: api fetch failed")
 		p.setSource("none")
-		return 0, fmt.Errorf("anthropic api fetch failed: %w", err)
+		return HourlyCapacityResult{Source: "none"}, fmt.Errorf("anthropic api fetch failed: %w", err)
 	}
-	if entry, ok := resp["seven_day"]; ok {
-		pct := entry.Utilization * 100
-		p.setSource("api")
-		log.Debug().Str("provider", "claude").Str("source", "api").Float64("used_pct", pct).Msg("budget: usage from api")
-		return pct, nil
+
+	now := time.Now()
+	result := HourlyCapacityResult{Source: "api", Capacity: 1.0}
+
+	for _, wd := range anthropicWindowDefs {
+		entry, ok := resp[wd.key]
+		if !ok {
+			continue
+		}
+		usedPct := entry.Utilization * 100
+		resetHours := entry.ResetsAt.Sub(now).Hours()
+		cap := computeWindowCapacity(usedPct, float64(maxPercent), wd.windowHours, resetHours)
+		wc := WindowCapacity{
+			Name:     wd.key,
+			UsedPct:  usedPct,
+			ResetIn:  time.Duration(max64(resetHours, 0) * float64(time.Hour)),
+			Capacity: cap,
+		}
+		result.Windows = append(result.Windows, wc)
+		if result.BottleneckWindow == "" || cap < result.Capacity {
+			result.Capacity = cap
+			result.BottleneckWindow = wd.key
+			result.BottleneckUsedPct = usedPct
+		}
 	}
-	p.setSource("none")
-	return 0, fmt.Errorf("anthropic: seven_day quota not found in response")
+
+	if result.BottleneckWindow == "" {
+		p.setSource("none")
+		return HourlyCapacityResult{Source: "none"}, fmt.Errorf("anthropic: no quota windows found in response")
+	}
+
+	p.setSource("api")
+	log.Debug().Str("provider", "claude").Float64("capacity", result.Capacity).Str("bottleneck", result.BottleneckWindow).Float64("bottleneck_used_pct", result.BottleneckUsedPct).Msg("budget: hourly capacity")
+	return result, nil
 }
 
 func (p *anthropicActiveProvider) LastUsedPercentSource() string {
@@ -77,7 +113,7 @@ type codexActiveProvider struct {
 	mu     sync.Mutex
 	src    string
 	// Cache last FetchUsage response to avoid duplicate API calls
-	// when both GetUsedPercent and GetResetTime are called for the same check.
+	// when both GetHourlyCapacity and GetResetTime are called for the same check.
 	cachedResp *usage.CodexUsageResponse
 	cachedTime time.Time
 	cacheTTL   time.Duration // default 1 minute
@@ -85,22 +121,23 @@ type codexActiveProvider struct {
 
 func (p *codexActiveProvider) Name() string { return "codex" }
 
-func (p *codexActiveProvider) GetUsedPercent(mode string) (float64, error) {
+func (p *codexActiveProvider) GetHourlyCapacity(ctx context.Context, maxPercent int) (HourlyCapacityResult, error) {
 	if p.client == nil {
 		p.setSource("none")
-		return 0, fmt.Errorf("codex client not initialized")
+		return HourlyCapacityResult{Source: "none"}, fmt.Errorf("codex client not initialized")
 	}
-	resp, err := p.client.FetchUsage(context.Background())
+	resp, err := p.client.FetchUsage(ctx)
 	if err != nil {
 		log.Warn().Err(err).Str("provider", "codex").Msg("budget: api fetch failed")
 		p.setSource("none")
-		return 0, fmt.Errorf("codex api fetch failed: %w", err)
+		return HourlyCapacityResult{Source: "none"}, fmt.Errorf("codex api fetch failed: %w", err)
 	}
 	if resp == nil || resp.RateLimit == nil {
 		p.setSource("none")
-		log.Warn().Str("provider", "codex").Msg("budget: no rate limit data in response, assuming 0%")
-		return 0, nil
+		log.Warn().Str("provider", "codex").Msg("budget: no rate limit data in response, assuming full capacity")
+		return HourlyCapacityResult{Source: "none", Capacity: 1.0, BottleneckWindow: "none"}, nil
 	}
+
 	// Cache response for reuse by GetResetTime (1-minute TTL).
 	p.mu.Lock()
 	p.cachedResp = resp
@@ -109,21 +146,45 @@ func (p *codexActiveProvider) GetUsedPercent(mode string) (float64, error) {
 		p.cacheTTL = 1 * time.Minute
 	}
 	p.mu.Unlock()
-	// Prefer secondary (weekly) window; fall back to primary (5h) window.
-	var pct float64
-	if resp.RateLimit.SecondaryWindow != nil {
-		pct = resp.RateLimit.SecondaryWindow.UsedPercent
-	} else if resp.RateLimit.PrimaryWindow != nil {
-		pct = resp.RateLimit.PrimaryWindow.UsedPercent
-		log.Debug().Str("provider", "codex").Msg("budget: no secondary window, using primary")
-	} else {
-		p.setSource("none")
-		log.Warn().Str("provider", "codex").Msg("budget: no rate limit windows in response, assuming 0%")
-		return 0, nil
+
+	now := time.Now()
+	result := HourlyCapacityResult{Source: "api", Capacity: 1.0}
+
+	addWindow := func(label string, usedPct, windowHours float64, resetAt time.Time) {
+		resetHours := resetAt.Sub(now).Hours()
+		cap := computeWindowCapacity(usedPct, float64(maxPercent), windowHours, resetHours)
+		wc := WindowCapacity{
+			Name:     label,
+			UsedPct:  usedPct,
+			ResetIn:  time.Duration(max64(resetHours, 0) * float64(time.Hour)),
+			Capacity: cap,
+		}
+		result.Windows = append(result.Windows, wc)
+		if result.BottleneckWindow == "" || cap < result.Capacity {
+			result.Capacity = cap
+			result.BottleneckWindow = label
+			result.BottleneckUsedPct = usedPct
+		}
 	}
+
+	if sw := resp.RateLimit.SecondaryWindow; sw != nil {
+		windowHours := float64(sw.LimitWindowSeconds) / 3600
+		addWindow("secondary", sw.UsedPercent, windowHours, sw.ResetAt.Time)
+	}
+	if pw := resp.RateLimit.PrimaryWindow; pw != nil {
+		windowHours := float64(pw.LimitWindowSeconds) / 3600
+		addWindow("primary", pw.UsedPercent, windowHours, pw.ResetAt.Time)
+	}
+
+	if result.BottleneckWindow == "" {
+		p.setSource("none")
+		log.Warn().Str("provider", "codex").Msg("budget: no rate limit windows in response, assuming full capacity")
+		return HourlyCapacityResult{Source: "none", Capacity: 1.0, BottleneckWindow: "none"}, nil
+	}
+
 	p.setSource("api")
-	log.Debug().Str("provider", "codex").Str("source", "api").Float64("used_pct", pct).Msg("budget: usage from api")
-	return pct, nil
+	log.Debug().Str("provider", "codex").Float64("capacity", result.Capacity).Str("bottleneck", result.BottleneckWindow).Msg("budget: hourly capacity")
+	return result, nil
 }
 
 func (p *codexActiveProvider) GetResetTime(mode string) (time.Time, error) {
@@ -164,7 +225,7 @@ type copilotActiveProvider struct {
 	mu     sync.Mutex
 	src    string
 	// Cache last FetchQuotas response to avoid duplicate API calls
-	// when both GetUsedPercent and GetResetTime are called for the same check.
+	// when both GetHourlyCapacity and GetResetTime are called for the same check.
 	cachedResp *usage.CopilotUserResponse
 	cachedTime time.Time
 	cacheTTL   time.Duration // default 1 minute
@@ -172,21 +233,22 @@ type copilotActiveProvider struct {
 
 func (p *copilotActiveProvider) Name() string { return "copilot" }
 
-func (p *copilotActiveProvider) GetUsedPercent(mode string) (float64, error) {
+func (p *copilotActiveProvider) GetHourlyCapacity(ctx context.Context, maxPercent int) (HourlyCapacityResult, error) {
 	if p.client == nil {
 		p.setSource("none")
-		return 0, fmt.Errorf("copilot client not initialized")
+		return HourlyCapacityResult{Source: "none"}, fmt.Errorf("copilot client not initialized")
 	}
-	resp, err := p.client.FetchQuotas(context.Background())
+	resp, err := p.client.FetchQuotas(ctx)
 	if err != nil {
 		log.Warn().Err(err).Str("provider", "copilot").Msg("budget: api fetch failed")
 		p.setSource("none")
-		return 0, fmt.Errorf("copilot api fetch failed: %w", err)
+		return HourlyCapacityResult{Source: "none"}, fmt.Errorf("copilot api fetch failed: %w", err)
 	}
 	if resp == nil {
 		p.setSource("none")
-		return 0, fmt.Errorf("copilot: nil response from api")
+		return HourlyCapacityResult{Source: "none"}, fmt.Errorf("copilot: nil response from api")
 	}
+
 	// Cache response for reuse by GetResetTime (1-minute TTL).
 	p.mu.Lock()
 	p.cachedResp = resp
@@ -196,18 +258,46 @@ func (p *copilotActiveProvider) GetUsedPercent(mode string) (float64, error) {
 	}
 	p.mu.Unlock()
 
-	if snap, ok := resp.Quotas["premium_interactions"]; ok {
-		// PercentRemaining is 0–100; convert to used %.
-		pct := 100 - snap.PercentRemaining
-		if snap.Unlimited {
-			pct = 0
+	// Copilot uses a monthly quota window (~720h).
+	const copilotWindowHours = 720.0
+
+	// Parse reset date for resetHours calculation.
+	now := time.Now()
+	var resetHours float64
+	if resp.QuotaResetDate != "" {
+		if t, parseErr := time.Parse("2006-01-02", resp.QuotaResetDate); parseErr == nil {
+			resetHours = t.Sub(now).Hours()
 		}
-		p.setSource("api")
-		log.Debug().Str("provider", "copilot").Str("source", "api").Float64("used_pct", pct).Msg("budget: usage from api")
-		return pct, nil
 	}
-	p.setSource("none")
-	return 0, fmt.Errorf("copilot: premium_interactions quota not found")
+	if resetHours <= 0 {
+		resetHours = copilotWindowHours
+	}
+
+	result := HourlyCapacityResult{Source: "api", Capacity: 1.0}
+
+	if snap, ok := resp.Quotas["premium_interactions"]; ok && !snap.Unlimited {
+		usedPct := 100 - snap.PercentRemaining
+		cap := computeWindowCapacity(usedPct, float64(maxPercent), copilotWindowHours, resetHours)
+		wc := WindowCapacity{
+			Name:     "premium_interactions",
+			UsedPct:  usedPct,
+			ResetIn:  time.Duration(max64(resetHours, 0) * float64(time.Hour)),
+			Capacity: cap,
+		}
+		result.Windows = append(result.Windows, wc)
+		result.Capacity = cap
+		result.BottleneckWindow = "premium_interactions"
+		result.BottleneckUsedPct = usedPct
+	}
+
+	if result.BottleneckWindow == "" {
+		// No quota windows found (unlimited plan or no data).
+		result.BottleneckWindow = "none"
+	}
+
+	p.setSource("api")
+	log.Debug().Str("provider", "copilot").Float64("capacity", result.Capacity).Str("bottleneck", result.BottleneckWindow).Msg("budget: hourly capacity")
+	return result, nil
 }
 
 func (p *copilotActiveProvider) GetResetTime(mode string) (time.Time, error) {
@@ -251,7 +341,7 @@ func (p *copilotActiveProvider) setSource(s string) {
 }
 
 // NewManagerWithTracking builds a Manager using active (API-based) tracking.
-// If an API client fails to initialize, that provider returns 0% usage.
+// If an API client fails to initialize, that provider returns full capacity.
 func NewManagerWithTracking(cfg *config.Config, opts ...Option) *Manager {
 	claudeP := &anthropicActiveProvider{client: usage.NewAnthropicClient()}
 
@@ -417,4 +507,12 @@ func isKnownAnthropicQuotaKey(key string) bool {
 		return true
 	}
 	return false
+}
+
+// max64 returns the larger of two float64 values.
+func max64(a, b float64) float64 {
+	if a > b {
+		return a
+	}
+	return b
 }

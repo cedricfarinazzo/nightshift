@@ -77,9 +77,9 @@ func renderPreviewText(result *previewResult, opts previewTextOptions) string {
 			}
 			line := fmt.Sprintf("    - %s: %.1f%% used (limit: %d%%, source=%s, model=%s)",
 				summary.name,
-				summary.allowance.UsedPercent,
+				summary.allowance.BottleneckUsedPct,
 				summary.allowance.MaxPercent,
-				summary.allowance.UsedPercentSource,
+				summary.allowance.Source,
 				model)
 			fmt.Fprintln(b, line)
 		}
@@ -256,10 +256,11 @@ func renderBudgetText(b *strings.Builder, allowance *budget.AllowanceResult, ind
 		return
 	}
 	b.WriteString(indent)
-	fmt.Fprintf(b, "Budget: %.1f%% used (limit: %d%%)\n", allowance.UsedPercent, allowance.MaxPercent)
-	if allowance.UsedPercentSource != "" {
+	fmt.Fprintf(b, "Budget: %.0f%% capacity (bottleneck: %s, limit: %d%%)\n",
+		allowance.HourlyCapacity*100, allowance.BottleneckWindow, allowance.MaxPercent)
+	if allowance.Source != "" {
 		b.WriteString(indent)
-		fmt.Fprintf(b, "Source: %s\n", allowance.UsedPercentSource)
+		fmt.Fprintf(b, "Source: %s\n", allowance.Source)
 	}
 }
 
@@ -432,11 +433,12 @@ type previewJSONConfigSource struct {
 }
 
 type previewJSONProviderBudget struct {
-	Provider    string  `json:"provider"`
-	UsedPercent float64 `json:"used_percent"`
-	MaxPercent  int     `json:"max_percent"`
-	Source      string  `json:"source"`
-	Error       string  `json:"error,omitempty"`
+	Provider        string  `json:"provider"`
+	HourlyCapacity  float64 `json:"hourly_capacity"`
+	BottleneckUsed  float64 `json:"bottleneck_used_pct"`
+	MaxPercent      int     `json:"max_percent"`
+	Source          string  `json:"source"`
+	Error           string  `json:"error,omitempty"`
 }
 
 type previewJSONRun struct {
@@ -455,9 +457,10 @@ type previewJSONProject struct {
 }
 
 type previewJSONBudget struct {
-	UsedPercent float64 `json:"used_percent"`
-	MaxPercent  int     `json:"max_percent"`
-	Source      string  `json:"source"`
+	HourlyCapacity float64 `json:"hourly_capacity"`
+	BottleneckUsed float64 `json:"bottleneck_used_pct"`
+	MaxPercent     int     `json:"max_percent"`
+	Source         string  `json:"source"`
 }
 
 type previewJSONTask struct {
@@ -499,9 +502,10 @@ func buildPreviewJSON(result *previewResult) previewJSON {
 			continue
 		}
 		if summary.allowance != nil {
-			entry.UsedPercent = summary.allowance.UsedPercent
+			entry.HourlyCapacity = summary.allowance.HourlyCapacity
+			entry.BottleneckUsed = summary.allowance.BottleneckUsedPct
 			entry.MaxPercent = summary.allowance.MaxPercent
-			entry.Source = summary.allowance.UsedPercentSource
+			entry.Source = summary.allowance.Source
 		}
 		budgets = append(budgets, entry)
 	}
@@ -513,9 +517,10 @@ func buildPreviewJSON(result *previewResult) previewJSON {
 			var budgetPayload *previewJSONBudget
 			if project.Budget != nil {
 				budgetPayload = &previewJSONBudget{
-					UsedPercent: project.Budget.UsedPercent,
-					MaxPercent:  project.Budget.MaxPercent,
-					Source:      project.Budget.UsedPercentSource,
+					HourlyCapacity: project.Budget.HourlyCapacity,
+					BottleneckUsed: project.Budget.BottleneckUsedPct,
+					MaxPercent:     project.Budget.MaxPercent,
+					Source:         project.Budget.Source,
 				}
 			}
 

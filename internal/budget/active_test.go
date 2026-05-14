@@ -58,15 +58,15 @@ func TestAnthropicActiveProvider_APISuccess(t *testing.T) {
 	)
 	p := &anthropicActiveProvider{client: apiClient}
 
-	pct, err := p.GetUsedPercent("weekly")
+	hcr, err := p.GetHourlyCapacity(context.Background(), 80)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if pct != 60.0 {
-		t.Errorf("want 60.0, got %f", pct)
+	if hcr.BottleneckUsedPct != 60.0 {
+		t.Errorf("want BottleneckUsedPct=60.0, got %f", hcr.BottleneckUsedPct)
 	}
-	if p.LastUsedPercentSource() != "api" {
-		t.Errorf("want source=api, got %s", p.LastUsedPercentSource())
+	if hcr.Source != "api" {
+		t.Errorf("want source=api, got %s", hcr.Source)
 	}
 }
 
@@ -81,27 +81,27 @@ func TestAnthropicActiveProvider_APIError_ReturnsZero(t *testing.T) {
 	)
 	p := &anthropicActiveProvider{client: apiClient}
 
-	pct, err := p.GetUsedPercent("weekly")
+	hcr, err := p.GetHourlyCapacity(context.Background(), 80)
 	if err == nil {
 		t.Fatalf("expected error on API failure, got nil")
 	}
-	if pct != 0.0 {
-		t.Errorf("want 0.0 on API error, got %f", pct)
+	if hcr.Capacity != 0.0 {
+		t.Errorf("want Capacity=0.0 on API error, got %f", hcr.Capacity)
 	}
-	if p.LastUsedPercentSource() != "none" {
-		t.Errorf("want source=none, got %s", p.LastUsedPercentSource())
+	if hcr.Source != "none" {
+		t.Errorf("want source=none, got %s", hcr.Source)
 	}
 }
 
 func TestAnthropicActiveProvider_NilClient_ReturnsZero(t *testing.T) {
 	p := &anthropicActiveProvider{client: nil}
 
-	pct, err := p.GetUsedPercent("weekly")
+	hcr, err := p.GetHourlyCapacity(context.Background(), 80)
 	if err == nil {
 		t.Fatalf("expected error on nil client, got nil")
 	}
-	if pct != 0.0 {
-		t.Errorf("want 0.0, got %f", pct)
+	if hcr.Capacity != 0.0 {
+		t.Errorf("want Capacity=0.0, got %f", hcr.Capacity)
 	}
 }
 
@@ -140,15 +140,15 @@ func TestCopilotActiveProvider_APISuccess(t *testing.T) {
 	apiClient := newCopilotClientForTest(t, srv.URL, ghExec)
 	p := &copilotActiveProvider{client: apiClient}
 
-	pct, err := p.GetUsedPercent("weekly")
+	hcr, err := p.GetHourlyCapacity(context.Background(), 80)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if pct != 60.0 {
-		t.Errorf("want 60.0, got %f", pct)
+	if hcr.BottleneckUsedPct != 60.0 {
+		t.Errorf("want BottleneckUsedPct=60.0, got %f", hcr.BottleneckUsedPct)
 	}
-	if p.LastUsedPercentSource() != "api" {
-		t.Errorf("want source=api, got %s", p.LastUsedPercentSource())
+	if hcr.Source != "api" {
+		t.Errorf("want source=api, got %s", hcr.Source)
 	}
 }
 
@@ -164,15 +164,15 @@ func TestCopilotActiveProvider_APIError_ReturnsZero(t *testing.T) {
 	apiClient := newCopilotClientForTest(t, srv.URL, ghExec)
 	p := &copilotActiveProvider{client: apiClient}
 
-	pct, err := p.GetUsedPercent("weekly")
+	hcr, err := p.GetHourlyCapacity(context.Background(), 80)
 	if err == nil {
 		t.Fatalf("expected error on API failure, got nil")
 	}
-	if pct != 0.0 {
-		t.Errorf("want 0.0 on API error, got %f", pct)
+	if hcr.Capacity != 0.0 {
+		t.Errorf("want Capacity=0.0 on API error, got %f", hcr.Capacity)
 	}
-	if p.LastUsedPercentSource() != "none" {
-		t.Errorf("want source=none, got %s", p.LastUsedPercentSource())
+	if hcr.Source != "none" {
+		t.Errorf("want source=none, got %s", hcr.Source)
 	}
 }
 
@@ -185,8 +185,8 @@ func TestNewManagerWithTracking_Constructs(t *testing.T) {
 	if mgr == nil {
 		t.Fatal("NewManagerWithTracking returned nil manager")
 	}
-	// GetUsedPercent should not panic; returns error if credentials unavailable, data if available.
-	_, _ = mgr.GetUsedPercent("claude")
+	// GetHourlyCapacity should not panic; returns error if credentials unavailable, data if available.
+	_, _ = mgr.GetHourlyCapacity(context.Background(), "claude")
 }
 
 func TestActiveMode_APISucceeds_ReturnsAPIValue(t *testing.T) {
@@ -204,20 +204,17 @@ func TestActiveMode_APISucceeds_ReturnsAPIValue(t *testing.T) {
 	cfg := makeConfig()
 	mgr := NewManager(cfg, claudeP, codexP, nil)
 
-	pct, err := mgr.GetUsedPercent("claude")
+	hcr, err := mgr.GetHourlyCapacity(context.Background(), "claude")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if pct != 25.0 {
-		t.Errorf("want 25.0 (api), got %f", pct)
+	if hcr.BottleneckUsedPct != 25.0 {
+		t.Errorf("want BottleneckUsedPct=25.0 (api), got %f", hcr.BottleneckUsedPct)
 	}
 
-	pct, err = mgr.GetUsedPercent("codex")
+	_, err = mgr.GetHourlyCapacity(context.Background(), "codex")
 	if err == nil {
 		t.Fatalf("expected error on nil client, got nil")
-	}
-	if pct != 0.0 {
-		t.Errorf("want 0.0 (no client), got %f", pct)
 	}
 }
 
@@ -239,7 +236,7 @@ func TestAnthropicActiveProvider_Concurrent(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, _ = p.GetUsedPercent("weekly")
+			_, _ = p.GetHourlyCapacity(context.Background(), 80)
 			_ = p.LastUsedPercentSource()
 		}()
 	}

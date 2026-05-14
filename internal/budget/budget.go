@@ -1,9 +1,10 @@
 // Package budget implements budget enforcement for nightshift using live API quotas.
-// Budget is enforced as a percentage gate: if usedPercent >= maxPercent, the provider
+// Budget is enforced as a percentage gate: if hourly capacity reaches 0, the provider
 // is considered exhausted. No token arithmetic is performed.
 package budget
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -18,27 +19,39 @@ type UsageProvider interface {
 // ClaudeUsageProvider extends UsageProvider for Claude-specific usage methods.
 type ClaudeUsageProvider interface {
 	UsageProvider
-	GetUsedPercent(mode string) (float64, error)
+	GetHourlyCapacity(ctx context.Context, maxPercent int) (HourlyCapacityResult, error)
 }
 
 // CodexUsageProvider extends UsageProvider for Codex-specific usage methods.
 type CodexUsageProvider interface {
 	UsageProvider
-	GetUsedPercent(mode string) (float64, error)
+	GetHourlyCapacity(ctx context.Context, maxPercent int) (HourlyCapacityResult, error)
 	GetResetTime(mode string) (time.Time, error)
 }
 
 // CopilotUsageProvider extends UsageProvider for Copilot-specific usage methods.
 type CopilotUsageProvider interface {
 	UsageProvider
-	GetUsedPercent(mode string) (float64, error)
+	GetHourlyCapacity(ctx context.Context, maxPercent int) (HourlyCapacityResult, error)
 	GetResetTime(mode string) (time.Time, error)
 }
 
-// UsedPercentSourceProvider reports where the last used-percent value came from.
-// Implemented optionally by providers to improve CLI diagnostics.
-type UsedPercentSourceProvider interface {
-	LastUsedPercentSource() string
+// WindowCapacity holds computed capacity for a single quota window.
+type WindowCapacity struct {
+	Name     string
+	UsedPct  float64
+	ResetIn  time.Duration
+	Capacity float64 // 0–1
+}
+
+// HourlyCapacityResult holds the computed hourly capacity for a provider.
+// Capacity is the minimum across all quota windows; 0 = exhausted.
+type HourlyCapacityResult struct {
+	Capacity          float64          // 0–1; 0 = blocked, 1 = full capacity
+	BottleneckWindow  string           // most constraining window name
+	BottleneckUsedPct float64          // raw utilization of bottleneck window (for display)
+	Windows           []WindowCapacity // per-window breakdown
+	Source            string           // "api" or "none"
 }
 
 // Option configures a Manager.
@@ -68,12 +81,14 @@ func NewManager(cfg *config.Config, claude ClaudeUsageProvider, codex CodexUsage
 	return mgr
 }
 
-// AllowanceResult holds the live usage data for a provider.
-// All budget decisions are percentage-based; no token arithmetic is performed.
+// AllowanceResult holds the live budget check result for a single provider.
+// All budget decisions are based on hourly capacity; no token arithmetic is performed.
 type AllowanceResult struct {
-	UsedPercent       float64
-	UsedPercentSource string
+	HourlyCapacity    float64 // 0–1; 0 = exhausted
+	BottleneckWindow  string
+	BottleneckUsedPct float64 // raw utilization of bottleneck window (for display)
 	MaxPercent        int
+	Source            string
 }
 
 // EnforcementResult holds the budget check outcome for a single provider.
@@ -84,51 +99,45 @@ type EnforcementResult struct {
 	Allowance *AllowanceResult
 }
 
-// GetUsedPercent retrieves the live used percentage from the appropriate provider.
-func (m *Manager) GetUsedPercent(provider string) (float64, error) {
-	mode := m.cfg.Budget.Mode
-	if mode == "" {
-		mode = config.DefaultBudgetMode
+// GetHourlyCapacity retrieves the live hourly capacity from the appropriate provider.
+func (m *Manager) GetHourlyCapacity(ctx context.Context, provider string) (HourlyCapacityResult, error) {
+	maxPercent := m.cfg.Budget.MaxPercent
+	if maxPercent <= 0 {
+		maxPercent = config.DefaultMaxPercent
 	}
 
 	switch provider {
 	case "claude":
 		if m.claude == nil {
-			return 0, fmt.Errorf("claude provider not configured")
+			return HourlyCapacityResult{Source: "none"}, fmt.Errorf("claude provider not configured")
 		}
-		return m.claude.GetUsedPercent(mode)
+		return m.claude.GetHourlyCapacity(ctx, maxPercent)
 
 	case "codex":
 		if m.codex == nil {
-			return 0, fmt.Errorf("codex provider not configured")
+			return HourlyCapacityResult{Source: "none"}, fmt.Errorf("codex provider not configured")
 		}
-		return m.codex.GetUsedPercent(mode)
+		return m.codex.GetHourlyCapacity(ctx, maxPercent)
 
 	case "copilot":
 		if m.copilot == nil {
-			return 0, fmt.Errorf("copilot provider not configured")
+			return HourlyCapacityResult{Source: "none"}, fmt.Errorf("copilot provider not configured")
 		}
-		return m.copilot.GetUsedPercent(mode)
+		return m.copilot.GetHourlyCapacity(ctx, maxPercent)
 
 	default:
-		return 0, fmt.Errorf("unknown provider: %s", provider)
+		return HourlyCapacityResult{Source: "none"}, fmt.Errorf("unknown provider: %s", provider)
 	}
 }
 
-func (m *Manager) usedPercentSource(provider string) string {
-	switch provider {
-	case "claude":
-		if reporter, ok := m.claude.(UsedPercentSourceProvider); ok {
-			return reporter.LastUsedPercentSource()
-		}
-	case "codex":
-		if reporter, ok := m.codex.(UsedPercentSourceProvider); ok {
-			return reporter.LastUsedPercentSource()
-		}
-	case "copilot":
-		return "api"
+// GetUsedPercent returns the bottleneck window's raw utilization for a provider.
+// Kept for backward-compat display use in budget and doctor commands.
+func (m *Manager) GetUsedPercent(provider string) (float64, error) {
+	result, err := m.GetHourlyCapacity(context.Background(), provider)
+	if err != nil {
+		return 0, err
 	}
-	return ""
+	return result.BottleneckUsedPct, nil
 }
 
 // CheckProviders checks budget capacity for a set of providers using live API percentages.
@@ -144,9 +153,10 @@ func (m *Manager) CheckProviders(providers []string, ignoreBudget bool) ([]Enfor
 		maxPercent = config.DefaultMaxPercent
 	}
 
+	ctx := context.Background()
 	results := make([]EnforcementResult, 0, len(providers))
 	for _, provider := range providers {
-		usedPct, err := m.GetUsedPercent(provider)
+		hcr, err := m.GetHourlyCapacity(ctx, provider)
 		if err != nil {
 			results = append(results, EnforcementResult{
 				Provider: provider,
@@ -155,19 +165,22 @@ func (m *Manager) CheckProviders(providers []string, ignoreBudget bool) ([]Enfor
 			})
 			continue
 		}
-		ok := ignoreBudget || usedPct < float64(maxPercent)
+		ok := ignoreBudget || hcr.Capacity > 0
 		reason := ""
 		if !ok {
-			reason = fmt.Sprintf("budget at %.0f%% (limit: %d%%)", usedPct, maxPercent)
+			reason = fmt.Sprintf("budget exhausted on %s (%.0f%% used, limit: %d%%)",
+				hcr.BottleneckWindow, hcr.BottleneckUsedPct, maxPercent)
 		}
 		results = append(results, EnforcementResult{
 			Provider: provider,
 			OK:       ok,
 			Reason:   reason,
 			Allowance: &AllowanceResult{
-				UsedPercent:       usedPct,
-				UsedPercentSource: m.usedPercentSource(provider),
+				HourlyCapacity:    hcr.Capacity,
+				BottleneckWindow:  hcr.BottleneckWindow,
+				BottleneckUsedPct: hcr.BottleneckUsedPct,
 				MaxPercent:        maxPercent,
+				Source:            hcr.Source,
 			},
 		})
 	}
@@ -180,13 +193,62 @@ func (m *Manager) Summary(provider string) (string, error) {
 	if maxPercent <= 0 {
 		maxPercent = config.DefaultMaxPercent
 	}
-	usedPct, err := m.GetUsedPercent(provider)
+	hcr, err := m.GetHourlyCapacity(context.Background(), provider)
 	if err != nil {
 		return "", err
 	}
 	status := "OK"
-	if usedPct >= float64(maxPercent) {
+	if hcr.Capacity <= 0 {
 		status = "exhausted"
 	}
-	return fmt.Sprintf("%s: %.1f%% used (limit: %d%%) [%s]", provider, usedPct, maxPercent, status), nil
+	return fmt.Sprintf("%s: %.1f%% used on %s (capacity: %.0f%%, limit: %d%%) [%s]",
+		provider, hcr.BottleneckUsedPct, hcr.BottleneckWindow,
+		hcr.Capacity*100, maxPercent, status), nil
+}
+
+// computeWindowCapacity computes the hourly capacity (0–1) for a single quota window.
+//
+// The formula maximises quota ROI by pacing consumption to reach max_pct by reset:
+//   - exhausted (remaining ≤ 0): 0
+//   - nearly depleted (remaining < 15): absolute remaining fraction (no urgency boost)
+//   - expiring (reset < window/4): boost by time urgency — min(1, remaining/max * window/reset)
+//   - normal: pace-adjusted — min(1, remaining/max * max(1, ideal_rate/current_rate))
+func computeWindowCapacity(usedPct, maxPct, windowHours, resetHours float64) float64 {
+	const nearlyDepletedThreshold = 15.0
+
+	remaining := maxPct - usedPct
+	if remaining <= 0 {
+		return 0
+	}
+	if resetHours <= 0 {
+		resetHours = 0.01
+	}
+
+	remainingFrac := remaining / maxPct
+
+	if remaining < nearlyDepletedThreshold {
+		return remainingFrac
+	}
+
+	if resetHours < windowHours/4 {
+		// Expiring window: boost urgency so remaining capacity is shown at full rate.
+		v := remainingFrac * windowHours / resetHours
+		if v > 1 {
+			return 1
+		}
+		return v
+	}
+
+	// Normal: pace-based. Boost when behind pace (current rate < ideal rate).
+	idealRate := maxPct / windowHours
+	currentRate := remaining / resetHours
+	paceFactor := 1.0
+	if currentRate > 0 && idealRate > currentRate {
+		paceFactor = idealRate / currentRate
+	}
+	v := remainingFrac * paceFactor
+	if v > 1 {
+		return 1
+	}
+	return v
 }

@@ -124,8 +124,9 @@ func TestRenderJiraPreviewText_BudgetSummary(t *testing.T) {
 		JiraProject:  "PROJ",
 		ConnectionOK: true,
 		Budget: &budget.AllowanceResult{
-			UsedPercent:       30.5,
-			UsedPercentSource: "calibrated",
+			HourlyCapacity:    0.695,
+			BottleneckUsedPct: 30.5,
+			Source:            "calibrated",
 			MaxPercent:        80,
 		},
 		Phases: []jiraPreviewPhase{},
@@ -147,8 +148,9 @@ func TestRenderJiraPreviewText_BudgetExplain(t *testing.T) {
 		JiraProject:  "PROJ",
 		ConnectionOK: true,
 		Budget: &budget.AllowanceResult{
-			UsedPercent:       30.5,
-			UsedPercentSource: "calibrated",
+			HourlyCapacity:    0.695,
+			BottleneckUsedPct: 30.5,
+			Source:            "calibrated",
 			MaxPercent:        80,
 		},
 		Phases: []jiraPreviewPhase{},

@@ -1,6 +1,7 @@
 package budget
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -15,11 +16,21 @@ type mockClaudeProvider struct {
 }
 
 func (m *mockClaudeProvider) Name() string { return "claude" }
-func (m *mockClaudeProvider) GetUsedPercent(mode string) (float64, error) {
-	return m.usedPercent, m.err
-}
-func (m *mockClaudeProvider) LastUsedPercentSource() string {
-	return m.source
+func (m *mockClaudeProvider) GetHourlyCapacity(_ context.Context, maxPercent int) (HourlyCapacityResult, error) {
+	if m.err != nil {
+		return HourlyCapacityResult{Source: "none"}, m.err
+	}
+	remaining := float64(maxPercent) - m.usedPercent
+	var cap float64
+	if remaining > 0 {
+		cap = remaining / float64(maxPercent)
+	}
+	return HourlyCapacityResult{
+		Capacity:          cap,
+		BottleneckWindow:  "mock",
+		BottleneckUsedPct: m.usedPercent,
+		Source:            m.source,
+	}, nil
 }
 
 // mockCodexProvider implements CodexUsageProvider for testing.
@@ -30,8 +41,21 @@ type mockCodexProvider struct {
 }
 
 func (m *mockCodexProvider) Name() string { return "codex" }
-func (m *mockCodexProvider) GetUsedPercent(mode string) (float64, error) {
-	return m.usedPercent, m.err
+func (m *mockCodexProvider) GetHourlyCapacity(_ context.Context, maxPercent int) (HourlyCapacityResult, error) {
+	if m.err != nil {
+		return HourlyCapacityResult{Source: "none"}, m.err
+	}
+	remaining := float64(maxPercent) - m.usedPercent
+	var cap float64
+	if remaining > 0 {
+		cap = remaining / float64(maxPercent)
+	}
+	return HourlyCapacityResult{
+		Capacity:          cap,
+		BottleneckWindow:  "mock",
+		BottleneckUsedPct: m.usedPercent,
+		Source:            "api",
+	}, nil
 }
 func (m *mockCodexProvider) GetResetTime(mode string) (time.Time, error) {
 	return m.resetTime, m.err
@@ -45,8 +69,21 @@ type mockCopilotProvider struct {
 }
 
 func (m *mockCopilotProvider) Name() string { return "copilot" }
-func (m *mockCopilotProvider) GetUsedPercent(mode string) (float64, error) {
-	return m.usedPercent, m.err
+func (m *mockCopilotProvider) GetHourlyCapacity(_ context.Context, maxPercent int) (HourlyCapacityResult, error) {
+	if m.err != nil {
+		return HourlyCapacityResult{Source: "none"}, m.err
+	}
+	remaining := float64(maxPercent) - m.usedPercent
+	var cap float64
+	if remaining > 0 {
+		cap = remaining / float64(maxPercent)
+	}
+	return HourlyCapacityResult{
+		Capacity:          cap,
+		BottleneckWindow:  "mock",
+		BottleneckUsedPct: m.usedPercent,
+		Source:            "api",
+	}, nil
 }
 func (m *mockCopilotProvider) GetResetTime(mode string) (time.Time, error) {
 	return m.resetTime, m.err
@@ -75,8 +112,8 @@ func TestCheckProviders_OK(t *testing.T) {
 	if r.Allowance == nil {
 		t.Fatal("expected non-nil Allowance")
 	}
-	if r.Allowance.UsedPercent != 50 {
-		t.Errorf("UsedPercent = %f, want 50", r.Allowance.UsedPercent)
+	if r.Allowance.BottleneckUsedPct != 50 {
+		t.Errorf("BottleneckUsedPct = %f, want 50", r.Allowance.BottleneckUsedPct)
 	}
 	if r.Allowance.MaxPercent != 80 {
 		t.Errorf("MaxPercent = %d, want 80", r.Allowance.MaxPercent)
@@ -129,7 +166,7 @@ func TestCheckProviders_AtLimit(t *testing.T) {
 			MaxPercent: 80,
 		},
 	}
-	// Exactly at limit is NOT OK (< maxPercent required).
+	// Exactly at limit: remaining = 0 → capacity = 0 → NOT OK.
 	claude := &mockClaudeProvider{usedPercent: 80}
 	mgr := NewManager(cfg, claude, nil, nil)
 
@@ -246,9 +283,6 @@ func TestSummary(t *testing.T) {
 	if !contains(summary, "claude") {
 		t.Error("summary should contain provider name")
 	}
-	if !contains(summary, "25.0%") {
-		t.Error("summary should contain used percent")
-	}
 	if !contains(summary, "OK") {
 		t.Error("summary should contain OK status")
 	}
@@ -275,8 +309,67 @@ func TestAllowanceResult_Source(t *testing.T) {
 	mgr := NewManager(cfg, claude, nil, nil)
 
 	results, _ := mgr.CheckProviders([]string{"claude"}, false)
-	if results[0].Allowance.UsedPercentSource != "api" {
-		t.Errorf("UsedPercentSource = %q, want %q", results[0].Allowance.UsedPercentSource, "api")
+	if results[0].Allowance.Source != "api" {
+		t.Errorf("Source = %q, want %q", results[0].Allowance.Source, "api")
+	}
+}
+
+// TestComputeWindowCapacity verifies the hourly capacity formula across scenarios.
+func TestComputeWindowCapacity(t *testing.T) {
+	tests := []struct {
+		name        string
+		usedPct     float64
+		maxPct      float64
+		windowHours float64
+		resetHours  float64
+		wantMin     float64 // capacity should be >= wantMin
+		wantMax     float64 // capacity should be <= wantMax
+	}{
+		{
+			name: "exhausted window",
+			usedPct: 95, maxPct: 90, windowHours: 5, resetHours: 1,
+			wantMin: 0, wantMax: 0,
+		},
+		{
+			name: "nearly depleted",
+			usedPct: 80, maxPct: 90, windowHours: 5, resetHours: 0.5,
+			wantMin: 0, wantMax: 0.15, // 10/90 = 11%
+		},
+		{
+			name: "expiring with capacity — boost",
+			usedPct: 50, maxPct: 90, windowHours: 5, resetHours: 0.5,
+			wantMin: 0.9, wantMax: 1.0, // capped at 1.0
+		},
+		{
+			name: "behind pace — boost",
+			usedPct: 20, maxPct: 90, windowHours: 5, resetHours: 2,
+			wantMin: 0.7, wantMax: 1.0,
+		},
+		{
+			name: "on pace",
+			usedPct: 45, maxPct: 90, windowHours: 5, resetHours: 2.5,
+			wantMin: 0.45, wantMax: 0.6,
+		},
+		{
+			name: "weekly on pace",
+			usedPct: 46, maxPct: 90, windowHours: 168, resetHours: 83,
+			wantMin: 0.45, wantMax: 0.55,
+		},
+		{
+			name: "weekly nearly done",
+			usedPct: 85, maxPct: 90, windowHours: 168, resetHours: 10,
+			wantMin: 0, wantMax: 0.06,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := computeWindowCapacity(tt.usedPct, tt.maxPct, tt.windowHours, tt.resetHours)
+			if got < tt.wantMin || got > tt.wantMax {
+				t.Errorf("computeWindowCapacity(%.0f, %.0f, %.0f, %.1f) = %.3f, want [%.3f, %.3f]",
+					tt.usedPct, tt.maxPct, tt.windowHours, tt.resetHours, got, tt.wantMin, tt.wantMax)
+			}
+		})
 	}
 }
 
