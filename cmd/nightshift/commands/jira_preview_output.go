@@ -55,27 +55,33 @@ func renderJiraPreviewText(result *jiraPreviewResult, opts jiraPreviewTextOption
 	}
 	b.WriteString("\n")
 
-	// Budget (summary always shown; details behind --explain).
-	if result.Budget != nil {
+	// Budget: per-provider capacity table.
+	if len(result.ProviderBudgets) > 0 || result.Budget != nil || result.BudgetErr != "" {
 		b.WriteString(styles.Section.Render("Budget"))
 		b.WriteString("\n")
-		if opts.Explain {
-			renderBudgetText(b, result.Budget, "  ")
-		} else {
-			fmt.Fprintf(b, "  %.0f%% capacity  [%s: %.1f%% used, limit: %d%%, source=%s]\n",
-				result.Budget.HourlyCapacity*100,
-				result.Budget.BottleneckWindow,
-				result.Budget.BottleneckUsedPct,
-				result.Budget.MaxPercent,
-				result.Budget.Source)
+		if len(result.ProviderBudgets) > 0 {
+			for _, pb := range result.ProviderBudgets {
+				renderJiraProviderBudget(b, styles, pb, opts.Explain)
+			}
+		} else if result.Budget != nil {
+			// Fallback: single-provider summary.
+			if opts.Explain {
+				renderBudgetText(b, result.Budget, "  ")
+			} else {
+				fmt.Fprintf(b, "  %.0f%% capacity  [%s: %.1f%% used, limit: %d%%, source=%s]\n",
+					result.Budget.HourlyCapacity*100,
+					result.Budget.BottleneckWindow,
+					result.Budget.BottleneckUsedPct,
+					result.Budget.MaxPercent,
+					result.Budget.Source)
+			}
+		}
+		if result.BudgetErr != "" {
+			b.WriteString("  ")
+			b.WriteString(styles.Warn.Render("exhausted: " + result.BudgetErr))
+			b.WriteString("\n")
 		}
 		b.WriteString("\n")
-	} else if result.BudgetErr != "" {
-		b.WriteString(styles.Section.Render("Budget"))
-		b.WriteString("\n")
-		b.WriteString("  ")
-		b.WriteString(styles.Warn.Render(fmt.Sprintf("budget unavailable: %s", result.BudgetErr)))
-		b.WriteString("\n\n")
 	}
 
 	// TODO tickets in execution order.
@@ -166,4 +172,43 @@ func renderJiraPreviewText(result *jiraPreviewResult, opts jiraPreviewTextOption
 	b.WriteString("\n")
 
 	return b.String()
+}
+
+// renderJiraProviderBudget renders one provider's budget row in the jira preview Budget section.
+func renderJiraProviderBudget(b *strings.Builder, styles previewStyles, pb jiraPreviewProviderBudget, explain bool) {
+	if pb.Allowance == nil {
+		status := styles.Warn.Render("unavailable")
+		fmt.Fprintf(b, "  %-10s  %s\n", pb.Provider, status)
+		return
+	}
+	a := pb.Allowance
+	capBar := unicodeProgressBar(a.HourlyCapacity*100, 15)
+
+	statusStr := styles.Value.Render(fmt.Sprintf("%3.0f%% capacity", a.HourlyCapacity*100))
+	if !pb.OK {
+		statusStr = styles.Error.Render(fmt.Sprintf("%3.0f%% capacity  EXHAUSTED", a.HourlyCapacity*100))
+	}
+
+	phasesStr := ""
+	if len(pb.Phases) > 0 {
+		phasesStr = "  [" + strings.Join(pb.Phases, ", ") + "]"
+	}
+
+	fmt.Fprintf(b, "  %-10s  %s %s  %.1f%% used%s\n",
+		pb.Provider, capBar, statusStr, a.BottleneckUsedPct, phasesStr)
+
+	if explain {
+		for _, w := range a.Windows {
+			marker := " "
+			if w.Name == a.BottleneckWindow {
+				marker = "▶"
+			}
+			resetStr := ""
+			if w.ResetIn > 0 {
+				resetStr = "  resets in " + formatDuration(w.ResetIn)
+			}
+			fmt.Fprintf(b, "             %s %-18s  used=%3.0f%%  cap=%3.0f%%%s\n",
+				marker, windowDisplayName(w.Name), w.UsedPct, w.Capacity*100, resetStr)
+		}
+	}
 }

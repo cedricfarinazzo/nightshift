@@ -177,8 +177,8 @@ func TestRenderJiraPreviewText_BudgetError(t *testing.T) {
 		Phases:       []jiraPreviewPhase{},
 	}
 	out := renderJiraPreviewText(result, jiraPreviewTextOptions{})
-	if !strings.Contains(out, "budget unavailable") {
-		t.Errorf("expected budget unavailable message:\n%s", out)
+	if !strings.Contains(out, "db not found") {
+		t.Errorf("expected budget error message:\n%s", out)
 	}
 }
 
