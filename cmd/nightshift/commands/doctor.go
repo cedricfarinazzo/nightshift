@@ -146,21 +146,28 @@ func checkService(add func(string, checkStatus, string)) {
 		// Check Jira-specific service unit.
 		jiraServicePath := filepath.Join(home, ".config", "systemd", "user", systemdJiraServiceName)
 		if _, err := os.Stat(jiraServicePath); err == nil {
-			out, _ := exec.Command("systemctl", "--user", "is-active", systemdJiraServiceName).Output()
+			out, err := exec.Command("systemctl", "--user", "is-active", systemdJiraServiceName).CombinedOutput()
 			status := strings.TrimSpace(string(out))
-			switch status {
-			case "active":
-				add("service.jira", statusOK, "nightshift-jira.service active")
-			case "inactive":
-				add("service.jira", statusWarn, "nightshift-jira.service installed but inactive")
-			default:
-				add("service.jira", statusWarn, fmt.Sprintf("nightshift-jira.service: %s", status))
+			if err != nil {
+				// systemctl failed (e.g., no user bus) — include error in output
+				add("service.jira", statusWarn, fmt.Sprintf("nightshift-jira.service: %s (systemctl error: %v)", status, err))
+			} else {
+				switch status {
+				case "active":
+					add("service.jira", statusOK, "nightshift-jira.service active")
+				case "inactive":
+					add("service.jira", statusWarn, "nightshift-jira.service installed but inactive")
+				default:
+					add("service.jira", statusWarn, fmt.Sprintf("nightshift-jira.service: %s", status))
+				}
 			}
 			jiraTimerPath := filepath.Join(home, ".config", "systemd", "user", systemdJiraTimerName)
 			if _, err := os.Stat(jiraTimerPath); err == nil {
-				out, _ := exec.Command("systemctl", "--user", "is-active", systemdJiraTimerName).Output()
+				out, err := exec.Command("systemctl", "--user", "is-active", systemdJiraTimerName).CombinedOutput()
 				timerStatus := strings.TrimSpace(string(out))
-				if timerStatus == "active" {
+				if err != nil {
+					add("service.jira.timer", statusWarn, fmt.Sprintf("nightshift-jira.timer: %s (systemctl error: %v)", timerStatus, err))
+				} else if timerStatus == "active" {
 					add("service.jira.timer", statusOK, "nightshift-jira.timer active")
 				} else {
 					add("service.jira.timer", statusWarn, fmt.Sprintf("nightshift-jira.timer: %s", timerStatus))

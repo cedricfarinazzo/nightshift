@@ -2,6 +2,7 @@ package commands
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -56,15 +57,18 @@ var installSystemdJiraFlag bool
 func init() {
 	rootCmd.AddCommand(installCmd)
 	rootCmd.AddCommand(uninstallCmd)
-	installCmd.Flags().BoolVar(&installSystemdJiraFlag, "systemd", false, "Install systemd user service for nightshift jira run")
+	installCmd.Flags().BoolVar(&installSystemdJiraFlag, "systemd-jira", false, "Install systemd user service for nightshift jira run")
 }
 
 // runInstall implements the install command
 func runInstall(cmd *cobra.Command, args []string) error {
-	// Handle --systemd flag: install Jira-specific systemd unit
+	// Handle --systemd-jira flag: install Jira-specific systemd unit
 	if installSystemdJiraFlag {
 		cfg, err := config.Load()
-		if err != nil {
+		if err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("loading config: %w", err)
+		}
+		if cfg == nil {
 			cfg = &config.Config{}
 		}
 		return installSystemdJira(cfg)
@@ -581,11 +585,12 @@ func defaultExecRunner(name string, args ...string) error {
 // installSystemdJira writes nightshift-jira.service (and optionally .timer) to
 // ~/.config/systemd/user/ and runs systemctl --user daemon-reload.
 func installSystemdJira(cfg *config.Config) error {
-	return installSystemdJiraWithExec(cfg, defaultExecRunner)
+	return installSystemdJiraWithExec(cfg, defaultExecRunner, os.Stdout)
 }
 
 // installSystemdJiraWithExec is the testable core of installSystemdJira.
-func installSystemdJiraWithExec(cfg *config.Config, run execRunner) error {
+// Accepts an io.Writer to allow tests and callers to capture output.
+func installSystemdJiraWithExec(cfg *config.Config, run execRunner, w io.Writer) error {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return fmt.Errorf("getting home directory: %w", err)
@@ -602,7 +607,7 @@ func installSystemdJiraWithExec(cfg *config.Config, run execRunner) error {
 	if err := os.WriteFile(servicePath, []byte(service), 0644); err != nil {
 		return fmt.Errorf("writing jira service file: %w", err)
 	}
-	fmt.Printf("Installed %s\n", servicePath)
+	fmt.Fprintf(w, "Installed %s\n", servicePath)
 
 	// Write timer unit only in schedule mode.
 	mode := strings.ToLower(cfg.Systemd.Mode)
@@ -614,12 +619,16 @@ func installSystemdJiraWithExec(cfg *config.Config, run execRunner) error {
 		if onCalendar == "" {
 			onCalendar = "*-*-* 22:00:00"
 		}
+		// Reject OnCalendar values containing newlines to prevent injection
+		if strings.ContainsAny(onCalendar, "\r\n") {
+			return fmt.Errorf("OnCalendar value contains invalid characters")
+		}
 		timerPath := filepath.Join(systemdDir, systemdJiraTimerName)
 		timer := generateSystemdJiraTimer(onCalendar)
 		if err := os.WriteFile(timerPath, []byte(timer), 0644); err != nil {
 			return fmt.Errorf("writing jira timer file: %w", err)
 		}
-		fmt.Printf("Installed %s\n", timerPath)
+		fmt.Fprintf(w, "Installed %s\n", timerPath)
 	}
 
 	// Reload systemd so it picks up the new units.
@@ -627,39 +636,60 @@ func installSystemdJiraWithExec(cfg *config.Config, run execRunner) error {
 		return fmt.Errorf("reloading systemd: %w", err)
 	}
 
-	fmt.Println("systemd daemon reloaded.")
+	fmt.Fprintf(w, "systemd daemon reloaded.\n")
 	if mode == "schedule" {
-		fmt.Println("To enable and start:")
-		fmt.Println("  systemctl --user enable --now nightshift-jira.timer")
+		fmt.Fprintf(w, "To enable and start:\n")
+		fmt.Fprintf(w, "  systemctl --user enable --now nightshift-jira.timer\n")
 	} else {
-		fmt.Println("To enable and start:")
-		fmt.Println("  systemctl --user enable --now nightshift-jira.service")
+		fmt.Fprintf(w, "To enable and start:\n")
+		fmt.Fprintf(w, "  systemctl --user enable --now nightshift-jira.service\n")
 	}
 	return nil
 }
 
 // generateSystemdJiraService returns the content of the nightshift-jira.service unit.
-// Uses %h so the unit is portable across home directories.
+// Uses the resolved binary path if it exists; prefers %h/.local/bin if binary is in home/.local/bin.
 func generateSystemdJiraService() string {
-	return `[Unit]
+	execStart := "%h/.local/bin/nightshift jira run"
+
+	// Try to determine actual binary path for better portability
+	if binaryPath, err := os.Executable(); err == nil {
+		home, err := os.UserHomeDir()
+		if err == nil {
+			absPath, err := filepath.Abs(binaryPath)
+			if err == nil {
+				// If binary is in ~/.local/bin, use %h expansion for portability
+				localBinPath := filepath.Join(home, ".local", "bin")
+				if strings.HasPrefix(absPath, localBinPath) {
+					// Binary is in ~/.local/bin, use %h expansion
+					execStart = "%h/.local/bin/nightshift jira run"
+				} else {
+					// Binary is elsewhere, use absolute path
+					execStart = absPath + " jira run"
+				}
+			}
+		}
+	}
+
+	return fmt.Sprintf(`[Unit]
 Description=Nightshift Jira autonomous pipeline
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=%h/.local/bin/nightshift jira run
+ExecStart=%s
 Restart=on-failure
 RestartSec=60s
-Environment=HOME=%h
-EnvironmentFile=-%h/.config/nightshift/env
+Environment=HOME=%%h
+EnvironmentFile=-%%h/.config/nightshift/env
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=nightshift-jira
 
 [Install]
 WantedBy=default.target
-`
+`, execStart)
 }
 
 // generateSystemdJiraTimer returns the content of the nightshift-jira.timer unit.
@@ -677,11 +707,23 @@ WantedBy=timers.target
 }
 
 // validateOnCalendar checks an OnCalendar expression via systemd-analyze calendar.
-// Returns nil if systemd-analyze is not found (treat as skip, not error).
+// Returns nil if systemd-analyze is not found and systemd is unavailable.
+// Returns a warning if systemd-analyze is missing but systemd is available.
 func validateOnCalendar(expr string) error {
+	// Reject values containing newlines to prevent injection
+	if strings.ContainsAny(expr, "\r\n") {
+		return fmt.Errorf("OnCalendar value contains invalid characters")
+	}
 	path, err := exec.LookPath("systemd-analyze")
 	if err != nil {
-		return nil // not available — skip validation
+		// systemd-analyze not available: check if systemd is available
+		if _, err := exec.LookPath("systemctl"); err == nil {
+			// systemd is available but systemd-analyze is not — warn but don't fail
+			// (systemd will validate the expression at enable time)
+			return fmt.Errorf("warning: systemd-analyze not found; OnCalendar will be validated by systemd at enable time")
+		}
+		// Neither systemd nor systemd-analyze available — skip validation
+		return nil
 	}
 	out, err := exec.Command(path, "calendar", expr).CombinedOutput()
 	if err != nil {

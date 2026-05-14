@@ -2261,6 +2261,20 @@ func writeGlobalConfigToPath(cfg *config.Config, configPath string) error {
 		v.Set("jira.review_fix.timeout", "")
 	}
 
+	// Systemd integration — written unconditionally to prevent stale keys.
+	// When systemd is disabled (Enabled is false), all systemd.* keys are zeroed out.
+	if cfg.Systemd.Enabled {
+		v.Set("systemd.enabled", cfg.Systemd.Enabled)
+		v.Set("systemd.mode", cfg.Systemd.Mode)
+		if cfg.Systemd.OnCalendar != "" {
+			v.Set("systemd.on_calendar", cfg.Systemd.OnCalendar)
+		}
+	} else {
+		v.Set("systemd.enabled", false)
+		v.Set("systemd.mode", "")
+		v.Set("systemd.on_calendar", "")
+	}
+
 	if err := v.WriteConfig(); err != nil {
 		if os.IsNotExist(err) {
 			return v.SafeWriteConfig()
@@ -2478,7 +2492,12 @@ func (m *setupModel) handleJiraEnableInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) 
 			m.jiraErr = err.Error()
 			return m, nil
 		}
-		return m, m.setStep(stepSystemd)
+		// Skip systemd step if systemd is unavailable
+		nextStep := stepSystemd
+		if !systemdAvailable() {
+			nextStep = stepPreview
+		}
+		return m, m.setStep(nextStep)
 	case "enter":
 		if m.jiraEnableCursor == 0 {
 			m.jiraEnabled = true
@@ -2492,7 +2511,12 @@ func (m *setupModel) handleJiraEnableInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) 
 				m.jiraErr = err.Error()
 				return m, nil
 			}
-			return m, m.setStep(stepSystemd)
+			// Skip systemd step if systemd is unavailable
+			nextStep := stepSystemd
+			if !systemdAvailable() {
+				nextStep = stepPreview
+			}
+			return m, m.setStep(nextStep)
 		}
 	}
 	return m, nil
@@ -2711,7 +2735,12 @@ func (m *setupModel) handleJiraPingInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.jiraErr = err.Error()
 			return m, nil
 		}
-		return m, m.setStep(stepSystemd)
+		// Skip systemd step if systemd is unavailable
+		nextStep := stepSystemd
+		if !systemdAvailable() {
+			nextStep = stepPreview
+		}
+		return m, m.setStep(nextStep)
 	}
 	return m, nil
 }
@@ -2815,7 +2844,8 @@ func (m *setupModel) applyAndInstallSystemd() tea.Cmd {
 		m.systemdErr = err.Error()
 		return nil
 	}
-	if err := installSystemdJira(m.cfg); err != nil {
+	// Install with output suppressed (TUI will show a completion message instead)
+	if err := installSystemdJiraWithExec(m.cfg, defaultExecRunner, io.Discard); err != nil {
 		m.systemdErr = err.Error()
 		return nil
 	}
