@@ -49,6 +49,10 @@ func CommitAndPush(ctx context.Context, repoPath, message string) error {
 	if err != nil {
 		return err
 	}
+	// Sync with remote before pushing to avoid non-fast-forward rejection.
+	if _, pullErr := gitExec(ctx, repoPath, "pull", "--rebase", "origin", branch); pullErr != nil {
+		return fmt.Errorf("pull --rebase before push: %w", pullErr)
+	}
 	if _, err := gitExec(ctx, repoPath, "push", "origin", branch); err != nil {
 		return err
 	}
