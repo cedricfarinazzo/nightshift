@@ -187,8 +187,8 @@ func (m *Manager) CheckProviders(providers []string, ignoreBudget bool) ([]Enfor
 | `nightshift run` | priority list from config | pick first `OK=true` |
 | `nightshift preview` | priority list from config | show all results |
 | `nightshift task run` | single `--provider` flag | error if not OK |
-| `nightshift jira run` | phase providers for each project | skip project if any not OK |
-| `nightshift jira preview` | all phase providers (worst case) | display capacity per phase |
+| `nightshift jira run` | phase providers for each project | skip project if any provider not OK (TODO: per-ticket based on resume state) |
+| `nightshift jira preview` | all phase providers across all projects (worst case) | display capacity per phase |
 
 ### `--ignore-budget` Flag
 
@@ -205,9 +205,18 @@ the unique providers needed for the phases that will actually run:
 - Review path: review-fix only
 - Both paths: union of the above
 
-This means a project is only skipped if a provider needed for its *remaining*
-phases is exhausted — a provider used only in already-completed phases does not
-block resumption.
+#### Current: Project-Level Enforcement
+
+In `jiraRun`, the budget check occurs before processing any ticket for a project.
+If any required provider for that project is exhausted, the entire project is
+skipped. This is conservative but may be over-broad.
+
+#### Future: Per-Ticket / Resume-State Aware (VC-66 TODO)
+
+Ideally, budget checks should be per-ticket and account for resume state:
+a provider used only in already-completed phases does not block resumption.
+This requires `DetectResumeState` to be exported from orchestrator and called
+during the budget gate before each `ProcessTicket`.
 
 ## Testing
 

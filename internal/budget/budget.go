@@ -427,6 +427,9 @@ type EnforcementResult struct {
 // For jira: pass only providers needed for remaining phases; skip ticket if any not OK.
 //
 // When ignoreBudget is true, all results have OK=true (bypass).
+//
+// NOTE: Current implementation uses token-based gating (allowance > 0).
+// Hourly capacity normalization (as described in VC-66 title) is deferred.
 func (m *Manager) CheckProviders(providers []string, ignoreBudget bool) ([]EnforcementResult, error) {
 	results := make([]EnforcementResult, 0, len(providers))
 	for _, provider := range providers {

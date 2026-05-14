@@ -362,7 +362,12 @@ func selectProvider(cfg *config.Config, budgetMgr *budget.Manager, log *logging.
 	for _, r := range results {
 		if !r.OK {
 			log.Infof("provider %s: %s", r.Provider, r.Reason)
-			budgetExhausted = append(budgetExhausted, fmt.Sprintf("%s (%.0f%% used)", r.Provider, r.Allowance.UsedPercent))
+			// Only include usage pct if allowance data is available (not a budget error).
+			usageDetail := r.Reason
+			if r.Allowance != nil {
+				usageDetail = fmt.Sprintf("%s (%.0f%% used)", r.Provider, r.Allowance.UsedPercent)
+			}
+			budgetExhausted = append(budgetExhausted, usageDetail)
 			continue
 		}
 		if r.Allowance == nil {

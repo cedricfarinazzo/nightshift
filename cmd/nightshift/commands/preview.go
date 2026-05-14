@@ -309,21 +309,26 @@ func buildPreviewResult(cfg *config.Config, database *db.DB, projects []string, 
 			}
 
 			budgetResults, _ := budgetMgr.CheckProviders([]string{provider}, ignoreBudget)
-			if len(budgetResults) == 0 || budgetResults[0].Allowance == nil {
+			if len(budgetResults) == 0 {
 				projectResult.Status = previewProjectError
-				projectResult.Detail = "budget error: no result"
-				if len(budgetResults) > 0 {
-					projectResult.Detail = fmt.Sprintf("budget error: %s", budgetResults[0].Reason)
-				}
+				projectResult.Detail = "budget check failed (no result)"
 				run.Projects = append(run.Projects, projectResult)
 				continue
 			}
-			allowance := budgetResults[0].Allowance
+			result := budgetResults[0]
+			if result.Allowance == nil {
+				// Budget error case (e.g., provider unreachable).
+				projectResult.Status = previewProjectError
+				projectResult.Detail = fmt.Sprintf("budget error: %s", result.Reason)
+				run.Projects = append(run.Projects, projectResult)
+				continue
+			}
+			allowance := result.Allowance
 
 			projectResult.Budget = allowance
-			if !budgetResults[0].OK {
+			if !result.OK {
 				projectResult.Status = previewProjectBudgetExhausted
-				projectResult.Detail = budgetResults[0].Reason
+				projectResult.Detail = result.Reason
 				if includeDiagnostics {
 					projectResult.Diagnostics = computePreviewDiagnostics(cfg, selector, project, taskFilter, allowance.Allowance)
 				}

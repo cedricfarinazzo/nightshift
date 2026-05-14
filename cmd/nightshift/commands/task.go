@@ -11,7 +11,6 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"github.com/marcus/nightshift/internal/db"
 	"github.com/marcus/nightshift/internal/logging"
 	"github.com/marcus/nightshift/internal/orchestrator"
 	"github.com/marcus/nightshift/internal/security"
@@ -225,19 +224,13 @@ func runTaskRun(cmd *cobra.Command, args []string) error {
 
 	// Budget gate: check provider capacity before running.
 	if !dryRun {
-		database, dbErr := db.Open(cfg.ExpandedDBPath())
-		if dbErr != nil {
-			logging.Component("task-run").Warnf("open db for budget check: %v", dbErr)
-		} else {
-			defer func() { _ = database.Close() }()
-			budgetMgr := newBudgetManager(cfg, database)
-			results, _ := budgetMgr.CheckProviders([]string{provider}, ignoreBudget)
-			if len(results) > 0 && !results[0].OK {
-				return fmt.Errorf("budget exhausted for %s (%s), use --ignore-budget to override", provider, results[0].Reason)
-			}
-			if ignoreBudget {
-				fmt.Printf("WARNING: --ignore-budget is set, budget checks bypassed for %s\n", provider)
-			}
+		budgetMgr := newBudgetManager(cfg, nil)
+		results, _ := budgetMgr.CheckProviders([]string{provider}, ignoreBudget)
+		if len(results) > 0 && !results[0].OK && !ignoreBudget {
+			return fmt.Errorf("budget exhausted for %s (%s), use --ignore-budget to override", provider, results[0].Reason)
+		}
+		if ignoreBudget {
+			fmt.Printf("WARNING: --ignore-budget is set, budget checks bypassed for %s\n", provider)
 		}
 	}
 

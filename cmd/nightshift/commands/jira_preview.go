@@ -283,13 +283,39 @@ func runJiraPreview(cmd *cobra.Command, _ []string) error {
 
 			// Collect unique providers across all configured projects (all phases, worst case).
 			if len(projects) > 0 {
-				providers := jiraPhaseProviders(cfg.Jira, projects[0], false, false, false)
-				budgetResults, _ := budgetMgr.CheckProviders(providers, ignoreBudget)
-				// Use the implement provider's allowance as the primary Budget field.
+				seen := map[string]bool{}
+				var allProviders []string
+				for _, proj := range projects {
+					for _, p := range jiraPhaseProviders(cfg.Jira, proj, false, false, false) {
+						if !seen[p] {
+							seen[p] = true
+							allProviders = append(allProviders, p)
+						}
+					}
+				}
+				budgetResults, _ := budgetMgr.CheckProviders(allProviders, ignoreBudget)
+				// Use the implement provider's allowance as primary Budget (typically executes most logic).
+				implementProvider := "claude"
+				if len(projects) > 0 {
+					implementProvider = cfg.Jira.EffectiveImplement(projects[0]).Provider
+					if implementProvider == "" {
+						implementProvider = "claude"
+					}
+				}
+				implementProvider = strings.ToLower(implementProvider)
 				for _, r := range budgetResults {
-					if r.Allowance != nil {
+					if r.Provider == implementProvider && r.Allowance != nil {
 						result.Budget = r.Allowance
 						break
+					}
+				}
+				// Fallback to first available if implement provider not in results.
+				if result.Budget == nil {
+					for _, r := range budgetResults {
+						if r.Allowance != nil {
+							result.Budget = r.Allowance
+							break
+						}
 					}
 				}
 				// Collect any exhausted providers into BudgetErr for display.

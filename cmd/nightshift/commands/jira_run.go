@@ -10,7 +10,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/marcus/nightshift/internal/agents"
-	"github.com/marcus/nightshift/internal/budget"
 	"github.com/marcus/nightshift/internal/config"
 	"github.com/marcus/nightshift/internal/db"
 	"github.com/marcus/nightshift/internal/jira"
@@ -114,10 +113,7 @@ func runJira(cmd *cobra.Command, _ []string) error {
 	printJiraPreflightSummary(cfg.Jira, skipValidation, typeFilter, statusMap)
 
 	// Budget gate: build manager once for all projects.
-	var jiraBudgetMgr *budget.Manager
-	if runDB != nil {
-		jiraBudgetMgr = newBudgetManager(cfg, runDB)
-	}
+	jiraBudgetMgr := newBudgetManager(cfg, runDB)
 
 	if ignoreBudget {
 		fmt.Println("WARNING: --ignore-budget is set, budget checks will be bypassed")
@@ -139,21 +135,20 @@ func runJira(cmd *cobra.Command, _ []string) error {
 	} else {
 		for _, proj := range cfg.Jira.Projects {
 			// Budget gate: check all phase providers before starting this project.
-			if jiraBudgetMgr != nil {
-				providers := jiraPhaseProviders(cfg.Jira, proj, skipValidation, todoOnly, reviewOnly)
-				budgetResults, _ := jiraBudgetMgr.CheckProviders(providers, ignoreBudget)
-				blocked := false
-				for _, r := range budgetResults {
-					if !r.OK {
-						log.Warnf("project %s: provider %s: %s — skipping", proj.Key, r.Provider, r.Reason)
-						fmt.Printf("  ⏭  %s  skipped: provider %s %s (use --ignore-budget to override)\n", proj.Key, r.Provider, r.Reason)
-						blocked = true
-						break
-					}
+			// TODO: move this to per-ticket checking based on resume state (VC-66 feedback).
+			providers := jiraPhaseProviders(cfg.Jira, proj, skipValidation, todoOnly, reviewOnly)
+			budgetResults, _ := jiraBudgetMgr.CheckProviders(providers, ignoreBudget)
+			blocked := false
+			for _, r := range budgetResults {
+				if !r.OK {
+					log.Warnf("project %s: provider %s: %s — skipping", proj.Key, r.Provider, r.Reason)
+					fmt.Printf("  ⏭  %s  skipped: provider %s %s (use --ignore-budget to override)\n", proj.Key, r.Provider, r.Reason)
+					blocked = true
+					break
 				}
-				if blocked {
-					continue
-				}
+			}
+			if blocked {
+				continue
 			}
 
 			orch, err := buildOrchestrator(client, cfg, proj, skipValidation, runDB, runID)
