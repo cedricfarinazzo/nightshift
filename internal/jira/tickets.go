@@ -236,65 +236,6 @@ func issueToTicket(issue *model.IssueScheme) Ticket {
 	return t
 }
 
-// issueToTicketV2 maps a go-atlassian IssueSchemeV2 (Agile API) to a Ticket.
-// Description in V2 is a plain string, not ADF.
-func issueToTicketV2(issue *model.IssueSchemeV2) Ticket {
-	if issue == nil {
-		return Ticket{}
-	}
-	t := Ticket{Key: issue.Key}
-	if f := issue.Fields; f != nil {
-		t.Summary = f.Summary
-		t.Labels = f.Labels
-		if f.Description != "" {
-			t.Description = f.Description
-			t.AcceptanceCriteria = extractAcceptanceCriteria(t.Description)
-		}
-		if f.Status != nil {
-			t.Status = Status{
-				ID:   f.Status.ID,
-				Name: f.Status.Name,
-			}
-			if f.Status.StatusCategory != nil {
-				t.Status.CategoryKey = f.Status.StatusCategory.Key
-			}
-		}
-		if f.IssueType != nil {
-			t.IssueType = f.IssueType.Name
-		}
-		if f.Reporter != nil {
-			t.Reporter = f.Reporter.DisplayName
-		}
-		if f.Assignee != nil {
-			t.Assignee = f.Assignee.DisplayName
-		}
-		if f.Comment != nil {
-			for _, c := range f.Comment.Comments {
-				if c == nil {
-					continue
-				}
-				cm := Comment{ID: c.ID, Body: c.Body}
-				if c.Author != nil {
-					cm.Author = c.Author.DisplayName
-				}
-				cm.Created = parseJiraTime(c.Created)
-				cm.Updated = parseJiraTime(c.Updated)
-				t.Comments = append(t.Comments, cm)
-			}
-		}
-		for _, link := range f.IssueLinks {
-			t.IssueLinks = append(t.IssueLinks, issueLinkToLink(issue.Key, link))
-		}
-		if f.Parent != nil {
-			t.ParentKey = f.Parent.Key
-			if f.Parent.Fields != nil {
-				t.ParentSummary = f.Parent.Fields.Summary
-			}
-		}
-	}
-	return t
-}
-
 // fetchParentDescriptions fetches the description for each unique parent key and
 // populates ParentDescription on the tickets that reference it. Failures are
 // non-fatal: the ticket is still usable, just without parent description.
