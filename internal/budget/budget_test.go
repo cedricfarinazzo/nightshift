@@ -15,7 +15,7 @@ type mockClaudeProvider struct {
 }
 
 func (m *mockClaudeProvider) Name() string { return "claude" }
-func (m *mockClaudeProvider) GetUsedPercent(mode string, weeklyBudget int64) (float64, error) {
+func (m *mockClaudeProvider) GetUsedPercent(mode string) (float64, error) {
 	return m.usedPercent, m.err
 }
 func (m *mockClaudeProvider) LastUsedPercentSource() string {
@@ -30,7 +30,7 @@ type mockCodexProvider struct {
 }
 
 func (m *mockCodexProvider) Name() string { return "codex" }
-func (m *mockCodexProvider) GetUsedPercent(mode string, weeklyBudget int64) (float64, error) {
+func (m *mockCodexProvider) GetUsedPercent(mode string) (float64, error) {
 	return m.usedPercent, m.err
 }
 func (m *mockCodexProvider) GetResetTime(mode string) (time.Time, error) {
@@ -39,693 +39,249 @@ func (m *mockCodexProvider) GetResetTime(mode string) (time.Time, error) {
 
 // mockCopilotProvider implements CopilotUsageProvider for testing.
 type mockCopilotProvider struct {
-	usedPercent          float64
-	resetTime            time.Time
-	err                  error
-	receivedMonthlyLimit int64 // captures the monthlyLimit passed by production code
+	usedPercent float64
+	resetTime   time.Time
+	err         error
 }
 
 func (m *mockCopilotProvider) Name() string { return "copilot" }
-func (m *mockCopilotProvider) GetUsedPercent(mode string, monthlyLimit int64) (float64, error) {
-	m.receivedMonthlyLimit = monthlyLimit
+func (m *mockCopilotProvider) GetUsedPercent(mode string) (float64, error) {
 	return m.usedPercent, m.err
 }
 func (m *mockCopilotProvider) GetResetTime(mode string) (time.Time, error) {
 	return m.resetTime, m.err
 }
 
-type mockBudgetSource struct {
-	estimate BudgetEstimate
-	err      error
-}
-
-func (m *mockBudgetSource) GetBudget(provider string) (BudgetEstimate, error) {
-	return m.estimate, m.err
-}
-
-func TestCalculateAllowance_DailyMode(t *testing.T) {
-	tests := []struct {
-		name           string
-		weeklyBudget   int
-		maxPercent     int
-		reservePercent int
-		usedPercent    float64
-		wantAllowance  int64
-	}{
-		{
-			name:           "fresh day no usage",
-			weeklyBudget:   700000,
-			maxPercent:     10,
-			reservePercent: 5,
-			usedPercent:    0,
-			// daily=100000, available=100000, allowance=10000, reserve=5000, final=5000
-			wantAllowance: 5000,
-		},
-		{
-			name:           "50% used today",
-			weeklyBudget:   700000,
-			maxPercent:     10,
-			reservePercent: 5,
-			usedPercent:    50,
-			// daily=100000, available=50000, allowance=5000, reserve=5000, final=0
-			wantAllowance: 0,
-		},
-		{
-			name:           "20% used today",
-			weeklyBudget:   700000,
-			maxPercent:     10,
-			reservePercent: 5,
-			usedPercent:    20,
-			// daily=100000, available=80000, allowance=8000, reserve=5000, final=3000
-			wantAllowance: 3000,
-		},
-		{
-			name:           "no reserve",
-			weeklyBudget:   700000,
-			maxPercent:     10,
-			reservePercent: 0,
-			usedPercent:    0,
-			// daily=100000, available=100000, allowance=10000, reserve=0, final=10000
-			wantAllowance: 10000,
-		},
-		{
-			name:           "high max percent",
-			weeklyBudget:   700000,
-			maxPercent:     50,
-			reservePercent: 0,
-			usedPercent:    0,
-			// daily=100000, available=100000, allowance=50000, reserve=0, final=50000
-			wantAllowance: 50000,
-		},
-		{
-			name:           "fully used day",
-			weeklyBudget:   700000,
-			maxPercent:     10,
-			reservePercent: 5,
-			usedPercent:    100,
-			// daily=100000, available=0, allowance=0, reserve=5000, final=0 (capped at 0)
-			wantAllowance: 0,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			cfg := &config.Config{
-				Budget: config.BudgetConfig{
-					Mode:           "daily",
-					WeeklyTokens:   tt.weeklyBudget,
-					MaxPercent:     tt.maxPercent,
-					ReservePercent: tt.reservePercent,
-				},
-			}
-
-			claude := &mockClaudeProvider{usedPercent: tt.usedPercent}
-			copilot := &mockCopilotProvider{usedPercent: 0}
-			mgr := NewManager(cfg, claude, nil, copilot)
-
-			result, err := mgr.CalculateAllowance("claude")
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-
-			if result.Allowance != tt.wantAllowance {
-				t.Errorf("allowance = %d, want %d", result.Allowance, tt.wantAllowance)
-			}
-			if result.Mode != "daily" {
-				t.Errorf("mode = %s, want daily", result.Mode)
-			}
-		})
-	}
-}
-
-func TestCalculateAllowance_WeeklyMode(t *testing.T) {
-	// Fix time to Tuesday for predictable remainingDays (5 days until Sunday)
-	fixedTime := time.Date(2024, 1, 16, 12, 0, 0, 0, time.UTC) // Tuesday
-
-	tests := []struct {
-		name           string
-		weeklyBudget   int
-		maxPercent     int
-		reservePercent int
-		usedPercent    float64
-		aggressive     bool
-		remainingDays  int
-		wantAllowance  int64
-		wantMultiplier float64
-	}{
-		{
-			name:           "fresh week",
-			weeklyBudget:   700000,
-			maxPercent:     10,
-			reservePercent: 5,
-			usedPercent:    0,
-			aggressive:     false,
-			remainingDays:  5,
-			// remaining=700000, perDay=140000, allowance=14000, reserve=5%*14000=700, final=13300
-			wantAllowance:  13300,
-			wantMultiplier: 1.0,
-		},
-		{
-			name:           "mid-week 30% used",
-			weeklyBudget:   700000,
-			maxPercent:     20,
-			reservePercent: 0,
-			usedPercent:    30,
-			aggressive:     false,
-			remainingDays:  5,
-			// remaining=490000, perDay=98000, allowance=19600, reserve=0, final=19599 (rounding)
-			wantAllowance:  19599,
-			wantMultiplier: 1.0,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			cfg := &config.Config{
-				Budget: config.BudgetConfig{
-					Mode:                "weekly",
-					WeeklyTokens:        tt.weeklyBudget,
-					MaxPercent:          tt.maxPercent,
-					ReservePercent:      tt.reservePercent,
-					AggressiveEndOfWeek: tt.aggressive,
-				},
-			}
-
-			claude := &mockClaudeProvider{usedPercent: tt.usedPercent}
-			copilot := &mockCopilotProvider{usedPercent: 0}
-			mgr := NewManager(cfg, claude, nil, copilot)
-			mgr.nowFunc = func() time.Time { return fixedTime }
-
-			result, err := mgr.CalculateAllowance("claude")
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-
-			if result.Allowance != tt.wantAllowance {
-				t.Errorf("allowance = %d, want %d", result.Allowance, tt.wantAllowance)
-			}
-			if result.Mode != "weekly" {
-				t.Errorf("mode = %s, want weekly", result.Mode)
-			}
-			if result.Multiplier != tt.wantMultiplier {
-				t.Errorf("multiplier = %f, want %f", result.Multiplier, tt.wantMultiplier)
-			}
-		})
-	}
-}
-
-func TestAggressiveEndOfWeek(t *testing.T) {
-	tests := []struct {
-		name           string
-		dayOfWeek      time.Weekday
-		aggressive     bool
-		wantMultiplier float64
-	}{
-		{
-			name:           "friday not aggressive",
-			dayOfWeek:      time.Friday,
-			aggressive:     false,
-			wantMultiplier: 1.0,
-		},
-		{
-			name:           "friday aggressive (2 days left)",
-			dayOfWeek:      time.Friday,
-			aggressive:     true,
-			wantMultiplier: 2.0, // 4-2=2, remaining=2 so multiplier=2
-		},
-		{
-			name:           "saturday aggressive (1 day left)",
-			dayOfWeek:      time.Saturday,
-			aggressive:     true,
-			wantMultiplier: 3.0, // 4-1=3
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Set time to the specified day
-			var fixedTime time.Time
-			switch tt.dayOfWeek {
-			case time.Friday:
-				fixedTime = time.Date(2024, 1, 19, 12, 0, 0, 0, time.UTC)
-			case time.Saturday:
-				fixedTime = time.Date(2024, 1, 20, 12, 0, 0, 0, time.UTC)
-			}
-
-			cfg := &config.Config{
-				Budget: config.BudgetConfig{
-					Mode:                "weekly",
-					WeeklyTokens:        700000,
-					MaxPercent:          10,
-					ReservePercent:      0,
-					AggressiveEndOfWeek: tt.aggressive,
-				},
-			}
-
-			claude := &mockClaudeProvider{usedPercent: 0}
-			copilot := &mockCopilotProvider{usedPercent: 0}
-			mgr := NewManager(cfg, claude, nil, copilot)
-			mgr.nowFunc = func() time.Time { return fixedTime }
-
-			result, err := mgr.CalculateAllowance("claude")
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-
-			if result.Multiplier != tt.wantMultiplier {
-				t.Errorf("multiplier = %f, want %f", result.Multiplier, tt.wantMultiplier)
-			}
-		})
-	}
-}
-
-func TestDaysUntilWeeklyReset_Claude(t *testing.T) {
-	tests := []struct {
-		dayOfWeek time.Weekday
-		wantDays  int
-	}{
-		{time.Sunday, 7},
-		{time.Monday, 6},
-		{time.Tuesday, 5},
-		{time.Wednesday, 4},
-		{time.Thursday, 3},
-		{time.Friday, 2},
-		{time.Saturday, 1},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.dayOfWeek.String(), func(t *testing.T) {
-			// Create a date that falls on the specified day
-			// Jan 14, 2024 is a Sunday
-			baseDate := time.Date(2024, 1, 14, 12, 0, 0, 0, time.UTC)
-			fixedTime := baseDate.AddDate(0, 0, int(tt.dayOfWeek))
-
-			cfg := &config.Config{
-				Budget: config.BudgetConfig{
-					Mode:         "weekly",
-					WeeklyTokens: 700000,
-				},
-			}
-
-			copilot := &mockCopilotProvider{usedPercent: 0}
-			mgr := NewManager(cfg, nil, nil, copilot)
-			mgr.nowFunc = func() time.Time { return fixedTime }
-
-			days, err := mgr.DaysUntilWeeklyReset("claude")
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-
-			if days != tt.wantDays {
-				t.Errorf("days = %d, want %d (day=%s)", days, tt.wantDays, tt.dayOfWeek)
-			}
-		})
-	}
-}
-
-func TestDaysUntilWeeklyReset_Codex(t *testing.T) {
-	now := time.Date(2024, 1, 15, 12, 0, 0, 0, time.UTC)
-
-	tests := []struct {
-		name      string
-		resetTime time.Time
-		wantDays  int
-	}{
-		{
-			name:      "3 days until reset",
-			resetTime: now.Add(72 * time.Hour),
-			wantDays:  3,
-		},
-		{
-			name:      "6 hours until reset",
-			resetTime: now.Add(6 * time.Hour),
-			wantDays:  1,
-		},
-		{
-			name:      "past reset time",
-			resetTime: now.Add(-1 * time.Hour),
-			wantDays:  1,
-		},
-		{
-			name:      "zero reset time",
-			resetTime: time.Time{},
-			wantDays:  7,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			cfg := &config.Config{
-				Budget: config.BudgetConfig{
-					Mode:         "weekly",
-					WeeklyTokens: 700000,
-				},
-			}
-
-			codex := &mockCodexProvider{resetTime: tt.resetTime}
-			copilot := &mockCopilotProvider{usedPercent: 0}
-			mgr := NewManager(cfg, nil, codex, copilot)
-			mgr.nowFunc = func() time.Time { return now }
-
-			days, err := mgr.DaysUntilWeeklyReset("codex")
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-
-			if days != tt.wantDays {
-				t.Errorf("days = %d, want %d", days, tt.wantDays)
-			}
-		})
-	}
-}
-
-func TestPerProviderBudget(t *testing.T) {
+func TestCheckProviders_OK(t *testing.T) {
 	cfg := &config.Config{
 		Budget: config.BudgetConfig{
-			Mode:         "daily",
-			WeeklyTokens: 700000,
-			MaxPercent:   10,
-			PerProvider: map[string]int{
-				"claude": 350000, // Half the default
-			},
+			MaxPercent: 80,
 		},
 	}
+	claude := &mockClaudeProvider{usedPercent: 50}
+	mgr := NewManager(cfg, claude, nil, nil)
 
-	claude := &mockClaudeProvider{usedPercent: 0}
-	copilot := &mockCopilotProvider{usedPercent: 0}
-	mgr := NewManager(cfg, claude, nil, copilot)
-
-	result, err := mgr.CalculateAllowance("claude")
+	results, err := mgr.CheckProviders([]string{"claude"}, false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-
-	// daily = 350000/7 = 50000
-	// allowance = 50000 * 0.10 = 5000
-	// reserve = 50000 * 0.05 = 2500
-	// final = 5000 - 2500 = 2500
-	expectedDaily := int64(50000)
-	if result.BudgetBase != expectedDaily {
-		t.Errorf("BudgetBase = %d, want %d", result.BudgetBase, expectedDaily)
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
+	}
+	r := results[0]
+	if !r.OK {
+		t.Errorf("expected OK=true for 50%% used with 80%% limit, got reason: %s", r.Reason)
+	}
+	if r.Allowance == nil {
+		t.Fatal("expected non-nil Allowance")
+	}
+	if r.Allowance.UsedPercent != 50 {
+		t.Errorf("UsedPercent = %f, want 50", r.Allowance.UsedPercent)
+	}
+	if r.Allowance.MaxPercent != 80 {
+		t.Errorf("MaxPercent = %d, want 80", r.Allowance.MaxPercent)
 	}
 }
 
-func TestBudgetSourceOverridesConfig(t *testing.T) {
+func TestCheckProviders_Exhausted(t *testing.T) {
 	cfg := &config.Config{
 		Budget: config.BudgetConfig{
-			Mode:         "weekly",
-			WeeklyTokens: 100000,
-			MaxPercent:   10,
+			MaxPercent: 80,
 		},
 	}
+	claude := &mockClaudeProvider{usedPercent: 85}
+	mgr := NewManager(cfg, claude, nil, nil)
 
-	claude := &mockClaudeProvider{usedPercent: 0}
-	source := &mockBudgetSource{estimate: BudgetEstimate{
-		WeeklyTokens: 700000,
-		Source:       "calibrated",
-		Confidence:   "high",
-		SampleCount:  6,
-	}}
-
-	mgr := NewManager(cfg, claude, nil, nil, WithBudgetSource(source))
-	result, err := mgr.CalculateAllowance("claude")
-	if err != nil {
-		t.Fatalf("CalculateAllowance error: %v", err)
-	}
-
-	if result.BudgetSource != "calibrated" {
-		t.Fatalf("BudgetSource = %s", result.BudgetSource)
-	}
-	if result.BudgetConfidence != "high" {
-		t.Fatalf("BudgetConfidence = %s", result.BudgetConfidence)
-	}
-	if result.BudgetSampleCount != 6 {
-		t.Fatalf("BudgetSampleCount = %d", result.BudgetSampleCount)
-	}
-}
-
-func TestBudgetSourceFallbacksToConfig(t *testing.T) {
-	cfg := &config.Config{
-		Budget: config.BudgetConfig{
-			Mode:         "weekly",
-			WeeklyTokens: 100000,
-			MaxPercent:   10,
-		},
-	}
-
-	claude := &mockClaudeProvider{usedPercent: 0}
-	source := &mockBudgetSource{estimate: BudgetEstimate{
-		WeeklyTokens: 0,
-	}}
-
-	mgr := NewManager(cfg, claude, nil, nil, WithBudgetSource(source))
-	result, err := mgr.CalculateAllowance("claude")
-	if err != nil {
-		t.Fatalf("CalculateAllowance error: %v", err)
-	}
-
-	if result.BudgetSource != "config" {
-		t.Fatalf("BudgetSource = %s", result.BudgetSource)
-	}
-}
-
-func TestCanRun(t *testing.T) {
-	cfg := &config.Config{
-		Budget: config.BudgetConfig{
-			Mode:           "daily",
-			WeeklyTokens:   700000,
-			MaxPercent:     10,
-			ReservePercent: 0,
-		},
-	}
-
-	claude := &mockClaudeProvider{usedPercent: 0}
-	copilot := &mockCopilotProvider{usedPercent: 0}
-	mgr := NewManager(cfg, claude, nil, copilot)
-
-	// Available: 10000 tokens (100000 * 10%)
-	tests := []struct {
-		estimated int64
-		canRun    bool
-	}{
-		{5000, true},
-		{10000, true},
-		{10001, false},
-		{50000, false},
-	}
-
-	for _, tt := range tests {
-		canRun, err := mgr.CanRun("claude", tt.estimated)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if canRun != tt.canRun {
-			t.Errorf("CanRun(%d) = %v, want %v", tt.estimated, canRun, tt.canRun)
-		}
-	}
-}
-
-func TestSummary(t *testing.T) {
-	cfg := &config.Config{
-		Budget: config.BudgetConfig{
-			Mode:           "daily",
-			WeeklyTokens:   700000,
-			MaxPercent:     10,
-			ReservePercent: 5,
-		},
-	}
-
-	claude := &mockClaudeProvider{usedPercent: 25}
-	copilot := &mockCopilotProvider{usedPercent: 0}
-	mgr := NewManager(cfg, claude, nil, copilot)
-
-	summary, err := mgr.Summary("claude")
+	results, err := mgr.CheckProviders([]string{"claude"}, false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-
-	if summary == "" {
-		t.Error("summary should not be empty")
+	r := results[0]
+	if r.OK {
+		t.Error("expected OK=false for 85%% used with 80%% limit")
 	}
-
-	// Should contain key info
-	if !contains(summary, "claude") {
-		t.Error("summary should contain provider name")
-	}
-	if !contains(summary, "25.0%") {
-		t.Error("summary should contain used percent")
+	if r.Reason == "" {
+		t.Error("expected non-empty Reason")
 	}
 }
 
-func TestCalculateAllowance_UsedPercentSource(t *testing.T) {
+func TestCheckProviders_IgnoreBudget(t *testing.T) {
 	cfg := &config.Config{
 		Budget: config.BudgetConfig{
-			Mode:           "daily",
-			WeeklyTokens:   700000,
-			MaxPercent:     10,
-			ReservePercent: 5,
+			MaxPercent: 80,
 		},
 	}
+	claude := &mockClaudeProvider{usedPercent: 99}
+	mgr := NewManager(cfg, claude, nil, nil)
 
-	claude := &mockClaudeProvider{usedPercent: 25, source: "jsonl-fallback"}
-	copilot := &mockCopilotProvider{usedPercent: 0}
-	mgr := NewManager(cfg, claude, nil, copilot)
-
-	result, err := mgr.CalculateAllowance("claude")
-	if err != nil {
-		t.Fatalf("CalculateAllowance error: %v", err)
-	}
-	if result.UsedPercentSource != "jsonl-fallback" {
-		t.Fatalf("UsedPercentSource = %q, want %q", result.UsedPercentSource, "jsonl-fallback")
-	}
-}
-
-func TestCalculateAllowance_Codex(t *testing.T) {
-	cfg := &config.Config{
-		Budget: config.BudgetConfig{
-			Mode:           "daily",
-			WeeklyTokens:   700000,
-			MaxPercent:     10,
-			ReservePercent: 0,
-			PerProvider:    map[string]int{"codex": 500000},
-		},
-	}
-
-	codex := &mockCodexProvider{usedPercent: 24} // 24% used (from scraped data)
-	copilot := &mockCopilotProvider{usedPercent: 0}
-	mgr := NewManager(cfg, nil, codex, copilot)
-
-	result, err := mgr.CalculateAllowance("codex")
+	results, err := mgr.CheckProviders([]string{"claude"}, true)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
+	if !results[0].OK {
+		t.Error("expected OK=true with ignoreBudget=true")
+	}
+}
 
-	// daily = 500000/7 = 71428
-	// available = 71428 * (1 - 0.24) = 54285
-	// allowance = 54285 * 0.10 = 5428
-	if result.Allowance <= 0 {
-		t.Fatalf("expected positive allowance for codex, got %d", result.Allowance)
+func TestCheckProviders_AtLimit(t *testing.T) {
+	cfg := &config.Config{
+		Budget: config.BudgetConfig{
+			MaxPercent: 80,
+		},
 	}
-	if result.Mode != "daily" {
-		t.Fatalf("mode = %s, want daily", result.Mode)
+	// Exactly at limit is NOT OK (< maxPercent required).
+	claude := &mockClaudeProvider{usedPercent: 80}
+	mgr := NewManager(cfg, claude, nil, nil)
+
+	results, _ := mgr.CheckProviders([]string{"claude"}, false)
+	if results[0].OK {
+		t.Error("expected OK=false when usedPercent == maxPercent")
 	}
-	if result.UsedPercent != 24 {
-		t.Fatalf("used percent = %f, want 24", result.UsedPercent)
+}
+
+func TestCheckProviders_DefaultMaxPercent(t *testing.T) {
+	cfg := &config.Config{
+		Budget: config.BudgetConfig{
+			MaxPercent: 0, // zero → use default
+		},
+	}
+	claude := &mockClaudeProvider{usedPercent: 50}
+	mgr := NewManager(cfg, claude, nil, nil)
+
+	results, _ := mgr.CheckProviders([]string{"claude"}, false)
+	if !results[0].OK {
+		t.Error("expected OK=true at 50%% with default max percent")
+	}
+	if results[0].Allowance.MaxPercent != config.DefaultMaxPercent {
+		t.Errorf("MaxPercent = %d, want %d", results[0].Allowance.MaxPercent, config.DefaultMaxPercent)
+	}
+}
+
+func TestCheckProviders_ProviderError(t *testing.T) {
+	cfg := &config.Config{
+		Budget: config.BudgetConfig{MaxPercent: 80},
+	}
+	mgr := NewManager(cfg, nil, nil, nil) // no providers
+
+	results, err := mgr.CheckProviders([]string{"claude"}, false)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if results[0].OK {
+		t.Error("expected OK=false on provider error without ignoreBudget")
+	}
+}
+
+func TestCheckProviders_ProviderError_IgnoreBudget(t *testing.T) {
+	cfg := &config.Config{
+		Budget: config.BudgetConfig{MaxPercent: 80},
+	}
+	mgr := NewManager(cfg, nil, nil, nil)
+
+	results, _ := mgr.CheckProviders([]string{"claude"}, true)
+	if !results[0].OK {
+		t.Error("expected OK=true on provider error with ignoreBudget=true")
+	}
+}
+
+func TestCheckProviders_MultipleProviders(t *testing.T) {
+	cfg := &config.Config{
+		Budget: config.BudgetConfig{MaxPercent: 80},
+	}
+	claude := &mockClaudeProvider{usedPercent: 90} // exhausted
+	codex := &mockCodexProvider{usedPercent: 40}   // OK
+	mgr := NewManager(cfg, claude, codex, nil)
+
+	results, _ := mgr.CheckProviders([]string{"claude", "codex"}, false)
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(results))
+	}
+	if results[0].OK {
+		t.Error("claude should be exhausted")
+	}
+	if !results[1].OK {
+		t.Error("codex should be OK")
 	}
 }
 
 func TestGetUsedPercent_Errors(t *testing.T) {
 	cfg := &config.Config{
-		Budget: config.BudgetConfig{
-			Mode:         "daily",
-			WeeklyTokens: 700000,
-		},
+		Budget: config.BudgetConfig{Mode: "daily"},
 	}
 
-	// Test missing claude provider
-	copilot := &mockCopilotProvider{usedPercent: 0}
-	mgr := NewManager(cfg, nil, nil, copilot)
+	mgr := NewManager(cfg, nil, nil, nil)
 	_, err := mgr.GetUsedPercent("claude")
 	if err == nil {
 		t.Error("expected error for missing claude provider")
 	}
 
-	// Test missing codex provider
 	_, err = mgr.GetUsedPercent("codex")
 	if err == nil {
 		t.Error("expected error for missing codex provider")
 	}
 
-	// Test unknown provider
 	_, err = mgr.GetUsedPercent("unknown")
 	if err == nil {
 		t.Error("expected error for unknown provider")
 	}
 }
 
-
-func TestReserveEnforcement(t *testing.T) {
-	tests := []struct {
-		name           string
-		reservePercent int
-		maxPercent     int
-		usedPercent    float64
-		wantPositive   bool
-	}{
-		{
-			name:           "reserve larger than allowance",
-			reservePercent: 20,
-			maxPercent:     10,
-			usedPercent:    0,
-			wantPositive:   false, // reserve 20000 > allowance 10000
-		},
-		{
-			name:           "reserve smaller than allowance",
-			reservePercent: 2,
-			maxPercent:     10,
-			usedPercent:    0,
-			wantPositive:   true, // reserve 2000 < allowance 10000
+func TestSummary(t *testing.T) {
+	cfg := &config.Config{
+		Budget: config.BudgetConfig{
+			MaxPercent: 80,
 		},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			cfg := &config.Config{
-				Budget: config.BudgetConfig{
-					Mode:           "daily",
-					WeeklyTokens:   700000,
-					MaxPercent:     tt.maxPercent,
-					ReservePercent: tt.reservePercent,
-				},
-			}
+	claude := &mockClaudeProvider{usedPercent: 25}
+	mgr := NewManager(cfg, claude, nil, nil)
 
-			claude := &mockClaudeProvider{usedPercent: tt.usedPercent}
-			copilot := &mockCopilotProvider{usedPercent: 0}
-			mgr := NewManager(cfg, claude, nil, copilot)
+	summary, err := mgr.Summary("claude")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if summary == "" {
+		t.Error("summary should not be empty")
+	}
+	if !contains(summary, "claude") {
+		t.Error("summary should contain provider name")
+	}
+	if !contains(summary, "25.0%") {
+		t.Error("summary should contain used percent")
+	}
+	if !contains(summary, "OK") {
+		t.Error("summary should contain OK status")
+	}
+}
 
-			result, err := mgr.CalculateAllowance("claude")
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
+func TestSummary_Exhausted(t *testing.T) {
+	cfg := &config.Config{
+		Budget: config.BudgetConfig{MaxPercent: 80},
+	}
+	claude := &mockClaudeProvider{usedPercent: 85}
+	mgr := NewManager(cfg, claude, nil, nil)
 
-			gotPositive := result.Allowance > 0
-			if gotPositive != tt.wantPositive {
-				t.Errorf("allowance positive = %v, want %v (allowance=%d)", gotPositive, tt.wantPositive, result.Allowance)
-			}
-		})
+	summary, _ := mgr.Summary("claude")
+	if !contains(summary, "exhausted") {
+		t.Errorf("expected 'exhausted' in summary, got: %s", summary)
+	}
+}
+
+func TestAllowanceResult_Source(t *testing.T) {
+	cfg := &config.Config{
+		Budget: config.BudgetConfig{MaxPercent: 80},
+	}
+	claude := &mockClaudeProvider{usedPercent: 25, source: "api"}
+	mgr := NewManager(cfg, claude, nil, nil)
+
+	results, _ := mgr.CheckProviders([]string{"claude"}, false)
+	if results[0].Allowance.UsedPercentSource != "api" {
+		t.Errorf("UsedPercentSource = %q, want %q", results[0].Allowance.UsedPercentSource, "api")
 	}
 }
 
 func contains(s, substr string) bool {
 	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsHelper(s, substr))
-}
-
-func TestWeeklyToMonthlyConversion(t *testing.T) {
-	// Verify the production code passes weeklyBudget*52/12 (~4.33x) to GetUsedPercent,
-	// not weeklyBudget*4 (the old incorrect factor).
-	weeklyBudget := int64(100000)
-	copilot := &mockCopilotProvider{usedPercent: 50}
-	cfg := &config.Config{
-		Budget: config.BudgetConfig{
-			WeeklyTokens: int(weeklyBudget),
-		},
-	}
-	mgr := NewManager(cfg, nil, nil, copilot)
-
-	_, err := mgr.GetUsedPercent("copilot")
-	if err != nil {
-		t.Fatalf("GetUsedPercent error: %v", err)
-	}
-
-	got := copilot.receivedMonthlyLimit
-	want := weeklyBudget * 52 / 12
-	if got != want {
-		t.Errorf("monthlyLimit passed to GetUsedPercent = %d, want %d (~4.33x weekly)", got, want)
-	}
-	// Must be strictly greater than the old 4x factor
-	if got <= weeklyBudget*4 {
-		t.Errorf("monthlyLimit %d should be > weeklyBudget*4 %d", got, weeklyBudget*4)
-	}
 }
 
 func containsHelper(s, substr string) bool {

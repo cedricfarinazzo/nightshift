@@ -75,16 +75,12 @@ func renderPreviewText(result *previewResult, opts previewTextOptions) string {
 			if model == "" {
 				model = "default"
 			}
-			line := fmt.Sprintf("    - %s: %s available (%.1f%% used, weekly=%s, source=%s, model=%s)",
+			line := fmt.Sprintf("    - %s: %.1f%% used (limit: %d%%, source=%s, model=%s)",
 				summary.name,
-				formatTokens64(summary.allowance.Allowance),
 				summary.allowance.UsedPercent,
-				formatTokens64(summary.allowance.WeeklyBudget),
-				summary.allowance.BudgetSource,
+				summary.allowance.MaxPercent,
+				summary.allowance.UsedPercentSource,
 				model)
-			if summary.allowance.Allowance == 0 && summary.allowance.PredictedUsage > 0 {
-				line += fmt.Sprintf(" [daytime reserve: %s]", formatTokens64(summary.allowance.PredictedUsage))
-			}
 			fmt.Fprintln(b, line)
 		}
 	}
@@ -260,23 +256,11 @@ func renderBudgetText(b *strings.Builder, allowance *budget.AllowanceResult, ind
 		return
 	}
 	b.WriteString(indent)
-	fmt.Fprintf(b, "Budget: %s available (%.1f%% used)\n", formatTokens64(allowance.Allowance), allowance.UsedPercent)
-
-	b.WriteString(indent)
-	fmt.Fprintf(b, "Budget calc: weekly=%s, base=%s, reserve=%s, predicted=%s\n",
-		formatTokens64(allowance.WeeklyBudget),
-		formatTokens64(allowance.BudgetBase),
-		formatTokens64(allowance.ReserveAmount),
-		formatTokens64(allowance.PredictedUsage))
-	if allowance.Mode == "weekly" {
+	fmt.Fprintf(b, "Budget: %.1f%% used (limit: %d%%)\n", allowance.UsedPercent, allowance.MaxPercent)
+	if allowance.UsedPercentSource != "" {
 		b.WriteString(indent)
-		fmt.Fprintf(b, "Budget window: %d day(s) remaining, multiplier %.2f\n", allowance.RemainingDays, allowance.Multiplier)
+		fmt.Fprintf(b, "Source: %s\n", allowance.UsedPercentSource)
 	}
-	b.WriteString(indent)
-	fmt.Fprintf(b, "Budget source: %s (confidence=%s, samples=%d)\n",
-		allowance.BudgetSource,
-		allowance.BudgetConfidence,
-		allowance.BudgetSampleCount)
 }
 
 func renderDiagnosticsText(b *strings.Builder, styles previewStyles, diagnostics *previewDiagnostics, indent string) {
@@ -299,12 +283,6 @@ func renderDiagnosticsText(b *strings.Builder, styles previewStyles, diagnostics
 			diagnostics.FilteredTask.CostTier,
 			diagnostics.FilteredTask.MinTokens,
 			diagnostics.FilteredTask.MaxTokens)
-		if diagnostics.FilteredTask.BudgetTooLow {
-			b.WriteString(indent)
-			fmt.Fprintf(b, "  - Budget too low: need %s, have %s\n",
-				formatTokens64(int64(diagnostics.FilteredTask.MaxTokens)),
-				formatTokens64(diagnostics.FilteredTask.Budget))
-		}
 		if diagnostics.FilteredTask.Disabled {
 			b.WriteString(indent)
 			b.WriteString("  - Task disabled by config\n")
@@ -320,8 +298,6 @@ func renderDiagnosticsText(b *strings.Builder, styles previewStyles, diagnostics
 	agg := diagnostics.Aggregate
 	b.WriteString(indent)
 	fmt.Fprintf(b, "  - Enabled tasks: %d (disabled: %d)\n", agg.Enabled, agg.Disabled)
-	b.WriteString(indent)
-	fmt.Fprintf(b, "  - Over budget: %d (budget=%s)\n", agg.OverBudget, formatTokens64(agg.Budget))
 	if agg.Assigned > 0 {
 		b.WriteString(indent)
 		fmt.Fprintf(b, "  - Already assigned: %d\n", agg.Assigned)
@@ -457,16 +433,11 @@ type previewJSONConfigSource struct {
 }
 
 type previewJSONProviderBudget struct {
-	Provider       string  `json:"provider"`
-	Allowance      int64   `json:"allowance"`
-	UsedPercent    float64 `json:"used_percent"`
-	WeeklyBudget   int64   `json:"weekly_budget"`
-	ReserveAmount  int64   `json:"reserve_amount,omitempty"`
-	PredictedUsage int64   `json:"predicted_usage,omitempty"`
-	Source         string  `json:"source"`
-	Confidence     string  `json:"confidence,omitempty"`
-	Samples        int     `json:"samples,omitempty"`
-	Error          string  `json:"error,omitempty"`
+	Provider    string  `json:"provider"`
+	UsedPercent float64 `json:"used_percent"`
+	MaxPercent  int     `json:"max_percent"`
+	Source      string  `json:"source"`
+	Error       string  `json:"error,omitempty"`
 }
 
 type previewJSONRun struct {
@@ -485,18 +456,9 @@ type previewJSONProject struct {
 }
 
 type previewJSONBudget struct {
-	Allowance      int64   `json:"allowance"`
-	WeeklyBudget   int64   `json:"weekly_budget"`
-	BudgetBase     int64   `json:"budget_base"`
-	UsedPercent    float64 `json:"used_percent"`
-	ReserveAmount  int64   `json:"reserve_amount"`
-	PredictedUsage int64   `json:"predicted_usage"`
-	Mode           string  `json:"mode"`
-	RemainingDays  int     `json:"remaining_days,omitempty"`
-	Multiplier     float64 `json:"multiplier,omitempty"`
-	Source         string  `json:"source"`
-	Confidence     string  `json:"confidence,omitempty"`
-	Samples        int     `json:"samples,omitempty"`
+	UsedPercent float64 `json:"used_percent"`
+	MaxPercent  int     `json:"max_percent"`
+	Source      string  `json:"source"`
 }
 
 type previewJSONTask struct {
@@ -537,14 +499,11 @@ func buildPreviewJSON(result *previewResult) previewJSON {
 			budgets = append(budgets, entry)
 			continue
 		}
-		entry.Allowance = summary.allowance.Allowance
-		entry.UsedPercent = summary.allowance.UsedPercent
-		entry.WeeklyBudget = summary.allowance.WeeklyBudget
-		entry.ReserveAmount = summary.allowance.ReserveAmount
-		entry.PredictedUsage = summary.allowance.PredictedUsage
-		entry.Source = summary.allowance.BudgetSource
-		entry.Confidence = summary.allowance.BudgetConfidence
-		entry.Samples = summary.allowance.BudgetSampleCount
+		if summary.allowance != nil {
+			entry.UsedPercent = summary.allowance.UsedPercent
+			entry.MaxPercent = summary.allowance.MaxPercent
+			entry.Source = summary.allowance.UsedPercentSource
+		}
 		budgets = append(budgets, entry)
 	}
 
@@ -555,18 +514,9 @@ func buildPreviewJSON(result *previewResult) previewJSON {
 			var budgetPayload *previewJSONBudget
 			if project.Budget != nil {
 				budgetPayload = &previewJSONBudget{
-					Allowance:      project.Budget.Allowance,
-					WeeklyBudget:   project.Budget.WeeklyBudget,
-					BudgetBase:     project.Budget.BudgetBase,
-					UsedPercent:    project.Budget.UsedPercent,
-					ReserveAmount:  project.Budget.ReserveAmount,
-					PredictedUsage: project.Budget.PredictedUsage,
-					Mode:           project.Budget.Mode,
-					RemainingDays:  project.Budget.RemainingDays,
-					Multiplier:     project.Budget.Multiplier,
-					Source:         project.Budget.BudgetSource,
-					Confidence:     project.Budget.BudgetConfidence,
-					Samples:        project.Budget.BudgetSampleCount,
+					UsedPercent: project.Budget.UsedPercent,
+					MaxPercent:  project.Budget.MaxPercent,
+					Source:      project.Budget.UsedPercentSource,
 				}
 			}
 

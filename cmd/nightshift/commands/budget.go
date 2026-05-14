@@ -107,8 +107,6 @@ func printProviderBudgetActive(
 
 	pu := fetchProviderUsageFn(ctx, provName)
 
-	result, allowanceErr := mgr.CalculateAllowance(provName)
-
 	srcLabel := strings.ToUpper(pu.Source)
 	if pu.Source == "none" || pu.Source == "" {
 		srcLabel = "N/A"
@@ -141,9 +139,9 @@ func printProviderBudgetActive(
 			}
 			fmt.Printf("  %-8s %s %4s%s\n", label, bar, pct, resetStr)
 		}
-	} else if allowanceErr == nil {
-		bar := unicodeProgressBar(result.UsedPercent, 25)
-		pct := fmt.Sprintf("%.0f%%", result.UsedPercent)
+	} else if usedPct, err := mgr.GetUsedPercent(provName); err == nil {
+		bar := unicodeProgressBar(usedPct, 25)
+		pct := fmt.Sprintf("%.0f%%", usedPct)
 		fmt.Printf("  Used     %s %4s\n", bar, pct)
 	}
 
@@ -216,10 +214,8 @@ func printBudgetJSON(cfg *config.Config, providerList []string, mgr *budget.Mana
 				ResetsAt:    q.ResetsAt,
 			})
 		}
-		// Compute UsedPct from manager for consistency with active tracking
-		result, err := mgr.CalculateAllowance(provName)
-		if err == nil {
-			pj.UsedPct = result.UsedPercent
+		if usedPct, err := mgr.GetUsedPercent(provName); err == nil {
+			pj.UsedPct = usedPct
 		}
 		if pj.Source == "" {
 			pj.Source = "none"

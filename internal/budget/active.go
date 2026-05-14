@@ -38,7 +38,7 @@ type anthropicActiveProvider struct {
 
 func (p *anthropicActiveProvider) Name() string { return "claude" }
 
-func (p *anthropicActiveProvider) GetUsedPercent(mode string, weeklyBudget int64) (float64, error) {
+func (p *anthropicActiveProvider) GetUsedPercent(mode string) (float64, error) {
 	if p.client == nil {
 		p.setSource("none")
 		return 0, fmt.Errorf("anthropic client not initialized")
@@ -85,7 +85,7 @@ type codexActiveProvider struct {
 
 func (p *codexActiveProvider) Name() string { return "codex" }
 
-func (p *codexActiveProvider) GetUsedPercent(mode string, weeklyBudget int64) (float64, error) {
+func (p *codexActiveProvider) GetUsedPercent(mode string) (float64, error) {
 	if p.client == nil {
 		p.setSource("none")
 		return 0, fmt.Errorf("codex client not initialized")
@@ -160,7 +160,7 @@ type copilotActiveProvider struct {
 
 func (p *copilotActiveProvider) Name() string { return "copilot" }
 
-func (p *copilotActiveProvider) GetUsedPercent(mode string, monthlyLimit int64) (float64, error) {
+func (p *copilotActiveProvider) GetUsedPercent(mode string) (float64, error) {
 	if p.client == nil {
 		p.setSource("none")
 		return 0, fmt.Errorf("copilot client not initialized")

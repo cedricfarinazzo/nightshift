@@ -59,7 +59,7 @@ func TestAnthropicActiveProvider_APISuccess(t *testing.T) {
 	)
 	p := &anthropicActiveProvider{client: apiClient}
 
-	pct, err := p.GetUsedPercent("weekly", 1_000_000)
+	pct, err := p.GetUsedPercent("weekly")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -82,7 +82,7 @@ func TestAnthropicActiveProvider_APIError_ReturnsZero(t *testing.T) {
 	)
 	p := &anthropicActiveProvider{client: apiClient}
 
-	pct, err := p.GetUsedPercent("weekly", 1_000_000)
+	pct, err := p.GetUsedPercent("weekly")
 	if err == nil {
 		t.Fatalf("expected error on API failure, got nil")
 	}
@@ -97,7 +97,7 @@ func TestAnthropicActiveProvider_APIError_ReturnsZero(t *testing.T) {
 func TestAnthropicActiveProvider_NilClient_ReturnsZero(t *testing.T) {
 	p := &anthropicActiveProvider{client: nil}
 
-	pct, err := p.GetUsedPercent("weekly", 1_000_000)
+	pct, err := p.GetUsedPercent("weekly")
 	if err == nil {
 		t.Fatalf("expected error on nil client, got nil")
 	}
@@ -141,7 +141,7 @@ func TestCopilotActiveProvider_APISuccess(t *testing.T) {
 	apiClient := newCopilotClientForTest(t, srv.URL, ghExec)
 	p := &copilotActiveProvider{client: apiClient}
 
-	pct, err := p.GetUsedPercent("weekly", 300)
+	pct, err := p.GetUsedPercent("weekly")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -165,7 +165,7 @@ func TestCopilotActiveProvider_APIError_ReturnsZero(t *testing.T) {
 	apiClient := newCopilotClientForTest(t, srv.URL, ghExec)
 	p := &copilotActiveProvider{client: apiClient}
 
-	pct, err := p.GetUsedPercent("weekly", 300)
+	pct, err := p.GetUsedPercent("weekly")
 	if err == nil {
 		t.Fatalf("expected error on API failure, got nil")
 	}
@@ -240,7 +240,7 @@ func TestAnthropicActiveProvider_Concurrent(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, _ = p.GetUsedPercent("weekly", 1_000_000)
+			_, _ = p.GetUsedPercent("weekly")
 			_ = p.LastUsedPercentSource()
 		}()
 	}

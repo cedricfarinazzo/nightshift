@@ -62,10 +62,10 @@ func renderJiraPreviewText(result *jiraPreviewResult, opts jiraPreviewTextOption
 		if opts.Explain {
 			renderBudgetText(b, result.Budget, "  ")
 		} else {
-			fmt.Fprintf(b, "  %s available (%.1f%% used, source=%s)\n",
-				formatTokens64(result.Budget.Allowance),
+			fmt.Fprintf(b, "  %.1f%% used (limit: %d%%, source=%s)\n",
 				result.Budget.UsedPercent,
-				result.Budget.BudgetSource)
+				result.Budget.MaxPercent,
+				result.Budget.UsedPercentSource)
 		}
 		b.WriteString("\n")
 	} else if result.BudgetErr != "" {

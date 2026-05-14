@@ -1,10 +1,10 @@
-// Package budget implements token budget calculation and allocation for nightshift.
-// Supports daily and weekly modes with reserve and aggressive end-of-week options.
+// Package budget implements budget enforcement for nightshift using live API quotas.
+// Budget is enforced as a percentage gate: if usedPercent >= maxPercent, the provider
+// is considered exhausted. No token arithmetic is performed.
 package budget
 
 import (
 	"fmt"
-	"math"
 	"time"
 
 	"github.com/marcus/nightshift/internal/config"
@@ -18,37 +18,21 @@ type UsageProvider interface {
 // ClaudeUsageProvider extends UsageProvider for Claude-specific usage methods.
 type ClaudeUsageProvider interface {
 	UsageProvider
-	GetUsedPercent(mode string, weeklyBudget int64) (float64, error)
+	GetUsedPercent(mode string) (float64, error)
 }
 
 // CodexUsageProvider extends UsageProvider for Codex-specific usage methods.
 type CodexUsageProvider interface {
 	UsageProvider
-	GetUsedPercent(mode string, weeklyBudget int64) (float64, error)
+	GetUsedPercent(mode string) (float64, error)
 	GetResetTime(mode string) (time.Time, error)
 }
 
 // CopilotUsageProvider extends UsageProvider for Copilot-specific usage methods.
-// Note: Copilot uses monthly request limits, not weekly token budgets.
-// The monthlyLimit parameter represents max premium requests per month.
 type CopilotUsageProvider interface {
 	UsageProvider
-	GetUsedPercent(mode string, monthlyLimit int64) (float64, error)
+	GetUsedPercent(mode string) (float64, error)
 	GetResetTime(mode string) (time.Time, error)
-}
-
-// BudgetEstimate provides a resolved weekly budget with metadata.
-type BudgetEstimate struct {
-	WeeklyTokens int64
-	Source       string
-	Confidence   string
-	SampleCount  int
-	Variance     float64
-}
-
-// BudgetSource provides calibrated or external budget estimates.
-type BudgetSource interface {
-	GetBudget(provider string) (BudgetEstimate, error)
 }
 
 // UsedPercentSourceProvider reports where the last used-percent value came from.
@@ -60,14 +44,13 @@ type UsedPercentSourceProvider interface {
 // Option configures a Manager.
 type Option func(*Manager)
 
-// Manager calculates and manages token budget allocation across providers.
+// Manager checks budget capacity across providers using live API quotas.
 type Manager struct {
-	cfg          *config.Config
-	claude       ClaudeUsageProvider
-	codex        CodexUsageProvider
-	copilot      CopilotUsageProvider
-	budgetSource BudgetSource
-	nowFunc      func() time.Time // for testing
+	cfg     *config.Config
+	claude  ClaudeUsageProvider
+	codex   CodexUsageProvider
+	copilot CopilotUsageProvider
+	nowFunc func() time.Time // for testing
 }
 
 // NewManager creates a budget manager with the given configuration and providers.
@@ -85,186 +68,24 @@ func NewManager(cfg *config.Config, claude ClaudeUsageProvider, codex CodexUsage
 	return mgr
 }
 
-// WithBudgetSource injects a BudgetSource for calibrated budgets.
-func WithBudgetSource(source BudgetSource) Option {
-	return func(m *Manager) {
-		m.budgetSource = source
-	}
-}
-
-
-// AllowanceResult contains the calculated budget allowance and metadata.
+// AllowanceResult holds the live usage data for a provider.
+// All budget decisions are percentage-based; no token arithmetic is performed.
 type AllowanceResult struct {
-	Allowance          int64   // Final token allowance for this run
-	AllowanceNoDaytime int64   // Allowance before predicted daytime usage is reserved
-	WeeklyBudget       int64   // Weekly token budget used for calculation
-	BudgetBase         int64   // Base budget for reserve calculation (daily budget or per-run allowance)
-	RemainingBudget    int64   // Remaining weekly budget (weekly mode only)
-	UsedPercent        float64 // Current used percentage
-	UsedPercentSource  string  // Source of used percentage (e.g., "api", "none")
-	ReserveAmount      int64   // Tokens reserved
-	PredictedUsage     int64   // Predicted remaining usage today
-	Mode               string  // "daily" or "weekly"
-	RemainingDays      int     // Days until reset (weekly mode only)
-	Multiplier         float64 // End-of-week multiplier (weekly mode only)
-	BudgetSource       string  // calibrated, api, config
-	BudgetConfidence   string  // none, low, medium, high
-	BudgetSampleCount  int     // number of samples used
+	UsedPercent       float64
+	UsedPercentSource string
+	MaxPercent        int
 }
 
-// CalculateAllowance determines how many tokens nightshift can use for this run.
-func (m *Manager) CalculateAllowance(provider string) (*AllowanceResult, error) {
-	estimate, err := m.resolveBudget(provider)
-	if err != nil {
-		return nil, err
-	}
-	weeklyBudget := estimate.WeeklyTokens
-
-	usedPercent, err := m.GetUsedPercent(provider)
-	if err != nil {
-		return nil, fmt.Errorf("getting used percent for %s: %w", provider, err)
-	}
-	usedPercentSource := m.usedPercentSource(provider)
-
-	mode := m.cfg.Budget.Mode
-	if mode == "" {
-		mode = config.DefaultBudgetMode
-	}
-
-	maxPercent := m.cfg.Budget.MaxPercent
-	if maxPercent <= 0 {
-		maxPercent = config.DefaultMaxPercent
-	}
-
-	reservePercent := m.cfg.Budget.ReservePercent
-	if reservePercent < 0 {
-		reservePercent = config.DefaultReservePercent
-	}
-
-	var result *AllowanceResult
-
-	switch mode {
-	case "daily":
-		result = m.calculateDailyAllowance(weeklyBudget, usedPercent, maxPercent)
-	case "weekly":
-		remainingDays, err := m.DaysUntilWeeklyReset(provider)
-		if err != nil {
-			return nil, fmt.Errorf("getting days until reset: %w", err)
-		}
-		result = m.calculateWeeklyAllowance(weeklyBudget, usedPercent, maxPercent, remainingDays)
-	default:
-		return nil, fmt.Errorf("invalid budget mode: %s", mode)
-	}
-
-	// Apply reserve enforcement
-	result = m.applyReserve(result, reservePercent)
-	result.AllowanceNoDaytime = result.Allowance
-	result.BudgetSource = estimate.Source
-	result.BudgetConfidence = estimate.Confidence
-	result.BudgetSampleCount = estimate.SampleCount
-	result.WeeklyBudget = weeklyBudget
-	result.UsedPercentSource = usedPercentSource
-
-	return result, nil
+// EnforcementResult holds the budget check outcome for a single provider.
+type EnforcementResult struct {
+	Provider  string
+	OK        bool
+	Reason    string
+	Allowance *AllowanceResult
 }
 
-// calculateDailyAllowance implements the daily mode budget algorithm.
-// Daily mode: Each night uses up to max_percent of that day's budget (weekly/7).
-func (m *Manager) calculateDailyAllowance(weeklyBudget int64, usedPercent float64, maxPercent int) *AllowanceResult {
-	dailyBudget := weeklyBudget / 7
-	availableToday := float64(dailyBudget) * (1 - usedPercent/100)
-	nightshiftAllowance := availableToday * float64(maxPercent) / 100
-
-	// Cap at available (can't use more than available)
-	if nightshiftAllowance > availableToday {
-		nightshiftAllowance = availableToday
-	}
-
-	return &AllowanceResult{
-		Allowance:   int64(math.Max(0, nightshiftAllowance)),
-		BudgetBase:  dailyBudget,
-		UsedPercent: usedPercent,
-		Mode:        "daily",
-		Multiplier:  1.0,
-	}
-}
-
-// calculateWeeklyAllowance implements the weekly mode budget algorithm.
-// Weekly mode: Each night uses up to max_percent of REMAINING weekly budget.
-func (m *Manager) calculateWeeklyAllowance(weeklyBudget int64, usedPercent float64, maxPercent int, remainingDays int) *AllowanceResult {
-	if remainingDays <= 0 {
-		remainingDays = 1 // Avoid division by zero
-	}
-
-	remainingWeekly := float64(weeklyBudget) * (1 - usedPercent/100)
-
-	// Aggressive end-of-week multiplier
-	multiplier := 1.0
-	if m.cfg.Budget.AggressiveEndOfWeek && remainingDays <= 2 {
-		// 2x on day before reset, 3x on last day
-		multiplier = float64(4 - remainingDays)
-	}
-
-	nightshiftAllowance := (remainingWeekly / float64(remainingDays)) * float64(maxPercent) / 100 * multiplier
-
-	return &AllowanceResult{
-		Allowance:       int64(math.Max(0, nightshiftAllowance)),
-		BudgetBase:      int64(math.Max(0, nightshiftAllowance)),
-		RemainingBudget: int64(math.Max(0, remainingWeekly)),
-		UsedPercent:     usedPercent,
-		Mode:            "weekly",
-		RemainingDays:   remainingDays,
-		Multiplier:      multiplier,
-	}
-}
-
-// applyReserve enforces the reserve percentage on the calculated allowance.
-func (m *Manager) applyReserve(result *AllowanceResult, reservePercent int) *AllowanceResult {
-	reserveAmount := float64(result.BudgetBase) * float64(reservePercent) / 100
-	result.ReserveAmount = int64(reserveAmount)
-	result.Allowance = int64(math.Max(0, float64(result.Allowance)-reserveAmount))
-	return result
-}
-
-func (m *Manager) resolveBudget(provider string) (BudgetEstimate, error) {
-	estimate := BudgetEstimate{
-		WeeklyTokens: int64(m.cfg.GetProviderBudget(provider)),
-		Source:       "config",
-	}
-
-	if m.budgetSource != nil {
-		loaded, err := m.budgetSource.GetBudget(provider)
-		if err != nil {
-			return estimate, fmt.Errorf("get budget estimate: %w", err)
-		}
-		if loaded.WeeklyTokens > 0 {
-			estimate = loaded
-			if estimate.Source == "" {
-				estimate.Source = "calibrated"
-			}
-		}
-	}
-
-	if estimate.WeeklyTokens <= 0 {
-		return estimate, fmt.Errorf("invalid weekly budget for provider %s: %d", provider, estimate.WeeklyTokens)
-	}
-
-	if estimate.Source == "" {
-		estimate.Source = "config"
-	}
-
-	return estimate, nil
-}
-
-// GetUsedPercent retrieves the used percentage from the appropriate provider.
-// Uses the resolved (calibrated) budget so percentages match the displayed budget.
+// GetUsedPercent retrieves the live used percentage from the appropriate provider.
 func (m *Manager) GetUsedPercent(provider string) (float64, error) {
-	estimate, err := m.resolveBudget(provider)
-	if err != nil {
-		return 0, fmt.Errorf("resolving budget for %s: %w", provider, err)
-	}
-	weeklyBudget := estimate.WeeklyTokens
-
 	mode := m.cfg.Budget.Mode
 	if mode == "" {
 		mode = config.DefaultBudgetMode
@@ -275,23 +96,19 @@ func (m *Manager) GetUsedPercent(provider string) (float64, error) {
 		if m.claude == nil {
 			return 0, fmt.Errorf("claude provider not configured")
 		}
-		return m.claude.GetUsedPercent(mode, weeklyBudget)
+		return m.claude.GetUsedPercent(mode)
 
 	case "codex":
 		if m.codex == nil {
 			return 0, fmt.Errorf("codex provider not configured")
 		}
-		return m.codex.GetUsedPercent(mode, weeklyBudget)
+		return m.codex.GetUsedPercent(mode)
 
 	case "copilot":
 		if m.copilot == nil {
 			return 0, fmt.Errorf("copilot provider not configured")
 		}
-		// Copilot uses monthly request limits, not weekly token budgets
-		// Convert weekly budget to monthly limit for consistency
-		// Note: This is a simplification; actual monthly limits should be configured separately
-		monthlyLimit := weeklyBudget * 52 / 12 // ~4.33 weeks per month (52/12)
-		return m.copilot.GetUsedPercent(mode, monthlyLimit)
+		return m.copilot.GetUsedPercent(mode)
 
 	default:
 		return 0, fmt.Errorf("unknown provider: %s", provider)
@@ -309,131 +126,27 @@ func (m *Manager) usedPercentSource(provider string) string {
 			return reporter.LastUsedPercentSource()
 		}
 	case "copilot":
-		// Copilot tracks locally, so source is always "local-tracking"
-		return "local-tracking"
+		return "api"
 	}
 	return ""
 }
 
-// DaysUntilWeeklyReset calculates days remaining until the weekly budget resets.
-// For Claude: assumes weekly reset on Sunday (7 - current weekday, or 7 if Sunday).
-// For Codex: uses the secondary rate limit's resets_at timestamp.
-func (m *Manager) DaysUntilWeeklyReset(provider string) (int, error) {
-	now := m.nowFunc()
-
-	switch provider {
-	case "claude":
-		// Claude resets weekly; assume Sunday reset
-		// Weekday: Sunday=0, Monday=1, ..., Saturday=6
-		weekday := int(now.Weekday())
-		if weekday == 0 {
-			return 7, nil // It's Sunday, next reset in 7 days
-		}
-		return 7 - weekday, nil
-
-	case "codex":
-		if m.codex == nil {
-			return 7, nil // Default fallback
-		}
-		resetTime, err := m.codex.GetResetTime("weekly")
-		if err != nil {
-			return 7, nil // Fallback on error
-		}
-		if resetTime.IsZero() {
-			return 7, nil // No reset time available
-		}
-
-		duration := resetTime.Sub(now)
-		days := int(math.Ceil(duration.Hours() / 24))
-		if days <= 0 {
-			return 1, nil // At least 1 day
-		}
-		return days, nil
-
-	case "copilot":
-		// Copilot resets monthly on the 1st at 00:00:00 UTC
-		// Calculate days until next month's 1st
-		if m.copilot == nil {
-			return 30, nil // Default fallback (approximate month)
-		}
-		resetTime, err := m.copilot.GetResetTime("weekly")
-		if err != nil {
-			return 30, nil // Fallback on error
-		}
-		if resetTime.IsZero() {
-			return 30, nil // No reset time available
-		}
-
-		duration := resetTime.Sub(now)
-		days := int(math.Ceil(duration.Hours() / 24))
-		if days <= 0 {
-			return 1, nil // At least 1 day
-		}
-		return days, nil
-
-	default:
-		return 7, nil // Default for unknown providers
-	}
-}
-
-// Summary returns a human-readable summary of the budget state for a provider.
-func (m *Manager) Summary(provider string) (string, error) {
-	result, err := m.CalculateAllowance(provider)
-	if err != nil {
-		return "", err
-	}
-
-	estimate, err := m.resolveBudget(provider)
-	if err != nil {
-		return "", err
-	}
-	weeklyBudget := estimate.WeeklyTokens
-
-	if result.Mode == "daily" {
-		return fmt.Sprintf(
-			"%s: %.1f%% used today, %d tokens allowed (daily budget: %d, reserve: %d)",
-			provider, result.UsedPercent, result.Allowance, result.BudgetBase, result.ReserveAmount,
-		), nil
-	}
-
-	return fmt.Sprintf(
-		"%s: %.1f%% used this week (%d days left), %d tokens allowed (weekly: %d, remaining: %d, reserve: %d, multiplier: %.1fx)",
-		provider, result.UsedPercent, result.RemainingDays, result.Allowance,
-		weeklyBudget, result.RemainingBudget, result.ReserveAmount, result.Multiplier,
-	), nil
-}
-
-// CanRun checks if there's enough budget to run a task with the given estimated cost.
-func (m *Manager) CanRun(provider string, estimatedTokens int64) (bool, error) {
-	result, err := m.CalculateAllowance(provider)
-	if err != nil {
-		return false, err
-	}
-	return result.Allowance >= estimatedTokens, nil
-}
-
-// EnforcementResult holds the budget check outcome for a single provider.
-type EnforcementResult struct {
-	Provider  string
-	OK        bool
-	Reason    string
-	Allowance *AllowanceResult
-}
-
-// CheckProviders checks budget capacity for a set of providers.
+// CheckProviders checks budget capacity for a set of providers using live API percentages.
 //
 // For run/preview: pass providers in priority order — caller picks first OK result.
 // For task run: pass single explicit provider; error if not OK.
 // For jira: pass only providers needed for remaining phases; skip ticket if any not OK.
 //
 // When ignoreBudget is true, all results have OK=true (bypass).
-//
-// NOTE: Current implementation uses token-based gating (allowance > 0).
-// Hourly capacity normalization (as described in VC-66 title) is deferred.
 func (m *Manager) CheckProviders(providers []string, ignoreBudget bool) ([]EnforcementResult, error) {
+	maxPercent := m.cfg.Budget.MaxPercent
+	if maxPercent <= 0 {
+		maxPercent = config.DefaultMaxPercent
+	}
+
 	results := make([]EnforcementResult, 0, len(providers))
 	for _, provider := range providers {
-		allowance, err := m.CalculateAllowance(provider)
+		usedPct, err := m.GetUsedPercent(provider)
 		if err != nil {
 			results = append(results, EnforcementResult{
 				Provider: provider,
@@ -442,19 +155,38 @@ func (m *Manager) CheckProviders(providers []string, ignoreBudget bool) ([]Enfor
 			})
 			continue
 		}
-		ok := ignoreBudget || allowance.Allowance > 0
+		ok := ignoreBudget || usedPct < float64(maxPercent)
 		reason := ""
 		if !ok {
-			reason = fmt.Sprintf("budget exhausted (%.0f%% used)", allowance.UsedPercent)
+			reason = fmt.Sprintf("budget at %.0f%% (limit: %d%%)", usedPct, maxPercent)
 		}
 		results = append(results, EnforcementResult{
-			Provider:  provider,
-			OK:        ok,
-			Reason:    reason,
-			Allowance: allowance,
+			Provider: provider,
+			OK:       ok,
+			Reason:   reason,
+			Allowance: &AllowanceResult{
+				UsedPercent:       usedPct,
+				UsedPercentSource: m.usedPercentSource(provider),
+				MaxPercent:        maxPercent,
+			},
 		})
 	}
 	return results, nil
 }
 
-
+// Summary returns a human-readable budget status for a provider.
+func (m *Manager) Summary(provider string) (string, error) {
+	maxPercent := m.cfg.Budget.MaxPercent
+	if maxPercent <= 0 {
+		maxPercent = config.DefaultMaxPercent
+	}
+	usedPct, err := m.GetUsedPercent(provider)
+	if err != nil {
+		return "", err
+	}
+	status := "OK"
+	if usedPct >= float64(maxPercent) {
+		status = "exhausted"
+	}
+	return fmt.Sprintf("%s: %.1f%% used (limit: %d%%) [%s]", provider, usedPct, maxPercent, status), nil
+}

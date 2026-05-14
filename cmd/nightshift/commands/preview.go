@@ -199,25 +199,21 @@ type previewDiagnostics struct {
 }
 
 type previewFilteredTaskDiagnostic struct {
-	Type         string `json:"type"`
-	Name         string `json:"name,omitempty"`
-	CostTier     string `json:"cost_tier,omitempty"`
-	MinTokens    int    `json:"min_tokens,omitempty"`
-	MaxTokens    int    `json:"max_tokens,omitempty"`
-	Budget       int64  `json:"budget,omitempty"`
-	BudgetTooLow bool   `json:"budget_too_low,omitempty"`
-	Disabled     bool   `json:"disabled,omitempty"`
-	Error        string `json:"error,omitempty"`
+	Type      string `json:"type"`
+	Name      string `json:"name,omitempty"`
+	CostTier  string `json:"cost_tier,omitempty"`
+	MinTokens int    `json:"min_tokens,omitempty"`
+	MaxTokens int    `json:"max_tokens,omitempty"`
+	Disabled  bool   `json:"disabled,omitempty"`
+	Error     string `json:"error,omitempty"`
 }
 
 type previewAggregateDiagnostic struct {
 	Enabled        int      `json:"enabled"`
 	Disabled       int      `json:"disabled"`
-	OverBudget     int      `json:"over_budget"`
 	Assigned       int      `json:"assigned"`
 	OnCooldown     int      `json:"on_cooldown"`
 	Candidates     int      `json:"candidates"`
-	Budget         int64    `json:"budget"`
 	UnknownEnabled []string `json:"unknown_enabled,omitempty"`
 	NoEnabledTasks bool     `json:"no_enabled_tasks,omitempty"`
 }
@@ -291,7 +287,7 @@ func buildPreviewResult(cfg *config.Config, database *db.DB, projects []string, 
 		ReservePercent: reservePercent,
 		EnabledTasks:   append([]string(nil), cfg.Tasks.Enabled...),
 		ProjectCount:   len(projects),
-		Providers:      collectProviderBudgets(cfg, budgetMgr),
+		Providers:      collectProviderBudgets(cfg, budgetMgr, ignoreBudget),
 		ConfigSources:  sources,
 		Note:           "Only the plan prompt is deterministic. Implement/review prompts are generated after plan output.",
 	}
@@ -330,18 +326,18 @@ func buildPreviewResult(cfg *config.Config, database *db.DB, projects []string, 
 				projectResult.Status = previewProjectBudgetExhausted
 				projectResult.Detail = result.Reason
 				if includeDiagnostics {
-					projectResult.Diagnostics = computePreviewDiagnostics(cfg, selector, project, taskFilter, allowance.Allowance)
+					projectResult.Diagnostics = computePreviewDiagnostics(cfg, selector, project, taskFilter)
 				}
 				run.Projects = append(run.Projects, projectResult)
 				continue
 			}
 
-			selected, err := previewSelectTasks(selector, project, taskFilter, allowance.Allowance)
+			selected, err := previewSelectTasks(selector, project, taskFilter)
 			if err != nil {
 				projectResult.Status = previewProjectError
 				projectResult.Detail = err.Error()
 				if includeDiagnostics {
-					projectResult.Diagnostics = computePreviewDiagnostics(cfg, selector, project, taskFilter, allowance.Allowance)
+					projectResult.Diagnostics = computePreviewDiagnostics(cfg, selector, project, taskFilter)
 				}
 				run.Projects = append(run.Projects, projectResult)
 				continue
@@ -350,7 +346,7 @@ func buildPreviewResult(cfg *config.Config, database *db.DB, projects []string, 
 				projectResult.Status = previewProjectNoTasks
 				projectResult.Detail = "no tasks available within budget"
 				if includeDiagnostics {
-					projectResult.Diagnostics = computePreviewDiagnostics(cfg, selector, project, taskFilter, allowance.Allowance)
+					projectResult.Diagnostics = computePreviewDiagnostics(cfg, selector, project, taskFilter)
 				}
 				run.Projects = append(run.Projects, projectResult)
 				continue
@@ -358,7 +354,7 @@ func buildPreviewResult(cfg *config.Config, database *db.DB, projects []string, 
 
 			projectResult.Status = previewProjectReady
 			if includeDiagnostics {
-				projectResult.Diagnostics = computePreviewDiagnostics(cfg, selector, project, taskFilter, allowance.Allowance)
+				projectResult.Diagnostics = computePreviewDiagnostics(cfg, selector, project, taskFilter)
 			}
 			projectResult.Tasks = make([]previewTask, 0, len(selected))
 			for idx, scored := range selected {
@@ -418,39 +414,40 @@ type providerBudgetSummary struct {
 	err       error
 }
 
-func collectProviderBudgets(cfg *config.Config, budgetMgr *budget.Manager) []providerBudgetSummary {
-	var summaries []providerBudgetSummary
+func collectProviderBudgets(cfg *config.Config, budgetMgr *budget.Manager, ignoreBudget bool) []providerBudgetSummary {
+	var providers []string
+	providerModels := map[string]string{}
 	if cfg.Providers.Claude.Enabled {
-		allowance, err := budgetMgr.CalculateAllowance("claude")
-		summaries = append(summaries, providerBudgetSummary{
-			name:      "claude",
-			model:     cfg.Providers.Claude.Model,
-			allowance: allowance,
-			err:       err,
-		})
+		providers = append(providers, "claude")
+		providerModels["claude"] = cfg.Providers.Claude.Model
 	}
 	if cfg.Providers.Codex.Enabled {
-		allowance, err := budgetMgr.CalculateAllowance("codex")
-		summaries = append(summaries, providerBudgetSummary{
-			name:      "codex",
-			model:     cfg.Providers.Codex.Model,
-			allowance: allowance,
-			err:       err,
-		})
+		providers = append(providers, "codex")
+		providerModels["codex"] = cfg.Providers.Codex.Model
 	}
 	if cfg.Providers.Copilot.Enabled {
-		allowance, err := budgetMgr.CalculateAllowance("copilot")
-		summaries = append(summaries, providerBudgetSummary{
-			name:      "copilot",
-			model:     cfg.Providers.Copilot.Model,
-			allowance: allowance,
-			err:       err,
-		})
+		providers = append(providers, "copilot")
+		providerModels["copilot"] = cfg.Providers.Copilot.Model
+	}
+
+	results, _ := budgetMgr.CheckProviders(providers, ignoreBudget)
+	summaries := make([]providerBudgetSummary, 0, len(results))
+	for _, r := range results {
+		s := providerBudgetSummary{
+			name:  r.Provider,
+			model: providerModels[r.Provider],
+		}
+		if r.Reason != "" && r.Allowance == nil {
+			s.err = fmt.Errorf("%s", r.Reason)
+		} else {
+			s.allowance = r.Allowance
+		}
+		summaries = append(summaries, s)
 	}
 	return summaries
 }
 
-func computePreviewDiagnostics(cfg *config.Config, selector *tasks.Selector, project, taskFilter string, allowance int64) *previewDiagnostics {
+func computePreviewDiagnostics(cfg *config.Config, selector *tasks.Selector, project, taskFilter string) *previewDiagnostics {
 	diagnostics := &previewDiagnostics{}
 	if taskFilter != "" {
 		def, err := tasks.GetDefinition(tasks.TaskType(taskFilter))
@@ -463,16 +460,13 @@ func computePreviewDiagnostics(cfg *config.Config, selector *tasks.Selector, pro
 		}
 		minTok, maxTok := def.EstimatedTokens()
 		diagnostics.FilteredTask = &previewFilteredTaskDiagnostic{
-			Type:         string(def.Type),
-			Name:         def.Name,
-			CostTier:     def.CostTier.String(),
-			MinTokens:    minTok,
-			MaxTokens:    maxTok,
-			Budget:       allowance,
-			BudgetTooLow: int64(maxTok) > allowance,
-			Disabled:     !cfg.IsTaskEnabled(string(def.Type)),
+			Type:     string(def.Type),
+			Name:     def.Name,
+			CostTier: def.CostTier.String(),
+			MinTokens: minTok,
+			MaxTokens: maxTok,
+			Disabled: !cfg.IsTaskEnabled(string(def.Type)),
 		}
-		// Check cooldown for the filtered task
 		onCooldown, remaining, interval := selector.IsOnCooldown(tasks.TaskType(taskFilter), project)
 		simulated := selector.HasSimulatedCooldown(taskFilter, project)
 		if onCooldown || simulated {
@@ -500,7 +494,6 @@ func computePreviewDiagnostics(cfg *config.Config, selector *tasks.Selector, pro
 
 	enabledCount := 0
 	disabledCount := 0
-	overBudgetCount := 0
 	assignedCount := 0
 	cooldownCount := 0
 	candidateCount := 0
@@ -510,17 +503,11 @@ func computePreviewDiagnostics(cfg *config.Config, selector *tasks.Selector, pro
 			continue
 		}
 		enabledCount++
-		_, maxTok := def.EstimatedTokens()
-		if int64(maxTok) > allowance {
-			overBudgetCount++
-			continue
-		}
 		taskID := fmt.Sprintf("%s:%s", def.Type, project)
 		if selector.IsAssigned(taskID) {
 			assignedCount++
 			continue
 		}
-		// Check real cooldown and simulated cooldown
 		onCooldown, remaining, interval := selector.IsOnCooldown(def.Type, project)
 		simulated := selector.HasSimulatedCooldown(string(def.Type), project)
 		if onCooldown || simulated {
@@ -554,11 +541,9 @@ func computePreviewDiagnostics(cfg *config.Config, selector *tasks.Selector, pro
 	diagnostics.Aggregate = &previewAggregateDiagnostic{
 		Enabled:        enabledCount,
 		Disabled:       disabledCount,
-		OverBudget:     overBudgetCount,
 		Assigned:       assignedCount,
 		OnCooldown:     cooldownCount,
 		Candidates:     candidateCount,
-		Budget:         allowance,
 		UnknownEnabled: unknown,
 		NoEnabledTasks: enabledCount == 0,
 	}
@@ -579,7 +564,7 @@ func previewProvider(cfg *config.Config) (string, error) {
 	return "", fmt.Errorf("no providers enabled for preview")
 }
 
-func previewSelectTasks(selector *tasks.Selector, projectPath, taskFilter string, allowance int64) ([]tasks.ScoredTask, error) {
+func previewSelectTasks(selector *tasks.Selector, projectPath, taskFilter string) ([]tasks.ScoredTask, error) {
 	if taskFilter != "" {
 		def, err := tasks.GetDefinition(tasks.TaskType(taskFilter))
 		if err != nil {
@@ -591,7 +576,7 @@ func previewSelectTasks(selector *tasks.Selector, projectPath, taskFilter string
 			Project:    projectPath,
 		}}, nil
 	}
-	task := selector.SelectNext(allowance, projectPath)
+	task := selector.SelectNext(projectPath)
 	if task == nil {
 		return nil, nil
 	}

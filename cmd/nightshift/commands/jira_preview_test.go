@@ -119,15 +119,14 @@ func TestRenderJiraPreviewText_ReviewTickets(t *testing.T) {
 }
 
 func TestRenderJiraPreviewText_BudgetSummary(t *testing.T) {
-	allowance := int64(500000)
 	result := &jiraPreviewResult{
 		GeneratedAt:  time.Now(),
 		JiraProject:  "PROJ",
 		ConnectionOK: true,
 		Budget: &budget.AllowanceResult{
-			Allowance:    allowance,
-			UsedPercent:  30.5,
-			BudgetSource: "calibrated",
+			UsedPercent:       30.5,
+			UsedPercentSource: "calibrated",
+			MaxPercent:        80,
 		},
 		Phases: []jiraPreviewPhase{},
 	}
@@ -143,15 +142,14 @@ func TestRenderJiraPreviewText_BudgetSummary(t *testing.T) {
 }
 
 func TestRenderJiraPreviewText_BudgetExplain(t *testing.T) {
-	allowance := int64(500000)
 	result := &jiraPreviewResult{
 		GeneratedAt:  time.Now(),
 		JiraProject:  "PROJ",
 		ConnectionOK: true,
 		Budget: &budget.AllowanceResult{
-			Allowance:    allowance,
-			UsedPercent:  30.5,
-			BudgetSource: "calibrated",
+			UsedPercent:       30.5,
+			UsedPercentSource: "calibrated",
+			MaxPercent:        80,
 		},
 		Phases: []jiraPreviewPhase{},
 	}

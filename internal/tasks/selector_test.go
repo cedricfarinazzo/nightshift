@@ -184,33 +184,6 @@ func TestFilterEnabled_DisabledByDefault(t *testing.T) {
 	}
 }
 
-func TestFilterByBudget(t *testing.T) {
-	sel, _ := setupTestSelector(t)
-
-	tasks := []TaskDefinition{
-		{Type: TaskLintFix, CostTier: CostLow},                 // 10-50k
-		{Type: TaskBugFinder, CostTier: CostHigh},              // 150-500k
-		{Type: TaskMigrationRehearsal, CostTier: CostVeryHigh}, // 500k+
-	}
-
-	tests := []struct {
-		budget  int64
-		wantLen int
-	}{
-		{budget: 100_000, wantLen: 1},   // Only low cost fits
-		{budget: 500_000, wantLen: 2},   // Low and high fit
-		{budget: 1_000_000, wantLen: 3}, // All fit
-		{budget: 10_000, wantLen: 0},    // None fit
-	}
-
-	for _, tt := range tests {
-		got := sel.FilterByBudget(tasks, tt.budget)
-		if len(got) != tt.wantLen {
-			t.Errorf("FilterByBudget(%d) len = %d, want %d", tt.budget, len(got), tt.wantLen)
-		}
-	}
-}
-
 func TestFilterUnassigned(t *testing.T) {
 	sel, st := setupTestSelector(t)
 
@@ -266,23 +239,13 @@ func TestSelectNext(t *testing.T) {
 	st.RecordTaskRun(project, string(TaskDocsBackfill))
 
 	// Select should return highest priority task
-	task := sel.SelectNext(100_000, project)
+	task := sel.SelectNext(project)
 	if task == nil {
 		t.Fatal("SelectNext() returned nil")
 		return
 	}
 	if task.Definition.Type != TaskLintFix {
 		t.Errorf("SelectNext() = %s, want %s", task.Definition.Type, TaskLintFix)
-	}
-}
-
-func TestSelectNextNoBudget(t *testing.T) {
-	sel, _ := setupTestSelector(t)
-
-	// Budget too low for any task
-	task := sel.SelectNext(1000, "/test/project")
-	if task != nil {
-		t.Errorf("SelectNext() with tiny budget should return nil, got %v", task)
 	}
 }
 
@@ -299,7 +262,7 @@ func TestSelectAndAssign(t *testing.T) {
 	project := "/test/project"
 
 	// First selection should work
-	task1 := sel.SelectAndAssign(100_000, project)
+	task1 := sel.SelectAndAssign(project)
 	if task1 == nil {
 		t.Fatal("First SelectAndAssign() returned nil")
 		return
@@ -312,7 +275,7 @@ func TestSelectAndAssign(t *testing.T) {
 	}
 
 	// Second selection should return nil (only task is assigned)
-	task2 := sel.SelectAndAssign(100_000, project)
+	task2 := sel.SelectAndAssign(project)
 	if task2 != nil {
 		t.Errorf("Second SelectAndAssign() should return nil, got %v", task2)
 	}
@@ -349,7 +312,7 @@ func TestSelectTopN(t *testing.T) {
 	st.RecordTaskRun(project, string(TaskDeadCode))
 
 	// Get top 2
-	tasks := sel.SelectTopN(1_000_000, project, 2)
+	tasks := sel.SelectTopN(project, 2)
 	if len(tasks) != 2 {
 		t.Fatalf("SelectTopN(2) len = %d, want 2", len(tasks))
 	}
@@ -391,7 +354,7 @@ func TestStalenessAffectsSelection(t *testing.T) {
 	st.RecordTaskRun(project, string(TaskLintFix))
 	// docs-backfill never run -> higher staleness bonus
 
-	task := sel.SelectNext(100_000, project)
+	task := sel.SelectNext(project)
 	if task == nil {
 		t.Fatal("SelectNext() returned nil")
 		return
@@ -610,7 +573,7 @@ func TestSelectRandom(t *testing.T) {
 	// Run many iterations and verify we get different tasks (randomness)
 	seen := make(map[TaskType]bool)
 	for i := 0; i < 200; i++ {
-		task := sel.SelectRandom(1_000_000, project)
+		task := sel.SelectRandom(project)
 		if task == nil {
 			t.Fatal("SelectRandom() returned nil")
 		} else {
@@ -632,16 +595,6 @@ func TestSelectRandom(t *testing.T) {
 	}
 }
 
-func TestSelectRandomNoBudget(t *testing.T) {
-	sel, _ := setupTestSelector(t)
-
-	// Budget too low for any task
-	task := sel.SelectRandom(1000, "/test/project")
-	if task != nil {
-		t.Errorf("SelectRandom() with tiny budget should return nil, got %v", task)
-	}
-}
-
 func TestSelectRandomSingleTask(t *testing.T) {
 	st := newTestState(t)
 
@@ -660,7 +613,7 @@ func TestSelectRandomSingleTask(t *testing.T) {
 	time.Sleep(time.Microsecond)
 
 	// With only one eligible task, SelectRandom should always return it
-	task := sel.SelectRandom(100_000, project)
+	task := sel.SelectRandom(project)
 	if task == nil {
 		t.Fatal("SelectRandom() returned nil with one eligible task")
 	} else if task.Definition.Type != TaskLintFix {
@@ -692,7 +645,7 @@ func TestSelectRandomRespectsFilters(t *testing.T) {
 
 	// SelectRandom should only return docs-backfill (lint-fix on cooldown)
 	for i := 0; i < 20; i++ {
-		task := sel.SelectRandom(100_000, project)
+		task := sel.SelectRandom(project)
 		if task == nil {
 			t.Fatal("SelectRandom() returned nil")
 		} else if task.Definition.Type != TaskDocsBackfill {
@@ -724,7 +677,7 @@ func TestSelectNextRespectssCooldown(t *testing.T) {
 	st.RecordTaskRun(project, string(TaskLintFix))
 
 	// SelectNext should skip lint-fix (on cooldown) and return docs-backfill
-	task := sel.SelectNext(100_000, project)
+	task := sel.SelectNext(project)
 	if task == nil {
 		t.Fatal("SelectNext() returned nil")
 		return
