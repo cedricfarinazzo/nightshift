@@ -363,7 +363,55 @@ func TestComputeWindowCapacity(t *testing.T) {
 		{
 			name: "nearly depleted with time to go — no boost",
 			usedPct: 80, maxPct: 90, windowHours: 5, resetHours: 2,
-			wantMin: 0, wantMax: 0.15, // not expiring (2h > 1.25h): 10/90 = 11%
+			wantMin: 0, wantMax: 0.12, // not expiring (2h > 1.25h): 10/90 = 11.1%
+		},
+		// Boundary: remaining exactly at nearlyDepletedThreshold (15.0) — NOT < 15, goes to pace check.
+		{
+			name: "remaining exactly at threshold — pace branch",
+			usedPct: 75, maxPct: 90, windowHours: 5, resetHours: 2,
+			wantMin: 0.15, wantMax: 1.0, // 15/90=16.7% × paceFactor; pace check fires, not nearly-depleted
+		},
+		// Boundary: remaining just below threshold (14.9) — nearly-depleted fires.
+		{
+			name: "remaining just below threshold — nearly-depleted branch",
+			usedPct: 75.1, maxPct: 90, windowHours: 5, resetHours: 2,
+			wantMin: 0, wantMax: 0.167, // not expiring; 14.9/90 = 16.6% raw fraction
+		},
+		// Boundary: resetHours exactly at windowHours/4 — NOT < window/4, goes to pace check.
+		{
+			name: "reset exactly at window/4 boundary — pace branch",
+			usedPct: 45, maxPct: 90, windowHours: 5, resetHours: 1.25,
+			wantMin: 0.4, wantMax: 1.0, // (5/4=1.25): not expiring, pace fires
+		},
+		// Boundary: resetHours just below windowHours/4 — expiring fires.
+		{
+			name: "reset just below window/4 — expiring branch",
+			usedPct: 45, maxPct: 90, windowHours: 5, resetHours: 1.24,
+			wantMin: 0.9, wantMax: 1.0, // expiring: (45/90)*5/1.24 ≈ 2.0 → capped 1.0
+		},
+		// Normal: ahead of pace (headroomRate > idealRate) — no boost.
+		{
+			name: "ahead of pace — no boost",
+			usedPct: 10, maxPct: 90, windowHours: 5, resetHours: 4,
+			wantMin: 0.85, wantMax: 0.9, // headroom=80/4=20 > ideal=90/5=18; paceFactor=1; (80/90)=88.9%
+		},
+		// exhausted exactly at limit.
+		{
+			name: "used equals max — exhausted",
+			usedPct: 90, maxPct: 90, windowHours: 5, resetHours: 1,
+			wantMin: 0, wantMax: 0,
+		},
+		// zero resetHours guard: should not divide by zero.
+		{
+			name: "zero resetHours — guarded",
+			usedPct: 50, maxPct: 90, windowHours: 5, resetHours: 0,
+			wantMin: 0.9, wantMax: 1.0, // resetHours clamped to 0.01 → expiring → capped 1.0
+		},
+		// monthly window (720h), well within pace.
+		{
+			name: "monthly window on pace",
+			usedPct: 45, maxPct: 90, windowHours: 720, resetHours: 360,
+			wantMin: 0.45, wantMax: 0.6, // symmetric midpoint, pace factor ≈ 1
 		},
 	}
 
@@ -375,6 +423,143 @@ func TestComputeWindowCapacity(t *testing.T) {
 					tt.usedPct, tt.maxPct, tt.windowHours, tt.resetHours, got, tt.wantMin, tt.wantMax)
 			}
 		})
+	}
+}
+
+// mockClaudeProviderWithWindows returns a specific HourlyCapacityResult with Windows.
+type mockClaudeProviderWithWindows struct {
+	result HourlyCapacityResult
+	err    error
+}
+
+func (m *mockClaudeProviderWithWindows) Name() string { return "claude" }
+func (m *mockClaudeProviderWithWindows) GetHourlyCapacity(_ context.Context, _ int) (HourlyCapacityResult, error) {
+	return m.result, m.err
+}
+
+func TestGetHourlyCapacity_OK(t *testing.T) {
+	cfg := &config.Config{Budget: config.BudgetConfig{MaxPercent: 80}}
+	windows := []WindowCapacity{
+		{Name: "five_hour", UsedPct: 40, ResetIn: 3 * time.Hour, Capacity: 0.5},
+		{Name: "seven_day", UsedPct: 30, ResetIn: 100 * time.Hour, Capacity: 0.7},
+	}
+	claude := &mockClaudeProviderWithWindows{result: HourlyCapacityResult{
+		Capacity: 0.5, BottleneckWindow: "five_hour", BottleneckUsedPct: 40,
+		Windows: windows, Source: "api",
+	}}
+	mgr := NewManager(cfg, claude, nil, nil)
+
+	hcr, err := mgr.GetHourlyCapacity(context.Background(), "claude")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if hcr.Capacity != 0.5 {
+		t.Errorf("Capacity = %f, want 0.5", hcr.Capacity)
+	}
+	if hcr.BottleneckWindow != "five_hour" {
+		t.Errorf("BottleneckWindow = %q, want five_hour", hcr.BottleneckWindow)
+	}
+	if len(hcr.Windows) != 2 {
+		t.Errorf("Windows len = %d, want 2", len(hcr.Windows))
+	}
+}
+
+func TestGetHourlyCapacity_UnknownProvider(t *testing.T) {
+	cfg := &config.Config{Budget: config.BudgetConfig{MaxPercent: 80}}
+	mgr := NewManager(cfg, nil, nil, nil)
+
+	_, err := mgr.GetHourlyCapacity(context.Background(), "unknown")
+	if err == nil {
+		t.Error("expected error for unknown provider")
+	}
+}
+
+func TestGetHourlyCapacity_NilProvider(t *testing.T) {
+	cfg := &config.Config{Budget: config.BudgetConfig{MaxPercent: 80}}
+	mgr := NewManager(cfg, nil, nil, nil) // all providers nil
+
+	_, err := mgr.GetHourlyCapacity(context.Background(), "claude")
+	if err == nil {
+		t.Error("expected error when claude provider is nil")
+	}
+
+	_, err = mgr.GetHourlyCapacity(context.Background(), "codex")
+	if err == nil {
+		t.Error("expected error when codex provider is nil")
+	}
+
+	_, err = mgr.GetHourlyCapacity(context.Background(), "copilot")
+	if err == nil {
+		t.Error("expected error when copilot provider is nil")
+	}
+}
+
+func TestCheckProviders_WindowsPropagated(t *testing.T) {
+	cfg := &config.Config{Budget: config.BudgetConfig{MaxPercent: 80}}
+	windows := []WindowCapacity{
+		{Name: "five_hour", UsedPct: 50, ResetIn: 2 * time.Hour, Capacity: 0.6},
+	}
+	claude := &mockClaudeProviderWithWindows{result: HourlyCapacityResult{
+		Capacity: 0.6, BottleneckWindow: "five_hour", BottleneckUsedPct: 50,
+		Windows: windows, Source: "api",
+	}}
+	mgr := NewManager(cfg, claude, nil, nil)
+
+	results, _ := mgr.CheckProviders([]string{"claude"}, false)
+	if len(results[0].Allowance.Windows) != 1 {
+		t.Errorf("Windows not propagated: got %d, want 1", len(results[0].Allowance.Windows))
+	}
+	if results[0].Allowance.Windows[0].Name != "five_hour" {
+		t.Errorf("Window name = %q, want five_hour", results[0].Allowance.Windows[0].Name)
+	}
+}
+
+func TestCheckProviders_HourlyCapacityInAllowance(t *testing.T) {
+	cfg := &config.Config{Budget: config.BudgetConfig{MaxPercent: 80}}
+	claude := &mockClaudeProviderWithWindows{result: HourlyCapacityResult{
+		Capacity: 0.42, BottleneckWindow: "seven_day", BottleneckUsedPct: 55,
+		Source: "api",
+	}}
+	mgr := NewManager(cfg, claude, nil, nil)
+
+	results, _ := mgr.CheckProviders([]string{"claude"}, false)
+	a := results[0].Allowance
+	if a.HourlyCapacity != 0.42 {
+		t.Errorf("HourlyCapacity = %f, want 0.42", a.HourlyCapacity)
+	}
+	if a.BottleneckWindow != "seven_day" {
+		t.Errorf("BottleneckWindow = %q, want seven_day", a.BottleneckWindow)
+	}
+	if a.BottleneckUsedPct != 55 {
+		t.Errorf("BottleneckUsedPct = %f, want 55", a.BottleneckUsedPct)
+	}
+}
+
+func TestCheckProviders_ExactlyZeroCapacity_NotOK(t *testing.T) {
+	cfg := &config.Config{Budget: config.BudgetConfig{MaxPercent: 80}}
+	claude := &mockClaudeProviderWithWindows{result: HourlyCapacityResult{
+		Capacity: 0.0, BottleneckWindow: "five_hour", BottleneckUsedPct: 85,
+		Source: "api",
+	}}
+	mgr := NewManager(cfg, claude, nil, nil)
+
+	results, _ := mgr.CheckProviders([]string{"claude"}, false)
+	if results[0].OK {
+		t.Error("expected OK=false when Capacity=0")
+	}
+}
+
+func TestCheckProviders_TinyCapacity_IsOK(t *testing.T) {
+	cfg := &config.Config{Budget: config.BudgetConfig{MaxPercent: 80}}
+	claude := &mockClaudeProviderWithWindows{result: HourlyCapacityResult{
+		Capacity: 0.001, BottleneckWindow: "five_hour", BottleneckUsedPct: 79,
+		Source: "api",
+	}}
+	mgr := NewManager(cfg, claude, nil, nil)
+
+	results, _ := mgr.CheckProviders([]string{"claude"}, false)
+	if !results[0].OK {
+		t.Error("expected OK=true when Capacity > 0 (even tiny)")
 	}
 }
 
