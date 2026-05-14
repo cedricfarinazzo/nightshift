@@ -13,6 +13,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"golang.org/x/sync/singleflight"
 )
 
 const (
@@ -46,10 +48,11 @@ type AnthropicClient struct {
 	store      CredentialStore
 	userAgent  string
 
-	cacheMu  sync.Mutex
-	cache    map[string]cacheEntry
-	cacheTTL time.Duration
-	clockFn  func() time.Time
+	cacheMu     sync.Mutex
+	cache       map[string]cacheEntry
+	cacheTTL    time.Duration
+	clockFn     func() time.Time
+	inFlight    singleflight.Group
 }
 
 // Option configures an AnthropicClient.
@@ -137,6 +140,8 @@ func (c *AnthropicClient) Invalidate(ctx context.Context) error {
 // FetchQuotas fetches current quota utilization from the Anthropic usage API.
 // Results are cached for cacheTTL. On HTTP 429, the last cached value is
 // returned if available; otherwise ErrRateLimited is surfaced.
+// Concurrent cache misses are deduplicated via singleflight so only one
+// upstream call is made; others await and reuse the result.
 func (c *AnthropicClient) FetchQuotas(ctx context.Context) (AnthropicQuotaResponse, error) {
 	ctx, cancel := context.WithTimeout(ctx, requestTimeout)
 	defer cancel()
@@ -157,7 +162,12 @@ func (c *AnthropicClient) FetchQuotas(ctx context.Context) (AnthropicQuotaRespon
 	}
 	c.cacheMu.Unlock()
 
-	result, err := c.doRequest(ctx, accessToken)
+	// Use singleflight to deduplicate concurrent cache misses.
+	// Only one goroutine calls doRequest(); others wait for the result.
+	val, err, _ := c.inFlight.Do(key, func() (interface{}, error) {
+		return c.doRequest(ctx, accessToken)
+	})
+
 	if err != nil {
 		if errors.Is(err, ErrRateLimited) {
 			c.cacheMu.Lock()
@@ -170,6 +180,7 @@ func (c *AnthropicClient) FetchQuotas(ctx context.Context) (AnthropicQuotaRespon
 		return nil, err
 	}
 
+	result := val.(AnthropicQuotaResponse)
 	c.cacheMu.Lock()
 	c.cache[key] = cacheEntry{value: result, storedAt: now}
 	c.cacheMu.Unlock()

@@ -363,7 +363,9 @@ func TestCache_Invalidate(t *testing.T) {
 }
 
 func TestCache_Concurrent(t *testing.T) {
+	var calls atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write(validQuotaBody())
 	}))
@@ -386,10 +388,17 @@ func TestCache_Concurrent(t *testing.T) {
 		}(i)
 	}
 	wg.Wait()
+
 	for i, err := range errs {
 		if err != nil {
 			t.Errorf("goroutine %d: %v", i, err)
 		}
+	}
+
+	// Verify that concurrent calls to cold cache are deduplicated via singleflight.
+	// All 20 goroutines should result in exactly 1 HTTP request, not 20.
+	if calls.Load() != 1 {
+		t.Errorf("server called %d times, want 1 (singleflight deduplication)", calls.Load())
 	}
 }
 
