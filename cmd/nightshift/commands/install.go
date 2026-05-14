@@ -252,35 +252,27 @@ func installSystemd(binaryPath string, cfg *config.Config) error {
 		return fmt.Errorf("writing timer file: %w", err)
 	}
 
-	// Reload systemd
-	if err := exec.Command("systemctl", "--user", "daemon-reload").Run(); err != nil {
-		return fmt.Errorf("reloading systemd: %w", err)
-	}
-
-	// Enable and start timer
-	if err := exec.Command("systemctl", "--user", "enable", "nightshift.timer").Run(); err != nil {
-		return fmt.Errorf("enabling timer: %w", err)
-	}
-
-	if err := exec.Command("systemctl", "--user", "start", "nightshift.timer").Run(); err != nil {
-		return fmt.Errorf("starting timer: %w", err)
-	}
+	// Best-effort: reload, enable, start. Failures don't block — files are already written.
+	_ = exec.Command("systemctl", "--user", "daemon-reload").Run()
+	_ = exec.Command("systemctl", "--user", "enable", "nightshift.timer").Run()
+	_ = exec.Command("systemctl", "--user", "start", "nightshift.timer").Run()
 
 	fmt.Printf("Installed systemd service: %s\n", servicePath)
 	fmt.Printf("Installed systemd timer: %s\n", timerPath)
-	fmt.Println("Timer enabled and started")
+	fmt.Println("Timer enabled and started (or run: systemctl --user enable --now nightshift.timer)")
 	return nil
 }
 
-// generateSystemdService creates the systemd service unit content
+// generateSystemdService creates the systemd service unit content.
+// Uses daemon start --foreground so the internal interval+window loop handles cycles.
 func generateSystemdService(binaryPath string) string {
 	return fmt.Sprintf(`[Unit]
 Description=Nightshift AI-powered code maintenance
 Documentation=https://github.com/marcus/nightshift
 
 [Service]
-Type=oneshot
-ExecStart=%s run
+Type=simple
+ExecStart=%s daemon start --foreground
 StandardOutput=journal
 StandardError=journal
 
@@ -306,11 +298,20 @@ WantedBy=timers.target
 `, onCalendar)
 }
 
-// convertCronToSystemd converts a cron expression to systemd OnCalendar format
+// convertCronToSystemd converts a cron expression to systemd OnCalendar format.
+// When interval mode is used, the timer fires once at the window start time (if set)
+// or at 02:00 — nightshift's internal cycle loop handles the interval repetition.
 func convertCronToSystemd(cfg *config.Config) string {
 	if cfg.Schedule.Interval != "" {
-		// Use interval
-		return "*:0/" + strings.TrimSuffix(cfg.Schedule.Interval, "m")
+		// Use window start if configured, else default to 02:00.
+		if cfg.Schedule.Window != nil && cfg.Schedule.Window.Start != "" {
+			start := cfg.Schedule.Window.Start // e.g. "09:00"
+			parts := strings.SplitN(start, ":", 2)
+			if len(parts) == 2 {
+				return fmt.Sprintf("*-*-* %s:%s:00", parts[0], parts[1])
+			}
+		}
+		return "*-*-* 02:00:00"
 	}
 
 	if cfg.Schedule.Cron == "" {

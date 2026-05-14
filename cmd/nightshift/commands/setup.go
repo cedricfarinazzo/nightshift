@@ -413,10 +413,27 @@ func newSetupModel() (*setupModel, error) {
 		jiraInput:         jiraInput,
 		jiraTokenEnv:      "JIRA_API_TOKEN",
 		systemdInput:      systemdInput,
-		systemdOnCalendar: "*-*-* 22:00:00",
+		systemdOnCalendar: func() string {
+			if cfg.Jira.SystemdOnCalendar != "" {
+				return cfg.Jira.SystemdOnCalendar
+			}
+			return "*-*-* 22:00:00"
+		}(),
 		jiraMaxTickets:    10,
 		jiraPhaseProvider: defaultJiraPhaseProviders(cfg.Providers.Preference),
 		jiraPhaseModelIdx: defaultJiraPhaseModelIdxs(cfg.Providers.Preference),
+	}
+
+	// Pre-populate schedule fields from existing config.
+	if cfg.Schedule.Cron != "" {
+		model.scheduleMode = "cron"
+		model.scheduleCron = cfg.Schedule.Cron
+	} else if cfg.Schedule.Interval != "" {
+		model.scheduleMode = "interval"
+		model.scheduleInterval = cfg.Schedule.Interval
+	}
+	if cfg.Schedule.Window != nil {
+		model.scheduleStart = cfg.Schedule.Window.Start
 	}
 
 	// Pre-populate from existing Jira config when re-running wizard.
