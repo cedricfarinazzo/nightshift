@@ -258,3 +258,44 @@ func newCopilotClientForTest(t *testing.T, baseURL string, ghExec func(...string
 	}
 	return c
 }
+
+func TestIsKnownAnthropicQuotaKey(t *testing.T) {
+	known := []string{"five_hour", "seven_day", "monthly_limit", "extra_usage"}
+	for _, k := range known {
+		if !isKnownAnthropicQuotaKey(k) {
+			t.Errorf("expected %q to be known", k)
+		}
+	}
+	unknown := []string{"seven_day_sonnet_20250514", "five_hour_opus", "custom", ""}
+	for _, k := range unknown {
+		if isKnownAnthropicQuotaKey(k) {
+			t.Errorf("expected %q to be unknown", k)
+		}
+	}
+}
+
+func TestProviderNames(t *testing.T) {
+	cfg := makeConfig()
+	mgr := NewManagerWithTracking(cfg)
+	// Verify Name() returns expected strings via GetHourlyCapacity error message
+	// (providers in active.go are unexported; test via manager)
+	for _, name := range []string{"claude", "codex", "copilot"} {
+		_, err := mgr.GetHourlyCapacity(context.Background(), name)
+		// May error (no API key in test) but should not say "unknown provider"
+		if err != nil && err.Error() == "unknown provider: "+name {
+			t.Errorf("provider %q not registered in manager", name)
+		}
+	}
+}
+
+func TestMax64(t *testing.T) {
+	if max64(3, 5) != 5 {
+		t.Error("max64(3,5) should be 5")
+	}
+	if max64(5, 3) != 5 {
+		t.Error("max64(5,3) should be 5")
+	}
+	if max64(4, 4) != 4 {
+		t.Error("max64(4,4) should be 4")
+	}
+}

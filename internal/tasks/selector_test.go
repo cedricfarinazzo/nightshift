@@ -686,3 +686,96 @@ func TestSelectNextRespectssCooldown(t *testing.T) {
 		t.Errorf("SelectNext() = %s, want %s (lint-fix on cooldown)", task.Definition.Type, TaskDocsBackfill)
 	}
 }
+
+func TestIsAssigned_NilState(t *testing.T) {
+	s := &Selector{state: nil}
+	if s.IsAssigned("any-task-id") {
+		t.Error("IsAssigned with nil state should return false")
+	}
+}
+
+func TestIsAssigned_StateIntegration(t *testing.T) {
+	sel, st := setupTestSelector(t)
+
+	taskID := makeTaskID("lint-fix", "/proj")
+	if sel.IsAssigned(taskID) {
+		t.Error("should not be assigned before assignment")
+	}
+
+	st.MarkAssigned(taskID, "/proj", "lint-fix")
+	if !sel.IsAssigned(taskID) {
+		t.Error("should be assigned after Assign")
+	}
+}
+
+func TestSimulatedCooldown_AddAndCheck(t *testing.T) {
+	sel, _ := setupTestSelector(t)
+
+	if sel.HasSimulatedCooldown("lint-fix", "/proj") {
+		t.Error("no simulated cooldown yet")
+	}
+
+	sel.AddSimulatedCooldown("lint-fix", "/proj")
+
+	if !sel.HasSimulatedCooldown("lint-fix", "/proj") {
+		t.Error("should have simulated cooldown after Add")
+	}
+	// Different project — should not be affected.
+	if sel.HasSimulatedCooldown("lint-fix", "/other") {
+		t.Error("simulated cooldown is project-scoped")
+	}
+}
+
+func TestSimulatedCooldown_Clear(t *testing.T) {
+	sel, _ := setupTestSelector(t)
+
+	sel.AddSimulatedCooldown("lint-fix", "/proj")
+	sel.AddSimulatedCooldown("security-footgun", "/proj")
+	sel.ClearSimulatedCooldowns()
+
+	if sel.HasSimulatedCooldown("lint-fix", "/proj") {
+		t.Error("cooldown should be cleared")
+	}
+	if sel.HasSimulatedCooldown("security-footgun", "/proj") {
+		t.Error("cooldown should be cleared")
+	}
+}
+
+func TestSimulatedCooldown_NilMap(t *testing.T) {
+	sel := &Selector{}
+	// HasSimulatedCooldown on nil map should not panic.
+	if sel.HasSimulatedCooldown("lint-fix", "/proj") {
+		t.Error("nil map should return false")
+	}
+	// ClearSimulatedCooldowns on nil map should not panic.
+	sel.ClearSimulatedCooldowns()
+}
+
+func TestSimulatedCooldown_AffectsFilterByCooldown(t *testing.T) {
+	sel, _ := setupTestSelector(t)
+
+	// lint-fix has no run history, so normally not on cooldown.
+	tasks := []TaskDefinition{
+		mustGetDef(t, TaskLintFix),
+	}
+	filtered := sel.FilterByCooldown(tasks, "/proj")
+	if len(filtered) != 1 {
+		t.Fatalf("expected lint-fix to pass cooldown filter, got %d tasks", len(filtered))
+	}
+
+	// Add simulated cooldown — now it should be filtered out.
+	sel.AddSimulatedCooldown(string(TaskLintFix), "/proj")
+	filtered = sel.FilterByCooldown(tasks, "/proj")
+	if len(filtered) != 0 {
+		t.Error("simulated cooldown should cause task to be filtered out")
+	}
+}
+
+func mustGetDef(t *testing.T, typ TaskType) TaskDefinition {
+	t.Helper()
+	def, err := GetDefinition(typ)
+	if err != nil {
+		t.Fatalf("GetDefinition(%s): %v", typ, err)
+	}
+	return def
+}
