@@ -268,8 +268,8 @@ func renderBudgetText(b *strings.Builder, allowance *budget.AllowanceResult, ind
 		if w.ResetIn > 0 {
 			resetStr = fmt.Sprintf("  resets in %s", formatDuration(w.ResetIn))
 		}
-		fmt.Fprintf(b, "%s  %s %-22s used=%3.0f%%  cap=%3.0f%%%s\n",
-			indent, marker, w.Name, w.UsedPct, w.Capacity*100, resetStr)
+		fmt.Fprintf(b, "%s  %s %-18s  used=%3.0f%%  cap=%3.0f%%%s\n",
+			indent, marker, windowDisplayName(w.Name), w.UsedPct, w.Capacity*100, resetStr)
 	}
 }
 

@@ -91,7 +91,6 @@ func (p *anthropicActiveProvider) GetHourlyCapacity(ctx context.Context, maxPerc
 	}
 
 	p.setSource("api")
-	log.Debug().Str("provider", "claude").Float64("capacity", result.Capacity).Str("bottleneck", result.BottleneckWindow).Float64("bottleneck_used_pct", result.BottleneckUsedPct).Msg("budget: hourly capacity")
 	return result, nil
 }
 
@@ -183,7 +182,6 @@ func (p *codexActiveProvider) GetHourlyCapacity(ctx context.Context, maxPercent 
 	}
 
 	p.setSource("api")
-	log.Debug().Str("provider", "codex").Float64("capacity", result.Capacity).Str("bottleneck", result.BottleneckWindow).Msg("budget: hourly capacity")
 	return result, nil
 }
 
@@ -296,7 +294,6 @@ func (p *copilotActiveProvider) GetHourlyCapacity(ctx context.Context, maxPercen
 	}
 
 	p.setSource("api")
-	log.Debug().Str("provider", "copilot").Float64("capacity", result.Capacity).Str("bottleneck", result.BottleneckWindow).Msg("budget: hourly capacity")
 	return result, nil
 }
 

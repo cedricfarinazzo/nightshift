@@ -157,8 +157,11 @@ func printProviderBudgetActive(
 		printCopilotPlan(ctx)
 	}
 
+	// Only show Reset line when we have no per-window reset info already displayed.
 	if pu.ResetTime != nil {
-		fmt.Printf("  Reset:   %s\n", formatResetCountdown(*pu.ResetTime))
+		if hcr, err := mgr.GetHourlyCapacity(ctx, provName); err != nil || len(hcr.Windows) == 0 {
+			fmt.Printf("  Reset:   %s\n", formatResetCountdown(*pu.ResetTime))
+		}
 	}
 
 	return nil

@@ -133,6 +133,26 @@ func primaryWindowLabel(secStr string) string {
 	}
 }
 
+// windowDisplayName maps raw API window keys to short human-readable names.
+func windowDisplayName(key string) string {
+	switch key {
+	case "five_hour":
+		return "5-hour"
+	case "seven_day":
+		return "weekly"
+	case "monthly_limit":
+		return "monthly"
+	case "premium_interactions":
+		return "premium"
+	case "primary":
+		return "weekly (primary)"
+	case "secondary":
+		return "secondary"
+	default:
+		return key
+	}
+}
+
 // printHourlyCapacity prints a capacity line plus per-window input data.
 func printHourlyCapacity(hcr budget.HourlyCapacityResult) {
 	capBar := unicodeProgressBar(hcr.Capacity*100, 25)
@@ -146,8 +166,8 @@ func printHourlyCapacity(hcr budget.HourlyCapacityResult) {
 		if w.ResetIn > 0 {
 			resetStr = "  resets in " + formatDuration(w.ResetIn)
 		}
-		fmt.Printf("    %s %-22s used=%3.0f%%  cap=%3.0f%%%s\n",
-			marker, w.Name, w.UsedPct, w.Capacity*100, resetStr)
+		fmt.Printf("    %s %-18s  used=%3.0f%%  cap=%3.0f%%%s\n",
+			marker, windowDisplayName(w.Name), w.UsedPct, w.Capacity*100, resetStr)
 	}
 }
 
