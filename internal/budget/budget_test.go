@@ -61,33 +61,6 @@ func (m *mockCodexProvider) GetResetTime(mode string) (time.Time, error) {
 	return m.resetTime, m.err
 }
 
-// mockCopilotProvider implements CopilotUsageProvider for testing.
-type mockCopilotProvider struct {
-	usedPercent float64
-	resetTime   time.Time
-	err         error
-}
-
-func (m *mockCopilotProvider) Name() string { return "copilot" }
-func (m *mockCopilotProvider) GetHourlyCapacity(_ context.Context, maxPercent int) (HourlyCapacityResult, error) {
-	if m.err != nil {
-		return HourlyCapacityResult{Source: "none"}, m.err
-	}
-	remaining := float64(maxPercent) - m.usedPercent
-	var cap float64
-	if remaining > 0 {
-		cap = remaining / float64(maxPercent)
-	}
-	return HourlyCapacityResult{
-		Capacity:          cap,
-		BottleneckWindow:  "mock",
-		BottleneckUsedPct: m.usedPercent,
-		Source:            "api",
-	}, nil
-}
-func (m *mockCopilotProvider) GetResetTime(mode string) (time.Time, error) {
-	return m.resetTime, m.err
-}
 
 func TestCheckProviders_OK(t *testing.T) {
 	cfg := &config.Config{

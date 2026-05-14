@@ -11,7 +11,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"time"
 )
 
@@ -76,7 +75,6 @@ func (u *TokenUsage) TotalTokens() int64 {
 // Claude wraps the Claude Code CLI as a provider.
 type Claude struct {
 	dataPath string // Path to ~/.claude
-	mu       sync.RWMutex
 }
 
 // NewClaude creates a Claude Code provider.
