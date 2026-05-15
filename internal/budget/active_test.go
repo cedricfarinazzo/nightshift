@@ -47,7 +47,7 @@ func anthropicErrorServer() *httptest.Server {
 // --- active mode: anthropic provider ---
 
 func TestAnthropicActiveProvider_APISuccess(t *testing.T) {
-	srv := anthropicTestServer(0.6) // 60% utilization
+	srv := anthropicTestServer(60.0) // 60% utilization
 	defer srv.Close()
 
 	apiClient := usage.NewAnthropicClient(
@@ -189,7 +189,7 @@ func TestNewManagerWithTracking_Constructs(t *testing.T) {
 }
 
 func TestActiveMode_APISucceeds_ReturnsAPIValue(t *testing.T) {
-	srv := anthropicTestServer(0.25)
+	srv := anthropicTestServer(25.0)
 	defer srv.Close()
 
 	apiClient := usage.NewAnthropicClient(
@@ -220,7 +220,7 @@ func TestActiveMode_APISucceeds_ReturnsAPIValue(t *testing.T) {
 // --- thread safety ---
 
 func TestAnthropicActiveProvider_Concurrent(t *testing.T) {
-	srv := anthropicTestServer(0.5)
+	srv := anthropicTestServer(50.0)
 	defer srv.Close()
 
 	apiClient := usage.NewAnthropicClient(

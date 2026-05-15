@@ -27,12 +27,12 @@ func validQuotaBody() []byte {
 	ml := int64(1000000)
 	raw := map[string]anthropicQuotaEntryRaw{
 		"five_hour": {
-			Utilization: 0.42,
+			Utilization: 42.0,
 			ResetsAt:    "2026-05-12T10:00:00Z",
 			IsEnabled:   true,
 		},
 		"seven_day": {
-			Utilization:  0.75,
+			Utilization:  75.0,
 			ResetsAt:     "2026-05-19T00:00:00Z",
 			IsEnabled:    true,
 			MonthlyLimit: &ml,
@@ -66,7 +66,7 @@ func TestFetchQuotas_Success(t *testing.T) {
 		t.Fatal("missing five_hour key")
 	}
 	if fh.Utilization != 0.42 {
-		t.Errorf("utilization = %v, want 0.42", fh.Utilization)
+		t.Errorf("utilization = %v, want 0.42 (42.0/100)", fh.Utilization)
 	}
 	if !fh.IsEnabled {
 		t.Error("IsEnabled should be true")
