@@ -269,9 +269,10 @@ type setupModel struct {
 	jiraRepoEditing   bool
 	jiraRepoField     int
 	jiraRepoEditURL   string
-	jiraPhaseCursor   int
-	jiraPhaseModelIdx [4]int
-	jiraPhaseProvider [4]string // provider per phase: claude, codex, or copilot
+	jiraPhaseCursor    int
+	jiraPhaseModelIdx  [4]int
+	jiraPhaseProvider  [4]string // provider per phase: claude, codex, or copilot
+	jiraPhaseEffortIdx [4]int    // effort index per phase, into provider-specific effort slice
 	jiraPinging       bool
 	jiraPingOK        bool
 	jiraPingErr       string
@@ -509,6 +510,7 @@ func newSetupModel() (*setupModel, error) {
 			}
 			model.jiraPhaseProvider[i] = p
 			model.jiraPhaseModelIdx[i] = jiraModelIndexForProvider(p, phase.Model)
+			model.jiraPhaseEffortIdx[i] = effortIndex(jiraPhaseEffortsForProvider(p), phase.ReasoningEffort)
 		}
 	}
 
@@ -2259,15 +2261,19 @@ func writeGlobalConfigToPath(cfg *config.Config, configPath string) error {
 		v.Set("jira.validation.provider", cfg.Jira.Validation.Provider)
 		v.Set("jira.validation.model", cfg.Jira.Validation.Model)
 		v.Set("jira.validation.timeout", cfg.Jira.Validation.Timeout)
+		v.Set("jira.validation.reasoning_effort", cfg.Jira.Validation.ReasoningEffort)
 		v.Set("jira.plan.provider", cfg.Jira.Plan.Provider)
 		v.Set("jira.plan.model", cfg.Jira.Plan.Model)
 		v.Set("jira.plan.timeout", cfg.Jira.Plan.Timeout)
+		v.Set("jira.plan.reasoning_effort", cfg.Jira.Plan.ReasoningEffort)
 		v.Set("jira.implement.provider", cfg.Jira.Implement.Provider)
 		v.Set("jira.implement.model", cfg.Jira.Implement.Model)
 		v.Set("jira.implement.timeout", cfg.Jira.Implement.Timeout)
+		v.Set("jira.implement.reasoning_effort", cfg.Jira.Implement.ReasoningEffort)
 		v.Set("jira.review_fix.provider", cfg.Jira.ReviewFix.Provider)
 		v.Set("jira.review_fix.model", cfg.Jira.ReviewFix.Model)
 		v.Set("jira.review_fix.timeout", cfg.Jira.ReviewFix.Timeout)
+		v.Set("jira.review_fix.reasoning_effort", cfg.Jira.ReviewFix.ReasoningEffort)
 		v.Set("jira.systemd_enabled", cfg.Jira.SystemdEnabled)
 		if cfg.Jira.SystemdOnCalendar != "" {
 			v.Set("jira.systemd_on_calendar", cfg.Jira.SystemdOnCalendar)
@@ -2284,15 +2290,19 @@ func writeGlobalConfigToPath(cfg *config.Config, configPath string) error {
 		v.Set("jira.validation.provider", "")
 		v.Set("jira.validation.model", "")
 		v.Set("jira.validation.timeout", "")
+		v.Set("jira.validation.reasoning_effort", "")
 		v.Set("jira.plan.provider", "")
 		v.Set("jira.plan.model", "")
 		v.Set("jira.plan.timeout", "")
+		v.Set("jira.plan.reasoning_effort", "")
 		v.Set("jira.implement.provider", "")
 		v.Set("jira.implement.model", "")
 		v.Set("jira.implement.timeout", "")
+		v.Set("jira.implement.reasoning_effort", "")
 		v.Set("jira.review_fix.provider", "")
 		v.Set("jira.review_fix.model", "")
 		v.Set("jira.review_fix.timeout", "")
+		v.Set("jira.review_fix.reasoning_effort", "")
 		v.Set("jira.systemd_enabled", false)
 		v.Set("jira.systemd_on_calendar", "")
 	}
@@ -2406,6 +2416,18 @@ func jiraPhaseModelsForProvider(provider string) []string {
 		return modelOptionValues(copilotModels[1:])
 	default:
 		return modelOptionValues(claudeModels[1:])
+	}
+}
+
+// jiraPhaseEffortsForProvider returns the effort slice for the given provider.
+func jiraPhaseEffortsForProvider(provider string) []string {
+	switch provider {
+	case "codex":
+		return codexEfforts
+	case "copilot":
+		return copilotEfforts
+	default:
+		return claudeEfforts
 	}
 }
 
@@ -2815,12 +2837,21 @@ func (m *setupModel) handleJiraPhaseInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.jiraPhaseModelIdx[m.jiraPhaseCursor] < len(models)-1 {
 			m.jiraPhaseModelIdx[m.jiraPhaseCursor]++
 		}
+	case "e":
+		// Cycle effort forward for the focused phase (wraps around).
+		efforts := jiraPhaseEffortsForProvider(m.jiraPhaseProvider[m.jiraPhaseCursor])
+		m.jiraPhaseEffortIdx[m.jiraPhaseCursor] = (m.jiraPhaseEffortIdx[m.jiraPhaseCursor] + 1) % len(efforts)
 	case "tab":
 		// Cycle provider for the selected phase; reset model index to avoid out-of-bounds.
+		// Clamp effort index to new provider's effort slice length.
 		idx := jiraProviderIndex(m.jiraPhaseProvider[m.jiraPhaseCursor])
 		idx = (idx + 1) % len(jiraProviders)
 		m.jiraPhaseProvider[m.jiraPhaseCursor] = jiraProviders[idx]
 		m.jiraPhaseModelIdx[m.jiraPhaseCursor] = 0
+		newEfforts := jiraPhaseEffortsForProvider(jiraProviders[idx])
+		if m.jiraPhaseEffortIdx[m.jiraPhaseCursor] >= len(newEfforts) {
+			m.jiraPhaseEffortIdx[m.jiraPhaseCursor] = 0
+		}
 	case "enter":
 		m.jiraSubStep = jiraSubStepMaxTickets
 		m.jiraInput.SetValue(strconv.Itoa(m.jiraMaxTickets))
@@ -3015,11 +3046,17 @@ func (m *setupModel) applyJiraConfig() {
 		if m.jiraPhaseModelIdx[i] < len(models) {
 			model = models[m.jiraPhaseModelIdx[i]]
 		}
+		efforts := jiraPhaseEffortsForProvider(provider)
+		effort := ""
+		if m.jiraPhaseEffortIdx[i] < len(efforts) {
+			effort = effortValue(efforts[m.jiraPhaseEffortIdx[i]])
+		}
 		timeouts := [4]string{"2m", "5m", "30m", "20m"}
 		phases[i] = jiraconfig.PhaseConfig{
-			Provider: provider,
-			Model:    model,
-			Timeout:  timeouts[i],
+			Provider:        provider,
+			Model:           model,
+			Timeout:         timeouts[i],
+			ReasoningEffort: effort,
 		}
 	}
 
@@ -3288,7 +3325,7 @@ func renderJiraReposStep(b *strings.Builder, m *setupModel) {
 
 func renderJiraPhasesStep(b *strings.Builder, m *setupModel) {
 	b.WriteString("Phase models\n")
-	b.WriteString("Use ↑/↓ to select phase, ←/→ to change model, Tab to change provider.\n\n")
+	b.WriteString("Use ↑/↓ to select phase, ←/→ to change model, Tab to change provider, [e] to cycle effort.\n\n")
 
 	phaseLabels := [4]string{"Validation ", "Plan       ", "Implement  ", "Review-fix "}
 	for i, label := range phaseLabels {
@@ -3305,7 +3342,12 @@ func renderJiraPhasesStep(b *strings.Builder, m *setupModel) {
 		if m.jiraPhaseModelIdx[i] < len(models) {
 			modelName = models[m.jiraPhaseModelIdx[i]]
 		}
-		fmt.Fprintf(b, " %s %-11s  %-8s  ← %s →\n", cursor, label, provider, modelName)
+		efforts := jiraPhaseEffortsForProvider(provider)
+		effortName := "default"
+		if m.jiraPhaseEffortIdx[i] < len(efforts) {
+			effortName = efforts[m.jiraPhaseEffortIdx[i]]
+		}
+		fmt.Fprintf(b, " %s %-11s  %-8s  ← %s →  ← %s →\n", cursor, label, provider, modelName, effortName)
 	}
 	b.WriteString("\n")
 	b.WriteString(styleNote.Render("Tip: haiku is cheaper/faster for validation; sonnet for implementation."))
