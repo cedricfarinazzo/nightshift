@@ -16,6 +16,7 @@ type CodexAgent struct {
 	runner     CommandRunner // Command executor (for testing)
 	bypassPerm bool          // Pass --dangerously-bypass-approvals-and-sandbox
 	model      string        // Default model to use
+	effort     string        // Default reasoning effort
 }
 
 // CodexOption configures a CodexAgent.
@@ -46,6 +47,13 @@ func WithDangerouslyBypassApprovalsAndSandbox(enabled bool) CodexOption {
 func WithCodexModel(model string) CodexOption {
 	return func(a *CodexAgent) {
 		a.model = model
+	}
+}
+
+// WithCodexEffort sets the default reasoning effort level.
+func WithCodexEffort(effort string) CodexOption {
+	return func(a *CodexAgent) {
+		a.effort = effort
 	}
 }
 
@@ -97,6 +105,15 @@ func (a *CodexAgent) Execute(ctx context.Context, opts ExecuteOptions) (*Execute
 	}
 	if model != "" {
 		args = append(args, "--model", model)
+	}
+
+	// Add reasoning effort if specified (codex uses --config key=value form)
+	effort := opts.ReasoningEffort
+	if effort == "" {
+		effort = a.effort
+	}
+	if effort != "" {
+		args = append(args, "--config", "model_reasoning_effort="+effort)
 	}
 
 	// Add prompt directly as argument

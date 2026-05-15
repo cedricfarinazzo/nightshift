@@ -25,6 +25,7 @@ type CopilotAgent struct {
 	binaryPath           string        // Path to binary: "gh" or "copilot" (default: "gh")
 	dangerouslySkipPerms bool          // Pass --allow-all-tools --allow-all-urls
 	model                string        // Default model to use
+	effort               string        // Default reasoning effort
 	timeout              time.Duration // Default timeout
 	runner               CommandRunner // Command executor (for testing)
 }
@@ -57,6 +58,13 @@ func WithCopilotDefaultTimeout(d time.Duration) CopilotOption {
 func WithCopilotModel(model string) CopilotOption {
 	return func(a *CopilotAgent) {
 		a.model = model
+	}
+}
+
+// WithCopilotEffort sets the default reasoning effort level.
+func WithCopilotEffort(effort string) CopilotOption {
+	return func(a *CopilotAgent) {
+		a.effort = effort
 	}
 }
 
@@ -116,6 +124,16 @@ func (a *CopilotAgent) Execute(ctx context.Context, opts ExecuteOptions) (*Execu
 	if model != "" {
 		args = append(args, "--model", model)
 	}
+
+	// Add reasoning effort if specified
+	effort := opts.ReasoningEffort
+	if effort == "" {
+		effort = a.effort
+	}
+	if effort != "" {
+		args = append(args, "--effort", effort)
+	}
+
 	if a.dangerouslySkipPerms {
 		args = append(args, "--allow-all-tools", "--allow-all-urls")
 	}

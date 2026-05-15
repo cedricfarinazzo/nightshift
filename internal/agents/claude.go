@@ -62,6 +62,7 @@ type ClaudeAgent struct {
 	runner     CommandRunner // Command executor (for testing)
 	skipPerms  bool          // Pass --dangerously-skip-permissions
 	model      string        // Default model to use
+	effort     string        // Default reasoning effort
 }
 
 // ClaudeOption configures a ClaudeAgent.
@@ -92,6 +93,13 @@ func WithDangerouslySkipPermissions(enabled bool) ClaudeOption {
 func WithModel(model string) ClaudeOption {
 	return func(a *ClaudeAgent) {
 		a.model = model
+	}
+}
+
+// WithEffort sets the default reasoning effort level.
+func WithEffort(effort string) ClaudeOption {
+	return func(a *ClaudeAgent) {
+		a.effort = effort
 	}
 }
 
@@ -142,6 +150,15 @@ func (a *ClaudeAgent) Execute(ctx context.Context, opts ExecuteOptions) (*Execut
 	}
 	if model != "" {
 		args = append(args, "--model", model)
+	}
+
+	// Add reasoning effort if specified
+	effort := opts.ReasoningEffort
+	if effort == "" {
+		effort = a.effort
+	}
+	if effort != "" {
+		args = append(args, "--effort", effort)
 	}
 
 	// Add prompt directly as argument
