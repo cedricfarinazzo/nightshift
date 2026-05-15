@@ -197,6 +197,95 @@ func TestJiraConfig_MultiProject(t *testing.T) {
 	}
 }
 
+func TestMergePhaseConfig_ReasoningEffort(t *testing.T) {
+	tests := []struct {
+		name     string
+		global   PhaseConfig
+		override PhaseConfig
+		want     string
+	}{
+		{
+			name:   "both empty",
+			global: PhaseConfig{}, override: PhaseConfig{},
+			want: "",
+		},
+		{
+			name:   "global set, no override",
+			global: PhaseConfig{ReasoningEffort: "high"}, override: PhaseConfig{},
+			want: "high",
+		},
+		{
+			name:   "override wins",
+			global: PhaseConfig{ReasoningEffort: "low"}, override: PhaseConfig{ReasoningEffort: "max"},
+			want: "max",
+		},
+		{
+			name:   "empty override keeps global",
+			global: PhaseConfig{ReasoningEffort: "medium"}, override: PhaseConfig{ReasoningEffort: ""},
+			want: "medium",
+		},
+		{
+			name:   "override only",
+			global: PhaseConfig{}, override: PhaseConfig{ReasoningEffort: "xhigh"},
+			want: "xhigh",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := mergePhaseConfig(tt.global, tt.override)
+			if got.ReasoningEffort != tt.want {
+				t.Errorf("ReasoningEffort = %q, want %q", got.ReasoningEffort, tt.want)
+			}
+		})
+	}
+}
+
+func TestEffectivePhase_ReasoningEffort(t *testing.T) {
+	cfg := JiraConfig{
+		Site:  "x",
+		Email: "a@b",
+		Implement: PhaseConfig{Provider: "claude", Model: "claude-sonnet-4-6", ReasoningEffort: "high"},
+		Plan:      PhaseConfig{Provider: "claude", ReasoningEffort: "medium"},
+		Projects: []ProjectConfig{
+			{
+				Key:   "VC",
+				Label: "nightshift",
+				Repos: []RepoConfig{{Name: "r", URL: "u"}},
+				// no override
+			},
+			{
+				Key:   "INFRA",
+				Label: "nightshift",
+				Repos: []RepoConfig{{Name: "r", URL: "u"}},
+				// override implement effort only
+				Implement: PhaseConfig{ReasoningEffort: "max"},
+			},
+		},
+	}
+	cfg.Defaults()
+
+	// VC inherits global effort
+	effVC := cfg.EffectiveImplement(cfg.Projects[0])
+	if effVC.ReasoningEffort != "high" {
+		t.Errorf("VC EffectiveImplement.ReasoningEffort = %q, want high", effVC.ReasoningEffort)
+	}
+
+	// INFRA overrides effort
+	effINFRA := cfg.EffectiveImplement(cfg.Projects[1])
+	if effINFRA.ReasoningEffort != "max" {
+		t.Errorf("INFRA EffectiveImplement.ReasoningEffort = %q, want max", effINFRA.ReasoningEffort)
+	}
+
+	// Plan effort unchanged for both (no project override)
+	if cfg.EffectivePlan(cfg.Projects[0]).ReasoningEffort != "medium" {
+		t.Errorf("VC EffectivePlan.ReasoningEffort = %q, want medium", cfg.EffectivePlan(cfg.Projects[0]).ReasoningEffort)
+	}
+	if cfg.EffectivePlan(cfg.Projects[1]).ReasoningEffort != "medium" {
+		t.Errorf("INFRA EffectivePlan.ReasoningEffort = %q, want medium", cfg.EffectivePlan(cfg.Projects[1]).ReasoningEffort)
+	}
+}
+
 func TestProjectConfig_BoardID_Preserved(t *testing.T) {
 	// BoardID should be preserved through Defaults().
 	cfg := JiraConfig{
