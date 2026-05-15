@@ -638,3 +638,99 @@ func TestWriteGlobalConfigToPath_ClearsJiraWhenDisabled(t *testing.T) {
 		t.Errorf("expected jira.email cleared, got %q", email)
 	}
 }
+
+// ── Jira phase effort ─────────────────────────────────────────────────────────
+
+func TestJiraPhaseInput_ECyclesEffort(t *testing.T) {
+	m := newJiraModel()
+	m.jiraPhaseCursor = 0
+	m.jiraPhaseProvider[0] = "claude"
+	m.jiraPhaseEffortIdx[0] = 0
+
+	model, _ := m.handleJiraPhaseInput(keyMsg("e"))
+	got := model.(*setupModel)
+	if got.jiraPhaseEffortIdx[0] != 1 {
+		t.Errorf("effort index after e = %d, want 1", got.jiraPhaseEffortIdx[0])
+	}
+
+	// Wrap around at end
+	got.jiraPhaseEffortIdx[0] = len(claudeEfforts) - 1
+	model, _ = got.handleJiraPhaseInput(keyMsg("e"))
+	got = model.(*setupModel)
+	if got.jiraPhaseEffortIdx[0] != 0 {
+		t.Errorf("effort index after wrap = %d, want 0", got.jiraPhaseEffortIdx[0])
+	}
+}
+
+func TestJiraPhaseInput_EOnlyAffectsFocusedPhase(t *testing.T) {
+	m := newJiraModel()
+	m.jiraPhaseCursor = 2 // implement
+	m.jiraPhaseProvider[2] = "claude"
+
+	model, _ := m.handleJiraPhaseInput(keyMsg("e"))
+	got := model.(*setupModel)
+
+	if got.jiraPhaseEffortIdx[0] != 0 {
+		t.Errorf("phase 0 effort changed unexpectedly: %d", got.jiraPhaseEffortIdx[0])
+	}
+	if got.jiraPhaseEffortIdx[2] != 1 {
+		t.Errorf("phase 2 effort = %d, want 1", got.jiraPhaseEffortIdx[2])
+	}
+}
+
+func TestJiraPhaseInput_TabClampsEffortIndex(t *testing.T) {
+	m := newJiraModel()
+	m.jiraPhaseCursor = 0
+	m.jiraPhaseProvider[0] = "claude"
+	// claude has 6 entries (default,low,medium,high,xhigh,max)
+	// copilot has 5 (default,low,medium,high,xhigh) — "max" gone after switch
+	m.jiraPhaseEffortIdx[0] = len(claudeEfforts) - 1 // "max" = index 5
+
+	// Tab: claude → codex (codex has 7 entries, index 5 still valid — no clamp needed)
+	model, _ := m.handleJiraPhaseInput(tea.KeyMsg{Type: tea.KeyTab})
+	got := model.(*setupModel)
+	if got.jiraPhaseProvider[0] != "codex" {
+		t.Fatalf("expected codex, got %q", got.jiraPhaseProvider[0])
+	}
+
+	// Tab again: codex → copilot; copilot has 5 entries, index 5 must clamp to 0
+	got.jiraPhaseEffortIdx[0] = len(claudeEfforts) - 1 // reset to "max" index (5)
+	model, _ = got.handleJiraPhaseInput(tea.KeyMsg{Type: tea.KeyTab})
+	got = model.(*setupModel)
+	if got.jiraPhaseProvider[0] != "copilot" {
+		t.Fatalf("expected copilot, got %q", got.jiraPhaseProvider[0])
+	}
+	if got.jiraPhaseEffortIdx[0] != 0 {
+		t.Errorf("effort index not clamped: got %d, want 0", got.jiraPhaseEffortIdx[0])
+	}
+}
+
+func TestJiraPhaseInput_ApplyJiraConfig_ReasoningEffort(t *testing.T) {
+	m := newJiraModel()
+	m.jiraEnabled = true
+	m.jiraPhaseProvider[0] = "claude"
+	m.jiraPhaseEffortIdx[0] = 3 // "high"
+	m.jiraPhaseProvider[2] = "codex"
+	m.jiraPhaseEffortIdx[2] = 4 // "medium"
+
+	m.applyJiraConfig()
+
+	if m.cfg.Jira.Validation.ReasoningEffort != "high" {
+		t.Errorf("validation effort = %q, want high", m.cfg.Jira.Validation.ReasoningEffort)
+	}
+	if m.cfg.Jira.Implement.ReasoningEffort != "medium" {
+		t.Errorf("implement effort = %q, want medium", m.cfg.Jira.Implement.ReasoningEffort)
+	}
+}
+
+func TestJiraPhaseInput_ApplyJiraConfig_DefaultEffortMapsToEmpty(t *testing.T) {
+	m := newJiraModel()
+	m.jiraPhaseProvider[1] = "claude"
+	m.jiraPhaseEffortIdx[1] = 0 // "default"
+
+	m.applyJiraConfig()
+
+	if m.cfg.Jira.Plan.ReasoningEffort != "" {
+		t.Errorf("plan effort = %q, want empty for default", m.cfg.Jira.Plan.ReasoningEffort)
+	}
+}
