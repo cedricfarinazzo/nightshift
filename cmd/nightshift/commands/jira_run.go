@@ -502,6 +502,9 @@ func createJiraAgent(cfg *config.Config, phase jira.PhaseConfig) (agents.Agent, 
 		if m := phase.Model; m != "" {
 			extra = append(extra, agents.WithCodexModel(m))
 		}
+		if phase.ReasoningEffort != "" {
+			extra = append(extra, agents.WithCodexEffort(phase.ReasoningEffort))
+		}
 		if timeout > 0 {
 			extra = append(extra, agents.WithCodexDefaultTimeout(timeout))
 		}
@@ -518,6 +521,9 @@ func createJiraAgent(cfg *config.Config, phase jira.PhaseConfig) (agents.Agent, 
 		if m := phase.Model; m != "" {
 			extra = append(extra, agents.WithCopilotModel(m))
 		}
+		if phase.ReasoningEffort != "" {
+			extra = append(extra, agents.WithCopilotEffort(phase.ReasoningEffort))
+		}
 		if timeout > 0 {
 			extra = append(extra, agents.WithCopilotDefaultTimeout(timeout))
 		}
@@ -533,6 +539,9 @@ func createJiraAgent(cfg *config.Config, phase jira.PhaseConfig) (agents.Agent, 
 		var extra []agents.ClaudeOption
 		if m := phase.Model; m != "" {
 			extra = append(extra, agents.WithModel(m))
+		}
+		if phase.ReasoningEffort != "" {
+			extra = append(extra, agents.WithEffort(phase.ReasoningEffort))
 		}
 		if timeout > 0 {
 			extra = append(extra, agents.WithDefaultTimeout(timeout))
