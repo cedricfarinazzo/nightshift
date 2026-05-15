@@ -120,6 +120,41 @@ func TestBranchAheadOfBase_MissingBaseRefErrors(t *testing.T) {
 	}
 }
 
+func TestCommitAndPush_FirstPush(t *testing.T) {
+	workDir := setupRemoteRepoWithMain(t)
+	runGit(t, workDir, "checkout", "-b", "feature/VC-99")
+	writeFile(t, workDir, "change.txt", "hello\n")
+
+	err := CommitAndPush(context.Background(), workDir, "feat: VC-99: first commit")
+	if err != nil {
+		t.Fatalf("CommitAndPush (first push) failed: %v", err)
+	}
+
+	// Verify remote branch now exists.
+	runGit(t, workDir, "fetch", "origin")
+	cmd := exec.Command("git", "rev-parse", "--verify", "refs/remotes/origin/feature/VC-99")
+	cmd.Dir = workDir
+	if out, err2 := cmd.CombinedOutput(); err2 != nil {
+		t.Fatalf("remote branch not found after first push: %v\n%s", err2, out)
+	}
+}
+
+func TestCommitAndPush_SubsequentPush(t *testing.T) {
+	workDir := setupRemoteRepoWithMain(t)
+	runGit(t, workDir, "checkout", "-b", "feature/VC-99")
+	writeFile(t, workDir, "change.txt", "hello\n")
+	runGit(t, workDir, "add", "change.txt")
+	runGit(t, workDir, "commit", "-m", "initial commit")
+	runGit(t, workDir, "push", "-u", "origin", "feature/VC-99")
+
+	writeFile(t, workDir, "change.txt", "updated\n")
+
+	err := CommitAndPush(context.Background(), workDir, "feat: VC-99: second commit")
+	if err != nil {
+		t.Fatalf("CommitAndPush (subsequent push) failed: %v", err)
+	}
+}
+
 func setupRemoteRepoWithMain(t *testing.T) string {
 	t.Helper()
 

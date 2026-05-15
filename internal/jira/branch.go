@@ -50,8 +50,12 @@ func CommitAndPush(ctx context.Context, repoPath, message string) error {
 		return err
 	}
 	// Sync with remote before pushing to avoid non-fast-forward rejection.
-	// Skip if remote branch doesn't exist yet (first push).
-	if exists, _ := remoteRefExists(ctx, repoPath, "refs/remotes/origin/"+branch); exists {
+	// Skip only when the remote branch genuinely does not exist yet (first push).
+	exists, err := remoteRefExists(ctx, repoPath, "refs/remotes/origin/"+branch)
+	if err != nil {
+		return fmt.Errorf("check remote ref before pull --rebase: %w", err)
+	}
+	if exists {
 		if _, pullErr := gitExec(ctx, repoPath, "pull", "--rebase", "origin", branch); pullErr != nil {
 			return fmt.Errorf("pull --rebase before push: %w", pullErr)
 		}
