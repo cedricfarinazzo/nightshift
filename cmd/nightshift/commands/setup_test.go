@@ -248,24 +248,21 @@ func TestEffortValue(t *testing.T) {
 	}
 }
 
-func TestHandleModelInput_TabTogglesField(t *testing.T) {
+func TestHandleModelInput_ETogglesField(t *testing.T) {
 	m := &setupModel{cfg: &config.Config{}}
 
-	// Initially on model column
 	if m.modelField != 0 {
 		t.Fatalf("initial modelField = %d, want 0", m.modelField)
 	}
 
-	// Tab switches to effort
-	m.handleModelInput(tea.KeyMsg{Type: tea.KeyTab})
+	m.handleModelInput(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'e'}})
 	if m.modelField != 1 {
-		t.Errorf("after Tab: modelField = %d, want 1", m.modelField)
+		t.Errorf("after e: modelField = %d, want 1", m.modelField)
 	}
 
-	// Tab again switches back
-	m.handleModelInput(tea.KeyMsg{Type: tea.KeyTab})
+	m.handleModelInput(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'e'}})
 	if m.modelField != 0 {
-		t.Errorf("after 2nd Tab: modelField = %d, want 0", m.modelField)
+		t.Errorf("after 2nd e: modelField = %d, want 0", m.modelField)
 	}
 }
 

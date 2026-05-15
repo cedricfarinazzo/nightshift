@@ -1877,7 +1877,7 @@ func renderModelFields(b *strings.Builder, m *setupModel) {
 		}
 		fmt.Fprintf(b, " %s %s  Model: %s   Effort: %s%s\n", cursor, row.label, modelStr, effortStr, avail)
 	}
-	b.WriteString(styleNote.Render("Tip: Tab switches between Model/Effort columns. 'default' = CLI built-in."))
+	b.WriteString(styleNote.Render("Tip: [e] toggles Model/Effort column. 'default' = CLI built-in."))
 	b.WriteString("\n")
 	if m.modelsLoading > 0 {
 		b.WriteString(styleDim.Render(m.spinner.View() + " Fetching live model list…"))
@@ -1895,7 +1895,7 @@ func (m *setupModel) handleModelInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.modelCursor < len(modelProviderLists)-1 {
 			m.modelCursor++
 		}
-	case "tab":
+	case "e":
 		if m.modelField == 0 {
 			m.modelField = 1
 		} else {
