@@ -22,11 +22,12 @@ import (
 // - Standalone: npm install -g @github/copilot or curl script
 // - Usage: copilot -p "<prompt>" --no-ask-user --silent
 type CopilotAgent struct {
-	binaryPath           string        // Path to binary: "gh" or "copilot" (default: "gh")
+	binaryPath      string        // Path to binary: "gh" or "copilot" (default: "gh")
 	dangerouslySkipPerms bool          // Pass --allow-all-tools --allow-all-urls
-	model                string        // Default model to use
-	timeout              time.Duration // Default timeout
-	runner               CommandRunner // Command executor (for testing)
+	model           string        // Default model to use
+	reasoningEffort string        // Default reasoning effort (low, medium, high, xhigh)
+	timeout         time.Duration // Default timeout
+	runner          CommandRunner // Command executor (for testing)
 }
 
 // CopilotOption configures a CopilotAgent.
@@ -57,6 +58,13 @@ func WithCopilotDefaultTimeout(d time.Duration) CopilotOption {
 func WithCopilotModel(model string) CopilotOption {
 	return func(a *CopilotAgent) {
 		a.model = model
+	}
+}
+
+// WithCopilotReasoningEffort sets the reasoning effort (low, medium, high, xhigh).
+func WithCopilotReasoningEffort(effort string) CopilotOption {
+	return func(a *CopilotAgent) {
+		a.reasoningEffort = effort
 	}
 }
 
@@ -116,6 +124,13 @@ func (a *CopilotAgent) Execute(ctx context.Context, opts ExecuteOptions) (*Execu
 	if model != "" {
 		args = append(args, "--model", model)
 	}
+
+	// Add reasoning effort if specified
+	effort := a.reasoningEffort
+	if effort != "" {
+		args = append(args, "--reasoning-effort", effort)
+	}
+
 	if a.dangerouslySkipPerms {
 		args = append(args, "--allow-all-tools", "--allow-all-urls")
 	}

@@ -595,6 +595,45 @@ func TestValidate_ReasoningEffort_Codex(t *testing.T) {
 	}
 }
 
+func TestLoadFromPaths_ReasoningEffort(t *testing.T) {
+	// Create a temporary config file with reasoning_effort values
+	tmpDir := t.TempDir()
+	configFile := filepath.Join(tmpDir, "nightshift.yaml")
+
+	configContent := `
+providers:
+  claude:
+    enabled: true
+    reasoning_effort: "high"
+  codex:
+    enabled: true
+    reasoning_effort: "minimal"
+  copilot:
+    enabled: true
+    reasoning_effort: "medium"
+`
+
+	if err := os.WriteFile(configFile, []byte(configContent), 0644); err != nil {
+		t.Fatalf("failed to write temp config file: %v", err)
+	}
+
+	// Load config and verify reasoning_effort was unmarshaled correctly
+	cfg, err := LoadFromPaths(tmpDir, "")
+	if err != nil {
+		t.Fatalf("LoadFromPaths failed: %v", err)
+	}
+
+	if cfg.Providers.Claude.ReasoningEffort != "high" {
+		t.Errorf("expected claude reasoning_effort='high', got '%s'", cfg.Providers.Claude.ReasoningEffort)
+	}
+	if cfg.Providers.Codex.ReasoningEffort != "minimal" {
+		t.Errorf("expected codex reasoning_effort='minimal', got '%s'", cfg.Providers.Codex.ReasoningEffort)
+	}
+	if cfg.Providers.Copilot.ReasoningEffort != "medium" {
+		t.Errorf("expected copilot reasoning_effort='medium', got '%s'", cfg.Providers.Copilot.ReasoningEffort)
+	}
+}
+
 func TestValidate_JiraSystemd_enabled(t *testing.T) {
 	cfg := &Config{}
 	cfg.Jira.SystemdEnabled = true

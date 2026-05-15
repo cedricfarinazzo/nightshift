@@ -11,11 +11,12 @@ import (
 
 // CodexAgent spawns Codex CLI for task execution.
 type CodexAgent struct {
-	binaryPath string        // Path to codex binary (default: "codex")
-	timeout    time.Duration // Default timeout
-	runner     CommandRunner // Command executor (for testing)
-	bypassPerm bool          // Pass --dangerously-bypass-approvals-and-sandbox
-	model      string        // Default model to use
+	binaryPath      string        // Path to codex binary (default: "codex")
+	timeout         time.Duration // Default timeout
+	runner          CommandRunner // Command executor (for testing)
+	bypassPerm      bool          // Pass --dangerously-bypass-approvals-and-sandbox
+	model           string        // Default model to use
+	reasoningEffort string        // Default reasoning effort (none, minimal, low, medium, high, xhigh)
 }
 
 // CodexOption configures a CodexAgent.
@@ -46,6 +47,13 @@ func WithDangerouslyBypassApprovalsAndSandbox(enabled bool) CodexOption {
 func WithCodexModel(model string) CodexOption {
 	return func(a *CodexAgent) {
 		a.model = model
+	}
+}
+
+// WithCodexReasoningEffort sets the reasoning effort (none, minimal, low, medium, high, xhigh).
+func WithCodexReasoningEffort(effort string) CodexOption {
+	return func(a *CodexAgent) {
+		a.reasoningEffort = effort
 	}
 }
 
@@ -97,6 +105,12 @@ func (a *CodexAgent) Execute(ctx context.Context, opts ExecuteOptions) (*Execute
 	}
 	if model != "" {
 		args = append(args, "--model", model)
+	}
+
+	// Add reasoning effort if specified
+	effort := a.reasoningEffort
+	if effort != "" {
+		args = append(args, "--reasoning-effort", effort)
 	}
 
 	// Add prompt directly as argument
