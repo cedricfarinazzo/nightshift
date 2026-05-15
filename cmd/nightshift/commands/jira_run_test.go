@@ -239,6 +239,47 @@ func TestCreateJiraAgent_CaseInsensitiveProvider(t *testing.T) {
 	}
 }
 
+func TestCreateJiraAgent_ReasoningEffort(t *testing.T) {
+	tests := []struct {
+		name     string
+		phase    jira.PhaseConfig
+		wantName string
+	}{
+		{
+			name:     "claude with effort",
+			phase:    jira.PhaseConfig{Provider: "claude", ReasoningEffort: "high"},
+			wantName: "claude",
+		},
+		{
+			name:     "codex with effort",
+			phase:    jira.PhaseConfig{Provider: "codex", ReasoningEffort: "medium"},
+			wantName: "codex",
+		},
+		{
+			name:     "copilot with effort",
+			phase:    jira.PhaseConfig{Provider: "copilot", ReasoningEffort: "low"},
+			wantName: "copilot",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &config.Config{}
+			a, err := createJiraAgent(cfg, tt.phase)
+			if err != nil {
+				if strings.Contains(err.Error(), "not found in PATH") {
+					t.Skipf("%s CLI not available: %v", tt.wantName, err)
+				}
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if a.Name() != tt.wantName {
+				t.Errorf("agent name = %q, want %q", a.Name(), tt.wantName)
+			}
+		})
+	}
+}
+
+
 func TestRunJira_MissingConfig(t *testing.T) {
 	// Validate() catches missing required fields.
 	cfg := jira.JiraConfig{}
