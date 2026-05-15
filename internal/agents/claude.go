@@ -57,12 +57,11 @@ func (r *ExecRunner) Run(ctx context.Context, name string, args []string, dir st
 
 // ClaudeAgent spawns Claude Code CLI for task execution.
 type ClaudeAgent struct {
-	binaryPath      string        // Path to claude binary (default: "claude")
-	timeout         time.Duration // Default timeout
-	runner          CommandRunner // Command executor (for testing)
-	skipPerms       bool          // Pass --dangerously-skip-permissions
-	model           string        // Default model to use
-	reasoningEffort string        // Default reasoning effort (low, medium, high, xhigh, max)
+	binaryPath string        // Path to claude binary (default: "claude")
+	timeout    time.Duration // Default timeout
+	runner     CommandRunner // Command executor (for testing)
+	skipPerms  bool          // Pass --dangerously-skip-permissions
+	model      string        // Default model to use
 }
 
 // ClaudeOption configures a ClaudeAgent.
@@ -93,13 +92,6 @@ func WithDangerouslySkipPermissions(enabled bool) ClaudeOption {
 func WithModel(model string) ClaudeOption {
 	return func(a *ClaudeAgent) {
 		a.model = model
-	}
-}
-
-// WithReasoningEffort sets the reasoning effort (low, medium, high, xhigh, max).
-func WithReasoningEffort(effort string) ClaudeOption {
-	return func(a *ClaudeAgent) {
-		a.reasoningEffort = effort
 	}
 }
 
@@ -150,12 +142,6 @@ func (a *ClaudeAgent) Execute(ctx context.Context, opts ExecuteOptions) (*Execut
 	}
 	if model != "" {
 		args = append(args, "--model", model)
-	}
-
-	// Add reasoning effort if specified
-	effort := a.reasoningEffort
-	if effort != "" {
-		args = append(args, "--reasoning-effort", effort)
 	}
 
 	// Add prompt directly as argument

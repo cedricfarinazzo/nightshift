@@ -544,59 +544,64 @@ func TestValidate_NoScheduleIsOK(t *testing.T) {
 	}
 }
 
-func TestValidate_ReasoningEffort_Claude(t *testing.T) {
-	valid := []string{"", "low", "medium", "high", "xhigh", "max"}
-	for _, v := range valid {
-		cfg := &Config{Providers: ProvidersConfig{Claude: ProviderConfig{ReasoningEffort: v}}}
-		if err := Validate(cfg); err != nil {
-			t.Errorf("claude effort %q: unexpected error %v", v, err)
-		}
-	}
-	invalid := []string{"none", "minimal", "ultra", "fast"}
-	for _, v := range invalid {
-		cfg := &Config{Providers: ProvidersConfig{Claude: ProviderConfig{ReasoningEffort: v}}}
-		if err := Validate(cfg); !errors.Is(err, ErrInvalidClaudeReasoningEffort) {
-			t.Errorf("claude effort %q: expected ErrInvalidClaudeReasoningEffort, got %v", v, err)
-		}
-	}
-}
+func TestValidate_ReasoningEffort(t *testing.T) {
+	tests := []struct {
+		name    string
+		cfg     *Config
+		wantErr error
+	}{
+		// Claude valid
+		{name: "claude/empty", cfg: &Config{Providers: ProvidersConfig{Claude: ProviderConfig{ReasoningEffort: ""}}}},
+		{name: "claude/low", cfg: &Config{Providers: ProvidersConfig{Claude: ProviderConfig{ReasoningEffort: "low"}}}},
+		{name: "claude/medium", cfg: &Config{Providers: ProvidersConfig{Claude: ProviderConfig{ReasoningEffort: "medium"}}}},
+		{name: "claude/high", cfg: &Config{Providers: ProvidersConfig{Claude: ProviderConfig{ReasoningEffort: "high"}}}},
+		{name: "claude/xhigh", cfg: &Config{Providers: ProvidersConfig{Claude: ProviderConfig{ReasoningEffort: "xhigh"}}}},
+		{name: "claude/max", cfg: &Config{Providers: ProvidersConfig{Claude: ProviderConfig{ReasoningEffort: "max"}}}},
+		// Claude invalid (codex-only or unknown)
+		{name: "claude/none", cfg: &Config{Providers: ProvidersConfig{Claude: ProviderConfig{ReasoningEffort: "none"}}}, wantErr: ErrInvalidClaudeReasoningEffort},
+		{name: "claude/minimal", cfg: &Config{Providers: ProvidersConfig{Claude: ProviderConfig{ReasoningEffort: "minimal"}}}, wantErr: ErrInvalidClaudeReasoningEffort},
+		{name: "claude/unknown", cfg: &Config{Providers: ProvidersConfig{Claude: ProviderConfig{ReasoningEffort: "ultra"}}}, wantErr: ErrInvalidClaudeReasoningEffort},
 
-func TestValidate_ReasoningEffort_Copilot(t *testing.T) {
-	valid := []string{"", "low", "medium", "high", "xhigh"}
-	for _, v := range valid {
-		cfg := &Config{Providers: ProvidersConfig{Copilot: ProviderConfig{ReasoningEffort: v}}}
-		if err := Validate(cfg); err != nil {
-			t.Errorf("copilot effort %q: unexpected error %v", v, err)
-		}
-	}
-	invalid := []string{"max", "none", "minimal", "ultra"}
-	for _, v := range invalid {
-		cfg := &Config{Providers: ProvidersConfig{Copilot: ProviderConfig{ReasoningEffort: v}}}
-		if err := Validate(cfg); !errors.Is(err, ErrInvalidCopilotReasoningEffort) {
-			t.Errorf("copilot effort %q: expected ErrInvalidCopilotReasoningEffort, got %v", v, err)
-		}
-	}
-}
+		// Copilot valid
+		{name: "copilot/empty", cfg: &Config{Providers: ProvidersConfig{Copilot: ProviderConfig{ReasoningEffort: ""}}}},
+		{name: "copilot/low", cfg: &Config{Providers: ProvidersConfig{Copilot: ProviderConfig{ReasoningEffort: "low"}}}},
+		{name: "copilot/medium", cfg: &Config{Providers: ProvidersConfig{Copilot: ProviderConfig{ReasoningEffort: "medium"}}}},
+		{name: "copilot/high", cfg: &Config{Providers: ProvidersConfig{Copilot: ProviderConfig{ReasoningEffort: "high"}}}},
+		{name: "copilot/xhigh", cfg: &Config{Providers: ProvidersConfig{Copilot: ProviderConfig{ReasoningEffort: "xhigh"}}}},
+		// Copilot invalid (claude-only, codex-only, or unknown)
+		{name: "copilot/max", cfg: &Config{Providers: ProvidersConfig{Copilot: ProviderConfig{ReasoningEffort: "max"}}}, wantErr: ErrInvalidCopilotReasoningEffort},
+		{name: "copilot/none", cfg: &Config{Providers: ProvidersConfig{Copilot: ProviderConfig{ReasoningEffort: "none"}}}, wantErr: ErrInvalidCopilotReasoningEffort},
+		{name: "copilot/minimal", cfg: &Config{Providers: ProvidersConfig{Copilot: ProviderConfig{ReasoningEffort: "minimal"}}}, wantErr: ErrInvalidCopilotReasoningEffort},
+		{name: "copilot/unknown", cfg: &Config{Providers: ProvidersConfig{Copilot: ProviderConfig{ReasoningEffort: "fast"}}}, wantErr: ErrInvalidCopilotReasoningEffort},
 
-func TestValidate_ReasoningEffort_Codex(t *testing.T) {
-	valid := []string{"", "none", "minimal", "low", "medium", "high", "xhigh"}
-	for _, v := range valid {
-		cfg := &Config{Providers: ProvidersConfig{Codex: ProviderConfig{ReasoningEffort: v}}}
-		if err := Validate(cfg); err != nil {
-			t.Errorf("codex effort %q: unexpected error %v", v, err)
-		}
+		// Codex valid
+		{name: "codex/empty", cfg: &Config{Providers: ProvidersConfig{Codex: ProviderConfig{ReasoningEffort: ""}}}},
+		{name: "codex/none", cfg: &Config{Providers: ProvidersConfig{Codex: ProviderConfig{ReasoningEffort: "none"}}}},
+		{name: "codex/minimal", cfg: &Config{Providers: ProvidersConfig{Codex: ProviderConfig{ReasoningEffort: "minimal"}}}},
+		{name: "codex/low", cfg: &Config{Providers: ProvidersConfig{Codex: ProviderConfig{ReasoningEffort: "low"}}}},
+		{name: "codex/medium", cfg: &Config{Providers: ProvidersConfig{Codex: ProviderConfig{ReasoningEffort: "medium"}}}},
+		{name: "codex/high", cfg: &Config{Providers: ProvidersConfig{Codex: ProviderConfig{ReasoningEffort: "high"}}}},
+		{name: "codex/xhigh", cfg: &Config{Providers: ProvidersConfig{Codex: ProviderConfig{ReasoningEffort: "xhigh"}}}},
+		// Codex invalid (claude-only or unknown)
+		{name: "codex/max", cfg: &Config{Providers: ProvidersConfig{Codex: ProviderConfig{ReasoningEffort: "max"}}}, wantErr: ErrInvalidCodexReasoningEffort},
+		{name: "codex/unknown", cfg: &Config{Providers: ProvidersConfig{Codex: ProviderConfig{ReasoningEffort: "ultra"}}}, wantErr: ErrInvalidCodexReasoningEffort},
 	}
-	invalid := []string{"max", "ultra", "fast"}
-	for _, v := range invalid {
-		cfg := &Config{Providers: ProvidersConfig{Codex: ProviderConfig{ReasoningEffort: v}}}
-		if err := Validate(cfg); !errors.Is(err, ErrInvalidCodexReasoningEffort) {
-			t.Errorf("codex effort %q: expected ErrInvalidCodexReasoningEffort, got %v", v, err)
-		}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := Validate(tt.cfg)
+			if tt.wantErr != nil {
+				if !errors.Is(err, tt.wantErr) {
+					t.Errorf("got %v, want %v", err, tt.wantErr)
+				}
+			} else if err != nil {
+				t.Errorf("unexpected error: %v", err)
+			}
+		})
 	}
 }
 
 func TestLoadFromPaths_ReasoningEffort(t *testing.T) {
-	// Create a temporary config file with reasoning_effort values
 	tmpDir := t.TempDir()
 	configFile := filepath.Join(tmpDir, "nightshift.yaml")
 
@@ -612,25 +617,23 @@ providers:
     enabled: true
     reasoning_effort: "medium"
 `
-
 	if err := os.WriteFile(configFile, []byte(configContent), 0644); err != nil {
-		t.Fatalf("failed to write temp config file: %v", err)
+		t.Fatalf("write config: %v", err)
 	}
 
-	// Load config and verify reasoning_effort was unmarshaled correctly
 	cfg, err := LoadFromPaths(tmpDir, "")
 	if err != nil {
-		t.Fatalf("LoadFromPaths failed: %v", err)
+		t.Fatalf("LoadFromPaths: %v", err)
 	}
 
-	if cfg.Providers.Claude.ReasoningEffort != "high" {
-		t.Errorf("expected claude reasoning_effort='high', got '%s'", cfg.Providers.Claude.ReasoningEffort)
+	if got := cfg.Providers.Claude.ReasoningEffort; got != "high" {
+		t.Errorf("claude: got %q, want %q", got, "high")
 	}
-	if cfg.Providers.Codex.ReasoningEffort != "minimal" {
-		t.Errorf("expected codex reasoning_effort='minimal', got '%s'", cfg.Providers.Codex.ReasoningEffort)
+	if got := cfg.Providers.Codex.ReasoningEffort; got != "minimal" {
+		t.Errorf("codex: got %q, want %q", got, "minimal")
 	}
-	if cfg.Providers.Copilot.ReasoningEffort != "medium" {
-		t.Errorf("expected copilot reasoning_effort='medium', got '%s'", cfg.Providers.Copilot.ReasoningEffort)
+	if got := cfg.Providers.Copilot.ReasoningEffort; got != "medium" {
+		t.Errorf("copilot: got %q, want %q", got, "medium")
 	}
 }
 

@@ -48,9 +48,6 @@ func newClaudeAgentFromConfig(cfg *config.Config, extra ...agents.ClaudeOption) 
 	if cfg.Providers.Claude.Model != "" {
 		opts = append(opts, agents.WithModel(cfg.Providers.Claude.Model))
 	}
-	if cfg.Providers.Claude.ReasoningEffort != "" {
-		opts = append(opts, agents.WithReasoningEffort(cfg.Providers.Claude.ReasoningEffort))
-	}
 	opts = append(opts, extra...)
 	return agents.NewClaudeAgent(opts...)
 }
@@ -77,9 +74,6 @@ func newCodexAgentFromConfig(cfg *config.Config, extra ...agents.CodexOption) *a
 	}
 	if cfg.Providers.Codex.Model != "" {
 		opts = append(opts, agents.WithCodexModel(cfg.Providers.Codex.Model))
-	}
-	if cfg.Providers.Codex.ReasoningEffort != "" {
-		opts = append(opts, agents.WithCodexReasoningEffort(cfg.Providers.Codex.ReasoningEffort))
 	}
 	opts = append(opts, extra...)
 	return agents.NewCodexAgent(opts...)
@@ -109,9 +103,6 @@ func newCopilotAgentFromConfig(cfg *config.Config, binaryPath string, extra ...a
 	}
 	if cfg.Providers.Copilot.Model != "" {
 		opts = append(opts, agents.WithCopilotModel(cfg.Providers.Copilot.Model))
-	}
-	if cfg.Providers.Copilot.ReasoningEffort != "" {
-		opts = append(opts, agents.WithCopilotReasoningEffort(cfg.Providers.Copilot.ReasoningEffort))
 	}
 	opts = append(opts, extra...)
 	return agents.NewCopilotAgent(opts...)
