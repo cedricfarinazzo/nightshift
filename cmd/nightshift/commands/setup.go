@@ -84,6 +84,32 @@ type modelOption struct {
 // (claude=0, codex=1, copilot=2). Used to bound modelCursor in handleModelInput.
 var modelProviderLists = []*[]modelOption{&claudeModels, &codexModels, &copilotModels}
 
+// Effort level slices per provider. "default" maps to "" (use CLI default).
+var claudeEfforts = []string{"default", "low", "medium", "high", "xhigh", "max"}
+var copilotEfforts = []string{"default", "low", "medium", "high", "xhigh"}
+var codexEfforts = []string{"default", "none", "minimal", "low", "medium", "high", "xhigh"}
+
+// effortIndex returns the index of the given effort value in an effort slice, defaulting to 0.
+func effortIndex(efforts []string, value string) int {
+	if value == "" {
+		return 0
+	}
+	for i, e := range efforts {
+		if e == value {
+			return i
+		}
+	}
+	return 0
+}
+
+// effortValue converts a display effort string to a config value ("default" → "").
+func effortValue(s string) string {
+	if s == "default" {
+		return ""
+	}
+	return s
+}
+
 // jiraProviders lists providers selectable for Jira phase configuration.
 var jiraProviders = []string{"claude", "codex", "copilot"}
 
@@ -188,6 +214,11 @@ type setupModel struct {
 	codexModelIdx   int
 	copilotModelIdx int
 	modelsLoading   int // counts pending dynamic-fetch goroutines (0 = done)
+
+	modelField       int // 0 = model column focused, 1 = effort column focused
+	claudeEffortIdx  int
+	codexEffortIdx   int
+	copilotEffortIdx int
 
 	taskPresetCursor int
 	taskCursor       int
@@ -410,6 +441,9 @@ func newSetupModel() (*setupModel, error) {
 		claudeModelIdx:    modelIndex(claudeModels, cfg.Providers.Claude.Model),
 		codexModelIdx:     modelIndex(codexModels, cfg.Providers.Codex.Model),
 		copilotModelIdx:   modelIndex(copilotModels, cfg.Providers.Copilot.Model),
+		claudeEffortIdx:   effortIndex(claudeEfforts, cfg.Providers.Claude.ReasoningEffort),
+		codexEffortIdx:    effortIndex(codexEfforts, cfg.Providers.Codex.ReasoningEffort),
+		copilotEffortIdx:  effortIndex(copilotEfforts, cfg.Providers.Copilot.ReasoningEffort),
 		jiraInput:         jiraInput,
 		jiraTokenEnv:      "JIRA_API_TOKEN",
 		systemdInput:      systemdInput,
@@ -1806,28 +1840,44 @@ func renderSafetyFields(b *strings.Builder, m *setupModel) {
 
 func renderModelFields(b *strings.Builder, m *setupModel) {
 	rows := []struct {
-		label     string
-		models    []modelOption
-		idx       int
-		available bool
+		label      string
+		models     []modelOption
+		modelIdx   int
+		efforts    []string
+		effortIdx  int
+		available  bool
 	}{
-		{"Claude ", claudeModels, m.claudeModelIdx, m.cfg.Providers.Claude.Enabled},
-		{"Codex  ", codexModels, m.codexModelIdx, m.cfg.Providers.Codex.Enabled},
-		{"Copilot", copilotModels, m.copilotModelIdx, m.cfg.Providers.Copilot.Enabled},
+		{"Claude ", claudeModels, m.claudeModelIdx, claudeEfforts, m.claudeEffortIdx, m.cfg.Providers.Claude.Enabled},
+		{"Codex  ", codexModels, m.codexModelIdx, codexEfforts, m.codexEffortIdx, m.cfg.Providers.Codex.Enabled},
+		{"Copilot", copilotModels, m.copilotModelIdx, copilotEfforts, m.copilotEffortIdx, m.cfg.Providers.Copilot.Enabled},
 	}
 	for i, row := range rows {
 		cursor := " "
 		if i == m.modelCursor {
 			cursor = ">"
 		}
-		selected := row.models[row.idx].label
+
+		modelStr := fmt.Sprintf("← %s →", row.models[row.modelIdx].label)
+		effortStr := fmt.Sprintf("← %s →", row.efforts[row.effortIdx])
+
+		// Highlight focused column when this row is selected
+		if i == m.modelCursor {
+			if m.modelField == 0 {
+				modelStr = styleAccent.Render(modelStr)
+				effortStr = styleDim.Render(effortStr)
+			} else {
+				modelStr = styleDim.Render(modelStr)
+				effortStr = styleAccent.Render(effortStr)
+			}
+		}
+
 		avail := ""
 		if !row.available {
 			avail = " (provider disabled)"
 		}
-		fmt.Fprintf(b, " %s %s  ← %s →%s\n", cursor, row.label, selected, avail)
+		fmt.Fprintf(b, " %s %s  Model: %s   Effort: %s%s\n", cursor, row.label, modelStr, effortStr, avail)
 	}
-	b.WriteString(styleNote.Render("Tip: 'default' lets the CLI pick its built-in model."))
+	b.WriteString(styleNote.Render("Tip: Tab switches between Model/Effort columns. 'default' = CLI built-in."))
 	b.WriteString("\n")
 	if m.modelsLoading > 0 {
 		b.WriteString(styleDim.Render(m.spinner.View() + " Fetching live model list…"))
@@ -1845,40 +1895,83 @@ func (m *setupModel) handleModelInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.modelCursor < len(modelProviderLists)-1 {
 			m.modelCursor++
 		}
+	case "tab":
+		if m.modelField == 0 {
+			m.modelField = 1
+		} else {
+			m.modelField = 0
+		}
 	case "left", "h":
-		switch m.modelCursor {
-		case 0:
-			if m.claudeModelIdx > 0 {
-				m.claudeModelIdx--
+		if m.modelField == 0 {
+			switch m.modelCursor {
+			case 0:
+				if m.claudeModelIdx > 0 {
+					m.claudeModelIdx--
+				}
+			case 1:
+				if m.codexModelIdx > 0 {
+					m.codexModelIdx--
+				}
+			case 2:
+				if m.copilotModelIdx > 0 {
+					m.copilotModelIdx--
+				}
 			}
-		case 1:
-			if m.codexModelIdx > 0 {
-				m.codexModelIdx--
-			}
-		case 2:
-			if m.copilotModelIdx > 0 {
-				m.copilotModelIdx--
+		} else {
+			switch m.modelCursor {
+			case 0:
+				if m.claudeEffortIdx > 0 {
+					m.claudeEffortIdx--
+				}
+			case 1:
+				if m.codexEffortIdx > 0 {
+					m.codexEffortIdx--
+				}
+			case 2:
+				if m.copilotEffortIdx > 0 {
+					m.copilotEffortIdx--
+				}
 			}
 		}
 	case "right", "l":
-		switch m.modelCursor {
-		case 0:
-			if m.claudeModelIdx < len(claudeModels)-1 {
-				m.claudeModelIdx++
+		if m.modelField == 0 {
+			switch m.modelCursor {
+			case 0:
+				if m.claudeModelIdx < len(claudeModels)-1 {
+					m.claudeModelIdx++
+				}
+			case 1:
+				if m.codexModelIdx < len(codexModels)-1 {
+					m.codexModelIdx++
+				}
+			case 2:
+				if m.copilotModelIdx < len(copilotModels)-1 {
+					m.copilotModelIdx++
+				}
 			}
-		case 1:
-			if m.codexModelIdx < len(codexModels)-1 {
-				m.codexModelIdx++
-			}
-		case 2:
-			if m.copilotModelIdx < len(copilotModels)-1 {
-				m.copilotModelIdx++
+		} else {
+			switch m.modelCursor {
+			case 0:
+				if m.claudeEffortIdx < len(claudeEfforts)-1 {
+					m.claudeEffortIdx++
+				}
+			case 1:
+				if m.codexEffortIdx < len(codexEfforts)-1 {
+					m.codexEffortIdx++
+				}
+			case 2:
+				if m.copilotEffortIdx < len(copilotEfforts)-1 {
+					m.copilotEffortIdx++
+				}
 			}
 		}
 	case "enter":
 		m.cfg.Providers.Claude.Model = claudeModels[m.claudeModelIdx].value
 		m.cfg.Providers.Codex.Model = codexModels[m.codexModelIdx].value
 		m.cfg.Providers.Copilot.Model = copilotModels[m.copilotModelIdx].value
+		m.cfg.Providers.Claude.ReasoningEffort = effortValue(claudeEfforts[m.claudeEffortIdx])
+		m.cfg.Providers.Codex.ReasoningEffort = effortValue(codexEfforts[m.codexEffortIdx])
+		m.cfg.Providers.Copilot.ReasoningEffort = effortValue(copilotEfforts[m.copilotEffortIdx])
 		return m, m.setStep(stepTaskPreset)
 	}
 	return m, nil
@@ -2166,16 +2259,19 @@ func writeGlobalConfigToPath(cfg *config.Config, configPath string) error {
 	v.Set("providers.claude.enabled", cfg.Providers.Claude.Enabled)
 	v.Set("providers.claude.data_path", cfg.Providers.Claude.DataPath)
 	v.Set("providers.claude.model", cfg.Providers.Claude.Model)
+	v.Set("providers.claude.reasoning_effort", cfg.Providers.Claude.ReasoningEffort)
 	v.Set("providers.claude.dangerously_skip_permissions", cfg.Providers.Claude.DangerouslySkipPermissions)
 	v.Set("providers.claude.dangerously_bypass_approvals_and_sandbox", cfg.Providers.Claude.DangerouslyBypassApprovalsAndSandbox)
 	v.Set("providers.codex.enabled", cfg.Providers.Codex.Enabled)
 	v.Set("providers.codex.data_path", cfg.Providers.Codex.DataPath)
 	v.Set("providers.codex.model", cfg.Providers.Codex.Model)
+	v.Set("providers.codex.reasoning_effort", cfg.Providers.Codex.ReasoningEffort)
 	v.Set("providers.codex.dangerously_skip_permissions", cfg.Providers.Codex.DangerouslySkipPermissions)
 	v.Set("providers.codex.dangerously_bypass_approvals_and_sandbox", cfg.Providers.Codex.DangerouslyBypassApprovalsAndSandbox)
 	v.Set("providers.copilot.enabled", cfg.Providers.Copilot.Enabled)
 	v.Set("providers.copilot.data_path", cfg.Providers.Copilot.DataPath)
 	v.Set("providers.copilot.model", cfg.Providers.Copilot.Model)
+	v.Set("providers.copilot.reasoning_effort", cfg.Providers.Copilot.ReasoningEffort)
 	v.Set("providers.copilot.dangerously_skip_permissions", cfg.Providers.Copilot.DangerouslySkipPermissions)
 	v.Set("providers.copilot.dangerously_bypass_approvals_and_sandbox", cfg.Providers.Copilot.DangerouslyBypassApprovalsAndSandbox)
 	v.Set("providers.preference", cfg.Providers.Preference)
