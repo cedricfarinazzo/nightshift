@@ -544,6 +544,57 @@ func TestValidate_NoScheduleIsOK(t *testing.T) {
 	}
 }
 
+func TestValidate_ReasoningEffort_Claude(t *testing.T) {
+	valid := []string{"", "low", "medium", "high", "xhigh", "max"}
+	for _, v := range valid {
+		cfg := &Config{Providers: ProvidersConfig{Claude: ProviderConfig{ReasoningEffort: v}}}
+		if err := Validate(cfg); err != nil {
+			t.Errorf("claude effort %q: unexpected error %v", v, err)
+		}
+	}
+	invalid := []string{"none", "minimal", "ultra", "fast"}
+	for _, v := range invalid {
+		cfg := &Config{Providers: ProvidersConfig{Claude: ProviderConfig{ReasoningEffort: v}}}
+		if err := Validate(cfg); !errors.Is(err, ErrInvalidClaudeReasoningEffort) {
+			t.Errorf("claude effort %q: expected ErrInvalidClaudeReasoningEffort, got %v", v, err)
+		}
+	}
+}
+
+func TestValidate_ReasoningEffort_Copilot(t *testing.T) {
+	valid := []string{"", "low", "medium", "high", "xhigh"}
+	for _, v := range valid {
+		cfg := &Config{Providers: ProvidersConfig{Copilot: ProviderConfig{ReasoningEffort: v}}}
+		if err := Validate(cfg); err != nil {
+			t.Errorf("copilot effort %q: unexpected error %v", v, err)
+		}
+	}
+	invalid := []string{"max", "none", "minimal", "ultra"}
+	for _, v := range invalid {
+		cfg := &Config{Providers: ProvidersConfig{Copilot: ProviderConfig{ReasoningEffort: v}}}
+		if err := Validate(cfg); !errors.Is(err, ErrInvalidCopilotReasoningEffort) {
+			t.Errorf("copilot effort %q: expected ErrInvalidCopilotReasoningEffort, got %v", v, err)
+		}
+	}
+}
+
+func TestValidate_ReasoningEffort_Codex(t *testing.T) {
+	valid := []string{"", "none", "minimal", "low", "medium", "high", "xhigh"}
+	for _, v := range valid {
+		cfg := &Config{Providers: ProvidersConfig{Codex: ProviderConfig{ReasoningEffort: v}}}
+		if err := Validate(cfg); err != nil {
+			t.Errorf("codex effort %q: unexpected error %v", v, err)
+		}
+	}
+	invalid := []string{"max", "ultra", "fast"}
+	for _, v := range invalid {
+		cfg := &Config{Providers: ProvidersConfig{Codex: ProviderConfig{ReasoningEffort: v}}}
+		if err := Validate(cfg); !errors.Is(err, ErrInvalidCodexReasoningEffort) {
+			t.Errorf("codex effort %q: expected ErrInvalidCodexReasoningEffort, got %v", v, err)
+		}
+	}
+}
+
 func TestValidate_JiraSystemd_enabled(t *testing.T) {
 	cfg := &Config{}
 	cfg.Jira.SystemdEnabled = true
