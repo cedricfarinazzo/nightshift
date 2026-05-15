@@ -65,6 +65,11 @@ type ProviderConfig struct {
 	Enabled  bool   `mapstructure:"enabled"`
 	DataPath string `mapstructure:"data_path"` // Path to provider data directory
 	Model    string `mapstructure:"model"`     // Model to use (e.g., "claude-sonnet-4.5", "gpt-5.2")
+	// ReasoningEffort controls thinking depth / token budget. Empty means use CLI default.
+	// Claude: low, medium, high, xhigh, max
+	// Copilot: low, medium, high, xhigh
+	// Codex: none, minimal, low, medium, high, xhigh
+	ReasoningEffort string `mapstructure:"reasoning_effort"`
 	// DangerouslySkipPermissions tells the CLI to skip interactive permission prompts.
 	DangerouslySkipPermissions bool `mapstructure:"dangerously_skip_permissions"`
 	// DangerouslyBypassApprovalsAndSandbox tells the CLI to bypass approvals and sandboxing.
@@ -314,6 +319,10 @@ var (
 	ErrInvalidLogFormat  = errors.New("log format must be json or text")
 	ErrNoSchedule        = errors.New("either cron or interval must be specified")
 
+	ErrInvalidClaudeReasoningEffort  = errors.New("claude: invalid reasoning_effort; allowed: low, medium, high, xhigh, max")
+	ErrInvalidCopilotReasoningEffort = errors.New("copilot: invalid reasoning_effort; allowed: low, medium, high, xhigh")
+	ErrInvalidCodexReasoningEffort   = errors.New("codex: invalid reasoning_effort; allowed: none, minimal, low, medium, high, xhigh")
+
 	ErrCustomTaskMissingType        = errors.New("custom task: type is required")
 	ErrCustomTaskMissingName        = errors.New("custom task: name is required")
 	ErrCustomTaskMissingDescription = errors.New("custom task: description is required")
@@ -377,6 +386,20 @@ func Validate(cfg *Config) error {
 			}
 			seen[name] = true
 		}
+	}
+
+	// Reasoning effort validation per provider
+	claudeEfforts := []string{"low", "medium", "high", "xhigh", "max"}
+	if e := cfg.Providers.Claude.ReasoningEffort; e != "" && !slices.Contains(claudeEfforts, e) {
+		return ErrInvalidClaudeReasoningEffort
+	}
+	copilotEfforts := []string{"low", "medium", "high", "xhigh"}
+	if e := cfg.Providers.Copilot.ReasoningEffort; e != "" && !slices.Contains(copilotEfforts, e) {
+		return ErrInvalidCopilotReasoningEffort
+	}
+	codexEfforts := []string{"none", "minimal", "low", "medium", "high", "xhigh"}
+	if e := cfg.Providers.Codex.ReasoningEffort; e != "" && !slices.Contains(codexEfforts, e) {
+		return ErrInvalidCodexReasoningEffort
 	}
 
 	// Custom task validation
