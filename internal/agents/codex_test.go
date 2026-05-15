@@ -482,6 +482,60 @@ func TestCodexAgentDefaultsBypassFlag(t *testing.T) {
 	}
 }
 
+func TestCodexAgent_Effort(t *testing.T) {
+	tests := []struct {
+		name        string
+		agentEffort string
+		optsEffort  string
+		wantEffort  string
+		wantFlag    bool
+	}{
+		{"agent default used", "medium", "", "medium", true},
+		{"opts override agent default", "medium", "high", "high", true},
+		{"opts alone", "", "xhigh", "xhigh", true},
+		{"no effort set", "", "", "", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mock := &MockRunner{Stdout: "response", ExitCode: 0}
+			opts := []CodexOption{WithCodexRunner(mock)}
+			if tt.agentEffort != "" {
+				opts = append(opts, WithCodexEffort(tt.agentEffort))
+			}
+			agent := NewCodexAgent(opts...)
+
+			_, err := agent.Execute(context.Background(), ExecuteOptions{
+				Prompt:          "test",
+				ReasoningEffort: tt.optsEffort,
+			})
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			wantConfigVal := "model_reasoning_effort=" + tt.wantEffort
+			hasFlag := containsArg(mock.CapturedArgs, "--config")
+			hasVal := containsArg(mock.CapturedArgs, wantConfigVal)
+
+			if tt.wantFlag {
+				if !hasFlag {
+					t.Errorf("expected --config in args %v", mock.CapturedArgs)
+				}
+				if !hasVal {
+					t.Errorf("expected %q in args %v", wantConfigVal, mock.CapturedArgs)
+				}
+			} else {
+				// Ensure no model_reasoning_effort config value present
+				for _, a := range mock.CapturedArgs {
+					if strings.Contains(a, "model_reasoning_effort") {
+						t.Errorf("unexpected model_reasoning_effort in args %v", mock.CapturedArgs)
+					}
+				}
+			}
+		})
+	}
+}
+
 // TestCodexAgentExplicitFalseBypassDisablesFlag verifies that explicitly calling
 // WithDangerouslyBypassApprovalsAndSandbox(false) does disable the flag.
 func TestCodexAgentExplicitFalseBypassDisablesFlag(t *testing.T) {

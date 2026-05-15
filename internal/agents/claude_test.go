@@ -700,3 +700,45 @@ func TestClaudeAgent_Execute_ModelFromOptions(t *testing.T) {
 		t.Error("expected agent default model to be overridden")
 	}
 }
+
+func TestClaudeAgent_Effort(t *testing.T) {
+	tests := []struct {
+		name         string
+		agentEffort  string
+		optsEffort   string
+		wantEffort   string
+		wantFlag     bool
+	}{
+		{"agent default used", "high", "", "high", true},
+		{"opts override agent default", "high", "max", "max", true},
+		{"opts alone", "", "low", "low", true},
+		{"no effort set", "", "", "", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mock := &MockRunner{Stdout: "response", ExitCode: 0}
+			opts := []ClaudeOption{WithRunner(mock)}
+			if tt.agentEffort != "" {
+				opts = append(opts, WithEffort(tt.agentEffort))
+			}
+			agent := NewClaudeAgent(opts...)
+
+			_, err := agent.Execute(context.Background(), ExecuteOptions{
+				Prompt:          "test",
+				ReasoningEffort: tt.optsEffort,
+			})
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			hasFlag := containsArg(mock.CapturedArgs, "--effort")
+			if hasFlag != tt.wantFlag {
+				t.Errorf("--effort present = %v, want %v (args: %v)", hasFlag, tt.wantFlag, mock.CapturedArgs)
+			}
+			if tt.wantFlag && !containsArg(mock.CapturedArgs, tt.wantEffort) {
+				t.Errorf("expected effort value %q in args %v", tt.wantEffort, mock.CapturedArgs)
+			}
+		})
+	}
+}

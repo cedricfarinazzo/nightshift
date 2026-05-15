@@ -332,6 +332,48 @@ func containsArg(args []string, val string) bool {
 	return false
 }
 
+func TestCopilotAgent_Effort(t *testing.T) {
+	tests := []struct {
+		name        string
+		agentEffort string
+		optsEffort  string
+		wantEffort  string
+		wantFlag    bool
+	}{
+		{"agent default used", "low", "", "low", true},
+		{"opts override agent default", "low", "high", "high", true},
+		{"opts alone", "", "xhigh", "xhigh", true},
+		{"no effort set", "", "", "", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mock := &MockRunner{Stdout: "response", ExitCode: 0}
+			opts := []CopilotOption{WithCopilotRunner(mock)}
+			if tt.agentEffort != "" {
+				opts = append(opts, WithCopilotEffort(tt.agentEffort))
+			}
+			agent := NewCopilotAgent(opts...)
+
+			_, err := agent.Execute(context.Background(), ExecuteOptions{
+				Prompt:          "test",
+				ReasoningEffort: tt.optsEffort,
+			})
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			hasFlag := containsArg(mock.CapturedArgs, "--effort")
+			if hasFlag != tt.wantFlag {
+				t.Errorf("--effort present = %v, want %v (args: %v)", hasFlag, tt.wantFlag, mock.CapturedArgs)
+			}
+			if tt.wantFlag && !containsArg(mock.CapturedArgs, tt.wantEffort) {
+				t.Errorf("expected effort value %q in args %v", tt.wantEffort, mock.CapturedArgs)
+			}
+		})
+	}
+}
+
 func TestCopilotAgent_ExtractJSON(t *testing.T) {
 	agent := NewCopilotAgent()
 

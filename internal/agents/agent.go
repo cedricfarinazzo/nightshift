@@ -25,7 +25,8 @@ type ExecuteOptions struct {
 	WorkDir string        // Working directory for execution
 	Files   []string      // Optional file paths to include as context
 	Timeout time.Duration // Execution timeout (0 = default)
-	Model   string        // Model to use (optional, uses agent default if empty)
+	Model           string        // Model to use (optional, uses agent default if empty)
+	ReasoningEffort string        // Reasoning effort (optional; precedence: this value, then agent default, then CLI default)
 }
 
 // ExecuteResult holds the outcome of an agent execution.
