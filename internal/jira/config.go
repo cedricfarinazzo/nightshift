@@ -76,9 +76,10 @@ type RepoConfig struct {
 
 // PhaseConfig specifies provider/model for a specific phase.
 type PhaseConfig struct {
-	Provider string `mapstructure:"provider"` // claude, codex, copilot
-	Model    string `mapstructure:"model"`    // model name
-	Timeout  string `mapstructure:"timeout"`  // e.g., "30m", "2m"
+	Provider        string `mapstructure:"provider"`         // claude, codex, copilot
+	Model           string `mapstructure:"model"`            // model name
+	Timeout         string `mapstructure:"timeout"`          // e.g., "30m", "2m"
+	ReasoningEffort string `mapstructure:"reasoning_effort"` // e.g., "low", "high", "max"; empty = CLI default
 }
 
 // mergePhaseConfig returns the project-level override merged over the global default.
@@ -96,6 +97,9 @@ func mergePhaseConfig(global, override PhaseConfig) PhaseConfig {
 	}
 	if override.Timeout != "" {
 		result.Timeout = override.Timeout
+	}
+	if override.ReasoningEffort != "" {
+		result.ReasoningEffort = override.ReasoningEffort
 	}
 	return result
 }
