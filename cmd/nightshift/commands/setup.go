@@ -215,7 +215,6 @@ type setupModel struct {
 	copilotModelIdx int
 	modelsLoading   int // counts pending dynamic-fetch goroutines (0 = done)
 
-	modelField       int // 0 = model column focused, 1 = effort column focused
 	claudeEffortIdx  int
 	codexEffortIdx   int
 	copilotEffortIdx int
@@ -1840,12 +1839,12 @@ func renderSafetyFields(b *strings.Builder, m *setupModel) {
 
 func renderModelFields(b *strings.Builder, m *setupModel) {
 	rows := []struct {
-		label      string
-		models     []modelOption
-		modelIdx   int
-		efforts    []string
-		effortIdx  int
-		available  bool
+		label     string
+		models    []modelOption
+		modelIdx  int
+		efforts   []string
+		effortIdx int
+		available bool
 	}{
 		{"Claude ", claudeModels, m.claudeModelIdx, claudeEfforts, m.claudeEffortIdx, m.cfg.Providers.Claude.Enabled},
 		{"Codex  ", codexModels, m.codexModelIdx, codexEfforts, m.codexEffortIdx, m.cfg.Providers.Codex.Enabled},
@@ -1856,28 +1855,18 @@ func renderModelFields(b *strings.Builder, m *setupModel) {
 		if i == m.modelCursor {
 			cursor = ">"
 		}
-
-		modelStr := fmt.Sprintf("← %s →", row.models[row.modelIdx].label)
-		effortStr := fmt.Sprintf("← %s →", row.efforts[row.effortIdx])
-
-		// Highlight focused column when this row is selected
-		if i == m.modelCursor {
-			if m.modelField == 0 {
-				modelStr = styleAccent.Render(modelStr)
-				effortStr = styleDim.Render(effortStr)
-			} else {
-				modelStr = styleDim.Render(modelStr)
-				effortStr = styleAccent.Render(effortStr)
-			}
-		}
-
 		avail := ""
 		if !row.available {
 			avail = " (provider disabled)"
 		}
-		fmt.Fprintf(b, " %s %s  Model: %s   Effort: %s%s\n", cursor, row.label, modelStr, effortStr, avail)
+		fmt.Fprintf(b, " %s %s  Model: ← %s →   Effort: ← %s →%s\n",
+			cursor, row.label,
+			row.models[row.modelIdx].label,
+			row.efforts[row.effortIdx],
+			avail,
+		)
 	}
-	b.WriteString(styleNote.Render("Tip: [e] toggles Model/Effort column. 'default' = CLI built-in."))
+	b.WriteString(styleNote.Render("Tip: ←/→ model  [e] cycle effort  'default' = CLI built-in."))
 	b.WriteString("\n")
 	if m.modelsLoading > 0 {
 		b.WriteString(styleDim.Render(m.spinner.View() + " Fetching live model list…"))
@@ -1895,75 +1884,45 @@ func (m *setupModel) handleModelInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.modelCursor < len(modelProviderLists)-1 {
 			m.modelCursor++
 		}
-	case "e":
-		if m.modelField == 0 {
-			m.modelField = 1
-		} else {
-			m.modelField = 0
-		}
 	case "left", "h":
-		if m.modelField == 0 {
-			switch m.modelCursor {
-			case 0:
-				if m.claudeModelIdx > 0 {
-					m.claudeModelIdx--
-				}
-			case 1:
-				if m.codexModelIdx > 0 {
-					m.codexModelIdx--
-				}
-			case 2:
-				if m.copilotModelIdx > 0 {
-					m.copilotModelIdx--
-				}
+		switch m.modelCursor {
+		case 0:
+			if m.claudeModelIdx > 0 {
+				m.claudeModelIdx--
 			}
-		} else {
-			switch m.modelCursor {
-			case 0:
-				if m.claudeEffortIdx > 0 {
-					m.claudeEffortIdx--
-				}
-			case 1:
-				if m.codexEffortIdx > 0 {
-					m.codexEffortIdx--
-				}
-			case 2:
-				if m.copilotEffortIdx > 0 {
-					m.copilotEffortIdx--
-				}
+		case 1:
+			if m.codexModelIdx > 0 {
+				m.codexModelIdx--
+			}
+		case 2:
+			if m.copilotModelIdx > 0 {
+				m.copilotModelIdx--
 			}
 		}
 	case "right", "l":
-		if m.modelField == 0 {
-			switch m.modelCursor {
-			case 0:
-				if m.claudeModelIdx < len(claudeModels)-1 {
-					m.claudeModelIdx++
-				}
-			case 1:
-				if m.codexModelIdx < len(codexModels)-1 {
-					m.codexModelIdx++
-				}
-			case 2:
-				if m.copilotModelIdx < len(copilotModels)-1 {
-					m.copilotModelIdx++
-				}
+		switch m.modelCursor {
+		case 0:
+			if m.claudeModelIdx < len(claudeModels)-1 {
+				m.claudeModelIdx++
 			}
-		} else {
-			switch m.modelCursor {
-			case 0:
-				if m.claudeEffortIdx < len(claudeEfforts)-1 {
-					m.claudeEffortIdx++
-				}
-			case 1:
-				if m.codexEffortIdx < len(codexEfforts)-1 {
-					m.codexEffortIdx++
-				}
-			case 2:
-				if m.copilotEffortIdx < len(copilotEfforts)-1 {
-					m.copilotEffortIdx++
-				}
+		case 1:
+			if m.codexModelIdx < len(codexModels)-1 {
+				m.codexModelIdx++
 			}
+		case 2:
+			if m.copilotModelIdx < len(copilotModels)-1 {
+				m.copilotModelIdx++
+			}
+		}
+	case "e":
+		// Cycle effort forward for the focused provider row
+		switch m.modelCursor {
+		case 0:
+			m.claudeEffortIdx = (m.claudeEffortIdx + 1) % len(claudeEfforts)
+		case 1:
+			m.codexEffortIdx = (m.codexEffortIdx + 1) % len(codexEfforts)
+		case 2:
+			m.copilotEffortIdx = (m.copilotEffortIdx + 1) % len(copilotEfforts)
 		}
 	case "enter":
 		m.cfg.Providers.Claude.Model = claudeModels[m.claudeModelIdx].value

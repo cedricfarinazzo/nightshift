@@ -248,61 +248,50 @@ func TestEffortValue(t *testing.T) {
 	}
 }
 
-func TestHandleModelInput_ETogglesField(t *testing.T) {
-	m := &setupModel{cfg: &config.Config{}}
+func TestHandleModelInput_ECyclesEffort(t *testing.T) {
+	m := &setupModel{cfg: &config.Config{}, modelCursor: 0}
 
-	if m.modelField != 0 {
-		t.Fatalf("initial modelField = %d, want 0", m.modelField)
-	}
-
+	// e advances effort index
 	m.handleModelInput(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'e'}})
-	if m.modelField != 1 {
-		t.Errorf("after e: modelField = %d, want 1", m.modelField)
-	}
-
-	m.handleModelInput(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'e'}})
-	if m.modelField != 0 {
-		t.Errorf("after 2nd e: modelField = %d, want 0", m.modelField)
-	}
-}
-
-func TestHandleModelInput_EffortNavigation(t *testing.T) {
-	m := &setupModel{
-		cfg:        &config.Config{},
-		modelField: 1, // effort column focused
-		modelCursor: 0, // claude row
-	}
-
-	// Right increases effort index
-	m.handleModelInput(tea.KeyMsg{Type: tea.KeyRight})
 	if m.claudeEffortIdx != 1 {
-		t.Errorf("claudeEffortIdx after right = %d, want 1", m.claudeEffortIdx)
+		t.Errorf("claudeEffortIdx after e = %d, want 1", m.claudeEffortIdx)
 	}
 
-	// Left decreases
-	m.handleModelInput(tea.KeyMsg{Type: tea.KeyLeft})
+	// e wraps around at end
+	m.claudeEffortIdx = len(claudeEfforts) - 1
+	m.handleModelInput(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'e'}})
 	if m.claudeEffortIdx != 0 {
-		t.Errorf("claudeEffortIdx after left = %d, want 0", m.claudeEffortIdx)
-	}
-
-	// Left at 0 does not go negative
-	m.handleModelInput(tea.KeyMsg{Type: tea.KeyLeft})
-	if m.claudeEffortIdx != 0 {
-		t.Errorf("claudeEffortIdx below 0: %d", m.claudeEffortIdx)
+		t.Errorf("claudeEffortIdx after wrap = %d, want 0", m.claudeEffortIdx)
 	}
 }
 
-func TestHandleModelInput_ModelNavNotAffectedWhenEffortFocused(t *testing.T) {
-	m := &setupModel{
-		cfg:            &config.Config{},
-		modelField:     1, // effort column
-		claudeModelIdx: 2,
+func TestHandleModelInput_EOnlyAffectsFocusedRow(t *testing.T) {
+	m := &setupModel{cfg: &config.Config{}, modelCursor: 1} // codex row
+
+	m.handleModelInput(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'e'}})
+
+	if m.claudeEffortIdx != 0 {
+		t.Errorf("claude effort changed unexpectedly: %d", m.claudeEffortIdx)
+	}
+	if m.codexEffortIdx != 1 {
+		t.Errorf("codex effort = %d, want 1", m.codexEffortIdx)
+	}
+	if m.copilotEffortIdx != 0 {
+		t.Errorf("copilot effort changed unexpectedly: %d", m.copilotEffortIdx)
+	}
+}
+
+func TestHandleModelInput_LeftRightAlwaysNavigatesModel(t *testing.T) {
+	m := &setupModel{cfg: &config.Config{}, modelCursor: 0, claudeModelIdx: 2}
+
+	m.handleModelInput(tea.KeyMsg{Type: tea.KeyRight})
+	if m.claudeModelIdx != 3 {
+		t.Errorf("claudeModelIdx after right = %d, want 3", m.claudeModelIdx)
 	}
 
-	// Right should NOT change model index when effort is focused
-	m.handleModelInput(tea.KeyMsg{Type: tea.KeyRight})
+	m.handleModelInput(tea.KeyMsg{Type: tea.KeyLeft})
 	if m.claudeModelIdx != 2 {
-		t.Errorf("claudeModelIdx changed while effort focused: got %d", m.claudeModelIdx)
+		t.Errorf("claudeModelIdx after left = %d, want 2", m.claudeModelIdx)
 	}
 }
 
