@@ -79,8 +79,14 @@ func TestCodexAgent_Execute_Success(t *testing.T) {
 	if mock.CapturedName != "codex" {
 		t.Errorf("binary = %q, want %q", mock.CapturedName, "codex")
 	}
-	if len(mock.CapturedArgs) != 3 || mock.CapturedArgs[0] != "exec" || mock.CapturedArgs[1] != "--dangerously-bypass-approvals-and-sandbox" || mock.CapturedArgs[2] != "fix the bug" {
-		t.Errorf("args = %v, want [exec --dangerously-bypass-approvals-and-sandbox fix the bug]", mock.CapturedArgs)
+	if len(mock.CapturedArgs) != 3 || mock.CapturedArgs[0] != "exec" || mock.CapturedArgs[1] != "--dangerously-bypass-approvals-and-sandbox" {
+		t.Errorf("args = %v, want [exec --dangerously-bypass-approvals-and-sandbox <directive>]", mock.CapturedArgs)
+	}
+	if !strings.HasPrefix(mock.CapturedArgs[2], promptFileDirectivePrefix) {
+		t.Errorf("args[2] = %q, want prefix %q", mock.CapturedArgs[2], promptFileDirectivePrefix)
+	}
+	if !strings.Contains(mock.CapturedPromptFileData, "fix the bug") {
+		t.Errorf("prompt file content = %q, expected to contain %q", mock.CapturedPromptFileData, "fix the bug")
 	}
 	if mock.CapturedDir != "/project" {
 		t.Errorf("dir = %q, want %q", mock.CapturedDir, "/project")
@@ -225,10 +231,10 @@ func TestCodexAgent_Execute_WithFiles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(mock.CapturedStdin, "package main") {
-		t.Error("expected file content in stdin")
+	if !strings.Contains(mock.CapturedPromptFileData, "package main") {
+		t.Error("expected file content in prompt file")
 	}
-	if !strings.Contains(mock.CapturedStdin, "# Context Files") {
+	if !strings.Contains(mock.CapturedPromptFileData, "# Context Files") {
 		t.Error("expected context header in stdin")
 	}
 	if result.Output != "analyzed file" {

@@ -173,10 +173,11 @@ func (o *Orchestrator) ProcessFeedback(ctx context.Context, ticket Ticket, ws *W
 			o.emit("🤖 %s running: review-fix  (%s, timeout %s)", rfCfg.Provider, rfCfg.Model, timeout.Round(time.Minute))
 			rfStart := time.Now()
 			agentResult, err := agent.Execute(ctx, agents.ExecuteOptions{
-				Prompt:  prompt,
-				WorkDir: repo.Path,
-				Timeout: timeout,
-				Model:   rfCfg.Model,
+				Prompt:      prompt,
+				WorkDir:     repo.Path,
+				Timeout:     timeout,
+				Model:       rfCfg.Model,
+				Compression: o.compression,
 			})
 			if err != nil {
 				o.savePhaseLog(ctx, ticket.Key, PhaseReviewFix, rfCfg.Provider, rfCfg.Model, rfStart, false, "", err.Error())

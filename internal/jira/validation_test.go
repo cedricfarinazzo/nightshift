@@ -296,7 +296,7 @@ func TestValidateTicket_Success(t *testing.T) {
 	}
 	ticket := Ticket{Key: "TEST-1", Summary: "Well-defined ticket", Description: "Detailed description."}
 
-	result, err := ValidateTicket(context.Background(), agent, ticket)
+	result, err := ValidateTicket(context.Background(), agent, ticket, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -315,7 +315,7 @@ func TestValidateTicket_AgentError(t *testing.T) {
 	}
 	ticket := Ticket{Key: "TEST-2", Summary: "Some ticket"}
 
-	_, err := ValidateTicket(context.Background(), agent, ticket)
+	_, err := ValidateTicket(context.Background(), agent, ticket, nil)
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -331,7 +331,7 @@ func TestValidateTicket_ParseError(t *testing.T) {
 	}
 	ticket := Ticket{Key: "TEST-3", Summary: "Another ticket"}
 
-	_, err := ValidateTicket(context.Background(), agent, ticket)
+	_, err := ValidateTicket(context.Background(), agent, ticket, nil)
 	if err == nil {
 		t.Fatal("expected parse error, got nil")
 	}
@@ -344,7 +344,7 @@ func TestValidateTicket_InvalidTicket(t *testing.T) {
 	}
 	ticket := Ticket{Key: "TEST-4", Summary: "Vague ticket", Description: "Do the thing."}
 
-	result, err := ValidateTicket(context.Background(), agent, ticket)
+	result, err := ValidateTicket(context.Background(), agent, ticket, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -372,7 +372,7 @@ func TestValidateTicket_PassesValidationPrompt(t *testing.T) {
 		},
 	}
 
-	_, err := ValidateTicket(context.Background(), agent, ticket)
+	_, err := ValidateTicket(context.Background(), agent, ticket, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

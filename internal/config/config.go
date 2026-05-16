@@ -18,15 +18,27 @@ import (
 
 // Config holds all nightshift configuration.
 type Config struct {
-	Schedule     ScheduleConfig     `mapstructure:"schedule"`
-	Budget       BudgetConfig       `mapstructure:"budget"`
-	Providers    ProvidersConfig    `mapstructure:"providers"`
-	Projects     []ProjectConfig    `mapstructure:"projects"`
-	Tasks        TasksConfig        `mapstructure:"tasks"`
-	Integrations IntegrationsConfig `mapstructure:"integrations"`
-	Logging      LoggingConfig      `mapstructure:"logging"`
-	Reporting    ReportingConfig    `mapstructure:"reporting"`
-	Jira         jira.JiraConfig    `mapstructure:"jira"`
+	Schedule          ScheduleConfig          `mapstructure:"schedule"`
+	Budget            BudgetConfig            `mapstructure:"budget"`
+	Providers         ProvidersConfig         `mapstructure:"providers"`
+	Projects          []ProjectConfig         `mapstructure:"projects"`
+	Tasks             TasksConfig             `mapstructure:"tasks"`
+	Integrations      IntegrationsConfig      `mapstructure:"integrations"`
+	Logging           LoggingConfig           `mapstructure:"logging"`
+	Reporting         ReportingConfig         `mapstructure:"reporting"`
+	Jira              jira.JiraConfig         `mapstructure:"jira"`
+	PromptCompression PromptCompressionConfig `mapstructure:"prompt_compression"`
+}
+
+// PromptCompressionConfig controls LLM-based prompt compression before agent execution.
+// When enabled, prompts exceeding Threshold chars are compressed via the configured provider
+// before being written to the temp file. Falls back to the original prompt on any error.
+type PromptCompressionConfig struct {
+	Enabled         bool   `mapstructure:"enabled"`
+	Provider        string `mapstructure:"provider"`         // "claude", "codex", or "copilot"
+	Model           string `mapstructure:"model"`
+	ReasoningEffort string `mapstructure:"reasoning_effort"`
+	Threshold       int    `mapstructure:"threshold"` // min chars to trigger compression; default 3000
 }
 
 // ScheduleConfig defines when nightshift runs.
@@ -270,6 +282,11 @@ func setDefaults(v *viper.Viper) {
 
 	// Jira systemd defaults
 	v.SetDefault("jira.systemd_on_calendar", "*-*-* 22:00:00")
+
+	// Prompt compression defaults
+	v.SetDefault("prompt_compression.enabled", false)
+	v.SetDefault("prompt_compression.provider", "claude")
+	v.SetDefault("prompt_compression.threshold", 3000)
 }
 
 // loadConfigFile merges a YAML config file into viper.
@@ -322,6 +339,8 @@ var (
 	ErrInvalidClaudeReasoningEffort  = errors.New("claude: invalid reasoning_effort; allowed: low, medium, high, xhigh, max")
 	ErrInvalidCopilotReasoningEffort = errors.New("copilot: invalid reasoning_effort; allowed: low, medium, high, xhigh")
 	ErrInvalidCodexReasoningEffort   = errors.New("codex: invalid reasoning_effort; allowed: none, minimal, low, medium, high, xhigh")
+
+	ErrInvalidCompressionProvider = errors.New("prompt_compression.provider must be \"claude\", \"codex\", or \"copilot\"")
 
 	ErrCustomTaskMissingType        = errors.New("custom task: type is required")
 	ErrCustomTaskMissingName        = errors.New("custom task: name is required")
@@ -400,6 +419,14 @@ func Validate(cfg *Config) error {
 	codexEfforts := []string{"none", "minimal", "low", "medium", "high", "xhigh"}
 	if e := cfg.Providers.Codex.ReasoningEffort; e != "" && !slices.Contains(codexEfforts, e) {
 		return ErrInvalidCodexReasoningEffort
+	}
+
+	// Prompt compression validation
+	if cfg.PromptCompression.Enabled {
+		validProviders := map[string]bool{"claude": true, "codex": true, "copilot": true}
+		if !validProviders[cfg.PromptCompression.Provider] {
+			return ErrInvalidCompressionProvider
+		}
 	}
 
 	// Custom task validation

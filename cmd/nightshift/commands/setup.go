@@ -63,6 +63,7 @@ const (
 	stepTaskSelect
 	stepSchedule
 	stepJira
+	stepPromptCompression
 	stepSystemd
 	stepPreview
 	stepPath
@@ -112,6 +113,9 @@ func effortValue(s string) string {
 
 // jiraProviders lists providers selectable for Jira phase configuration.
 var jiraProviders = []string{"claude", "codex", "copilot"}
+
+// compressionProviders lists providers available for prompt compression.
+var compressionProviders = []string{"claude", "codex", "copilot"}
 
 // modelOptionValues extracts the value field from a slice of modelOption.
 func modelOptionValues(opts []modelOption) []string {
@@ -286,6 +290,13 @@ type setupModel struct {
 	jiraEditProjectKey      string
 	jiraEditProjectLabel    string
 
+	// Prompt compression step state
+	compressionCursor    int    // 0=enable toggle, 1=provider, 2=model, 3=effort
+	compressionEnabled   bool
+	compressionProvider  string // "claude" or "codex"
+	compressionModelIdx  int
+	compressionEffortIdx int
+
 	// Systemd step state
 	systemdCursor     int // 0=yes, 1=no
 	systemdOnCalendar string
@@ -444,6 +455,15 @@ func newSetupModel() (*setupModel, error) {
 		claudeEffortIdx:   effortIndex(claudeEfforts, cfg.Providers.Claude.ReasoningEffort),
 		codexEffortIdx:    effortIndex(codexEfforts, cfg.Providers.Codex.ReasoningEffort),
 		copilotEffortIdx:  effortIndex(copilotEfforts, cfg.Providers.Copilot.ReasoningEffort),
+		compressionEnabled:   cfg.PromptCompression.Enabled,
+		compressionProvider:  func() string {
+			if cfg.PromptCompression.Provider != "" {
+				return cfg.PromptCompression.Provider
+			}
+			return "claude"
+		}(),
+		compressionModelIdx:  0,
+		compressionEffortIdx: 0,
 		jiraInput:         jiraInput,
 		jiraTokenEnv:      "JIRA_API_TOKEN",
 		systemdInput:      systemdInput,
@@ -456,6 +476,14 @@ func newSetupModel() (*setupModel, error) {
 		jiraMaxTickets:    10,
 		jiraPhaseProvider: defaultJiraPhaseProviders(cfg.Providers.Preference),
 		jiraPhaseModelIdx: defaultJiraPhaseModelIdxs(cfg.Providers.Preference),
+	}
+
+	// Pre-populate compression fields from existing config.
+	if cfg.PromptCompression.Enabled {
+		models := compressionModelsForProvider(model.compressionProvider)
+		model.compressionModelIdx = modelIndex(models, cfg.PromptCompression.Model)
+		efforts := compressionEffortsForProvider(model.compressionProvider)
+		model.compressionEffortIdx = effortIndex(efforts, cfg.PromptCompression.ReasoningEffort)
 	}
 
 	// Pre-populate schedule fields from existing config.
@@ -579,6 +607,8 @@ func (m *setupModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.handleScheduleInput(msg)
 		case stepJira:
 			return m.handleJiraInput(msg)
+		case stepPromptCompression:
+			return m.handleCompressionInput(msg)
 		case stepSystemd:
 			return m.handleSystemdInput(msg)
 		case stepPreview:
@@ -722,6 +752,12 @@ func (m *setupModel) View() string {
 		b.WriteString("\n")
 		b.WriteString("Choose the model for each provider. Use ↑/↓ to select a row, ←/→ to cycle models.\n\n")
 		renderModelFields(&b, m)
+		b.WriteString("\nPress Enter to continue.\n")
+	case stepPromptCompression:
+		b.WriteString(styleAccent.Render("Prompt compression"))
+		b.WriteString("\n")
+		b.WriteString("Compress prompts via LLM before sending to agents (reduces ARG_MAX risk + token cost).\n\n")
+		renderCompressionFields(&b, m)
 		b.WriteString("\nPress Enter to continue.\n")
 	case stepTaskPreset:
 		b.WriteString(styleAccent.Render("Task presets (derived from registry)"))
@@ -1938,6 +1974,174 @@ func (m *setupModel) handleModelInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// compressionModelsForProvider returns the model options for a compression provider.
+func compressionModelsForProvider(provider string) []modelOption {
+	switch provider {
+	case "codex":
+		return codexModels
+	case "copilot":
+		return copilotModels
+	default:
+		return claudeModels
+	}
+}
+
+// compressionEffortsForProvider returns the effort options for a compression provider.
+func compressionEffortsForProvider(provider string) []string {
+	switch provider {
+	case "codex":
+		return codexEfforts
+	case "copilot":
+		return copilotEfforts
+	default:
+		return claudeEfforts
+	}
+}
+
+func renderCompressionFields(b *strings.Builder, m *setupModel) {
+	// Row 0: enabled toggle
+	cursor := " "
+	if m.compressionCursor == 0 {
+		cursor = ">"
+	}
+	state := "off"
+	if m.compressionEnabled {
+		state = "on"
+	}
+	fmt.Fprintf(b, " %s Enable: [%s]  (space to toggle)\n", cursor, state)
+
+	if !m.compressionEnabled {
+		b.WriteString(styleDim.Render("   (enable to configure provider, model, effort)"))
+		b.WriteString("\n")
+		return
+	}
+
+	// Row 1: provider
+	cursor = " "
+	if m.compressionCursor == 1 {
+		cursor = ">"
+	}
+	fmt.Fprintf(b, " %s Provider: ← %s →\n", cursor, m.compressionProvider)
+
+	// Row 2: model
+	cursor = " "
+	if m.compressionCursor == 2 {
+		cursor = ">"
+	}
+	models := compressionModelsForProvider(m.compressionProvider)
+	modelLabel := models[m.compressionModelIdx].label
+	fmt.Fprintf(b, " %s Model:    ← %s →\n", cursor, modelLabel)
+
+	// Row 3: effort
+	cursor = " "
+	if m.compressionCursor == 3 {
+		cursor = ">"
+	}
+	efforts := compressionEffortsForProvider(m.compressionProvider)
+	effortLabel := efforts[m.compressionEffortIdx]
+	fmt.Fprintf(b, " %s Effort:   ← %s →\n", cursor, effortLabel)
+
+	b.WriteString(styleNote.Render("Tip: ←/→ cycle values  'default' = provider built-in"))
+	b.WriteString("\n")
+}
+
+func (m *setupModel) handleCompressionInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	maxRows := 1
+	if m.compressionEnabled {
+		maxRows = 4
+	}
+
+	switch msg.String() {
+	case "up", "k":
+		if m.compressionCursor > 0 {
+			m.compressionCursor--
+		}
+	case "down", "j":
+		if m.compressionCursor < maxRows-1 {
+			m.compressionCursor++
+		}
+	case " ":
+		if m.compressionCursor == 0 {
+			m.compressionEnabled = !m.compressionEnabled
+			if !m.compressionEnabled {
+				m.compressionCursor = 0
+			}
+		}
+	case "left", "h":
+		switch m.compressionCursor {
+		case 1:
+			idx := compressionProviderIdx(m.compressionProvider)
+			if idx > 0 {
+				m.compressionProvider = compressionProviders[idx-1]
+				m.compressionModelIdx = 0
+				m.compressionEffortIdx = 0
+			}
+		case 2:
+			if m.compressionModelIdx > 0 {
+				m.compressionModelIdx--
+			}
+		case 3:
+			if m.compressionEffortIdx > 0 {
+				m.compressionEffortIdx--
+			}
+		}
+	case "right", "l":
+		switch m.compressionCursor {
+		case 1:
+			idx := compressionProviderIdx(m.compressionProvider)
+			if idx < len(compressionProviders)-1 {
+				m.compressionProvider = compressionProviders[idx+1]
+				m.compressionModelIdx = 0
+				m.compressionEffortIdx = 0
+			}
+		case 2:
+			models := compressionModelsForProvider(m.compressionProvider)
+			if m.compressionModelIdx < len(models)-1 {
+				m.compressionModelIdx++
+			}
+		case 3:
+			efforts := compressionEffortsForProvider(m.compressionProvider)
+			if m.compressionEffortIdx < len(efforts)-1 {
+				m.compressionEffortIdx++
+			}
+		}
+	case "e":
+		switch m.compressionCursor {
+		case 3:
+			efforts := compressionEffortsForProvider(m.compressionProvider)
+			m.compressionEffortIdx = (m.compressionEffortIdx + 1) % len(efforts)
+		}
+	case "enter":
+		m.cfg.PromptCompression.Enabled = m.compressionEnabled
+		if m.compressionEnabled {
+			models := compressionModelsForProvider(m.compressionProvider)
+			efforts := compressionEffortsForProvider(m.compressionProvider)
+			m.cfg.PromptCompression.Provider = m.compressionProvider
+			m.cfg.PromptCompression.Model = models[m.compressionModelIdx].value
+			m.cfg.PromptCompression.ReasoningEffort = effortValue(efforts[m.compressionEffortIdx])
+		} else {
+			m.cfg.PromptCompression.Provider = ""
+			m.cfg.PromptCompression.Model = ""
+			m.cfg.PromptCompression.ReasoningEffort = ""
+		}
+		nextStep := stepPreview
+		if m.jiraEnabled && systemdAvailable() {
+			nextStep = stepSystemd
+		}
+		return m, m.setStep(nextStep)
+	}
+	return m, nil
+}
+
+func compressionProviderIdx(provider string) int {
+	for i, p := range compressionProviders {
+		if p == provider {
+			return i
+		}
+	}
+	return 0
+}
+
 // modelIndex returns the index of the given model value in a model list, defaulting to 0.
 func modelIndex(models []modelOption, value string) int {
 	for i, m := range models {
@@ -2068,6 +2272,7 @@ func setupSteps(includePathStep bool) []setupStepInfo {
 		{step: stepTaskSelect, label: "Task selection"},
 		{step: stepSchedule, label: "Schedule"},
 		{step: stepJira, label: "Jira"},
+		{step: stepPromptCompression, label: "Compression"},
 		{step: stepSystemd, label: "Systemd"},
 		{step: stepPreview, label: "Preview"},
 	}
@@ -2305,6 +2510,15 @@ func writeGlobalConfigToPath(cfg *config.Config, configPath string) error {
 		v.Set("jira.review_fix.reasoning_effort", "")
 		v.Set("jira.systemd_enabled", false)
 		v.Set("jira.systemd_on_calendar", "")
+	}
+
+	// Prompt compression — always write to prevent stale keys on disable.
+	v.Set("prompt_compression.enabled", cfg.PromptCompression.Enabled)
+	v.Set("prompt_compression.provider", cfg.PromptCompression.Provider)
+	v.Set("prompt_compression.model", cfg.PromptCompression.Model)
+	v.Set("prompt_compression.reasoning_effort", cfg.PromptCompression.ReasoningEffort)
+	if cfg.PromptCompression.Threshold > 0 {
+		v.Set("prompt_compression.threshold", cfg.PromptCompression.Threshold)
 	}
 
 	if err := v.WriteConfig(); err != nil {
@@ -2872,11 +3086,7 @@ func (m *setupModel) handleJiraPingInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.jiraErr = err.Error()
 			return m, nil
 		}
-		nextStep := stepPreview
-		if m.jiraEnabled && systemdAvailable() {
-			nextStep = stepSystemd
-		}
-		return m, m.setStep(nextStep)
+		return m, m.setStep(stepPromptCompression)
 	}
 	return m, nil
 }

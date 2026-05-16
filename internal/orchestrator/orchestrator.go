@@ -96,9 +96,10 @@ type RunMetadata struct {
 
 // Config holds orchestrator configuration.
 type Config struct {
-	MaxIterations int           // Max review iterations (default: 3)
-	AgentTimeout  time.Duration // Per-agent timeout (default: 30min)
-	WorkDir       string        // Working directory for agents
+	MaxIterations int                    // Max review iterations (default: 3)
+	AgentTimeout  time.Duration          // Per-agent timeout (default: 30min)
+	WorkDir       string                 // Working directory for agents
+	Compression   *agents.CompressConfig // optional LLM prompt compression
 }
 
 // DefaultConfig returns default orchestrator config.
@@ -431,9 +432,10 @@ func (o *Orchestrator) plan(ctx context.Context, task *tasks.Task, workDir strin
 	defer cancel()
 
 	execResult, err := o.agent.Execute(ctx, agents.ExecuteOptions{
-		Prompt:  prompt,
-		WorkDir: workDir,
-		Timeout: o.config.AgentTimeout,
+		Prompt:      prompt,
+		WorkDir:     workDir,
+		Timeout:     o.config.AgentTimeout,
+		Compression: o.config.Compression,
 	})
 	if err != nil {
 		if execResult != nil && execResult.Output != "" {
@@ -491,10 +493,11 @@ func (o *Orchestrator) implement(ctx context.Context, task *tasks.Task, plan *Pl
 	}
 
 	execResult, err := o.agent.Execute(ctx, agents.ExecuteOptions{
-		Prompt:  prompt,
-		WorkDir: workDir,
-		Files:   files,
-		Timeout: o.config.AgentTimeout,
+		Prompt:      prompt,
+		WorkDir:     workDir,
+		Files:       files,
+		Timeout:     o.config.AgentTimeout,
+		Compression: o.config.Compression,
 	})
 	if err != nil {
 		if execResult != nil && execResult.Output != "" {
@@ -605,10 +608,11 @@ func (o *Orchestrator) review(ctx context.Context, task *tasks.Task, impl *Imple
 	}
 
 	execResult, err := o.agent.Execute(ctx, agents.ExecuteOptions{
-		Prompt:  prompt,
-		WorkDir: workDir,
-		Files:   files,
-		Timeout: o.config.AgentTimeout,
+		Prompt:      prompt,
+		WorkDir:     workDir,
+		Files:       files,
+		Timeout:     o.config.AgentTimeout,
+		Compression: o.config.Compression,
 	})
 	if err != nil {
 		if execResult != nil && execResult.Output != "" {

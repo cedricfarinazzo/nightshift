@@ -24,12 +24,13 @@ type ValidationResult struct {
 // ValidateTicket uses an LLM agent to evaluate whether a ticket has enough
 // information for autonomous implementation. Returns a ValidationResult where
 // Valid is true if the ticket meets the quality threshold (score >= 6).
-func ValidateTicket(ctx context.Context, agent agents.Agent, ticket Ticket) (*ValidationResult, error) {
+func ValidateTicket(ctx context.Context, agent agents.Agent, ticket Ticket, compression *agents.CompressConfig) (*ValidationResult, error) {
 	ctx, cancel := context.WithTimeout(ctx, validationTimeout)
 	defer cancel()
 
 	opts := agents.ExecuteOptions{
-		Prompt: buildValidationPrompt(ticket),
+		Prompt:      buildValidationPrompt(ticket),
+		Compression: compression,
 	}
 	result, err := agent.Execute(ctx, opts)
 	if err != nil {

@@ -681,6 +681,7 @@ func executeRun(ctx context.Context, p executeRunParams) error {
 			orchestrator.WithConfig(orchestrator.Config{
 				MaxIterations: 3,
 				AgentTimeout:  p.agentTimeout,
+				Compression:   compressionConfigFromApp(p.cfg),
 			}),
 			orchestrator.WithLogger(logging.Component("orchestrator")),
 		}

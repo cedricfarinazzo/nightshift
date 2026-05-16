@@ -91,6 +91,8 @@ type Orchestrator struct {
 	db    jiraDB
 	runID string
 
+	compression *agents.CompressConfig // optional LLM prompt compression
+
 	// ops are injectable for testing; set to real functions by NewOrchestrator.
 	fnHasChanges             func(ctx context.Context, repoPath string) (bool, error)
 	fnCommitAndPush          func(ctx context.Context, repoPath, message string) error
@@ -154,6 +156,11 @@ func WithDB(d jiraDB, runID string) OrchestratorOption {
 		o.db = d
 		o.runID = runID
 	}
+}
+
+// WithCompression enables LLM-based prompt compression for this orchestrator.
+func WithCompression(c *agents.CompressConfig) OrchestratorOption {
+	return func(o *Orchestrator) { o.compression = c }
 }
 
 // NewOrchestrator creates an Orchestrator with the given client, config, project, and options.
@@ -371,7 +378,7 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 		if !o.skipValidation {
 			validateStart := time.Now()
 			valCfg := o.cfg.EffectiveValidation(o.proj)
-			vr, err := ValidateTicket(ctx, o.validationAgent, ticket)
+			vr, err := ValidateTicket(ctx, o.validationAgent, ticket, o.compression)
 			if err != nil {
 				o.savePhaseLog(ctx, ticket.Key, PhaseValidate, valCfg.Provider, valCfg.Model, validateStart, false, "", err.Error())
 				o.postErrorComment(ctx, ticket.Key, PhaseValidate, err)
@@ -439,9 +446,10 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 			planAgent = o.implAgent
 		}
 		planResult, err := planAgent.Execute(ctx, agents.ExecuteOptions{
-			Prompt:  o.buildPlanPrompt(ticket),
-			Timeout: parseTimeout(planCfg.Timeout, 5*time.Minute),
-			Model:   planCfg.Model,
+			Prompt:      o.buildPlanPrompt(ticket),
+			Timeout:     parseTimeout(planCfg.Timeout, 5*time.Minute),
+			Model:       planCfg.Model,
+			Compression: o.compression,
 		})
 		if err != nil {
 			o.savePhaseLog(ctx, ticket.Key, PhasePlan, planCfg.Provider, planCfg.Model, planStart, false, "", err.Error())
@@ -480,10 +488,11 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 			workDir = ws.Repos[0].Path
 		}
 		implResult, err := o.implAgent.Execute(ctx, agents.ExecuteOptions{
-			Prompt:  o.buildImplementPrompt(ticket, result.Plan, ws),
-			WorkDir: workDir,
-			Timeout: timeout,
-			Model:   implCfg.Model,
+			Prompt:      o.buildImplementPrompt(ticket, result.Plan, ws),
+			WorkDir:     workDir,
+			Timeout:     timeout,
+			Model:       implCfg.Model,
+			Compression: o.compression,
 		})
 		if err != nil {
 			o.savePhaseLog(ctx, ticket.Key, PhaseImplement, implCfg.Provider, implCfg.Model, implStart, false, "", err.Error())

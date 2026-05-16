@@ -117,6 +117,20 @@ func newCopilotAgentFromConfig(cfg *config.Config, binaryPath string, extra ...a
 	return agents.NewCopilotAgent(opts...)
 }
 
+// compressionConfigFromApp converts app config to agents.CompressConfig.
+func compressionConfigFromApp(cfg *config.Config) *agents.CompressConfig {
+	if cfg == nil || !cfg.PromptCompression.Enabled {
+		return nil
+	}
+	return &agents.CompressConfig{
+		Enabled:         true,
+		Provider:        cfg.PromptCompression.Provider,
+		Model:           cfg.PromptCompression.Model,
+		ReasoningEffort: cfg.PromptCompression.ReasoningEffort,
+		Threshold:       cfg.PromptCompression.Threshold,
+	}
+}
+
 // newBudgetManager builds a budget.Manager from config and an open database.
 func newBudgetManager(cfg *config.Config, _ *db.DB) *budget.Manager {
 	return budget.NewManagerWithTracking(cfg)

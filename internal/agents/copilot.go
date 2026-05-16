@@ -116,10 +116,25 @@ func (a *CopilotAgent) Execute(ctx context.Context, opts ExecuteOptions) (*Execu
 		model = a.model
 	}
 
+	// Write prompt (optionally compressed) + file context to a temp file.
+	// Pass a short directive via -p to avoid OS ARG_MAX limits.
+	var promptDirective string
+	if opts.Prompt != "" {
+		promptPath, cleanup, err := writePromptFile(ctx, opts)
+		if err != nil {
+			return &ExecuteResult{
+				Error:    fmt.Sprintf("writing prompt file: %v", err),
+				Duration: time.Since(start),
+			}, err
+		}
+		defer cleanup()
+		promptDirective = fmt.Sprintf("Read and follow the task instructions in file: %s", promptPath)
+	}
+
 	if a.binaryPath == "gh" {
-		args = []string{"copilot", "--", "-p", opts.Prompt, "--no-ask-user", "--silent"}
+		args = []string{"copilot", "--", "-p", promptDirective, "--no-ask-user", "--silent"}
 	} else {
-		args = []string{"-p", opts.Prompt, "--no-ask-user", "--silent"}
+		args = []string{"-p", promptDirective, "--no-ask-user", "--silent"}
 	}
 	if model != "" {
 		args = append(args, "--model", model)
@@ -138,21 +153,8 @@ func (a *CopilotAgent) Execute(ctx context.Context, opts ExecuteOptions) (*Execu
 		args = append(args, "--allow-all-tools", "--allow-all-urls")
 	}
 
-	// Build stdin content from files if provided
-	var stdinContent string
-	if len(opts.Files) > 0 {
-		var err error
-		stdinContent, err = a.buildFileContext(opts.Files)
-		if err != nil {
-			return &ExecuteResult{
-				Error:    fmt.Sprintf("building file context: %v", err),
-				Duration: time.Since(start),
-			}, err
-		}
-	}
-
 	// Run command
-	stdout, stderr, exitCode, err := a.runner.Run(ctx, a.binaryPath, args, opts.WorkDir, stdinContent)
+	stdout, stderr, exitCode, err := a.runner.Run(ctx, a.binaryPath, args, opts.WorkDir, "")
 
 	result := &ExecuteResult{
 		Output:   stdout,
