@@ -18,10 +18,15 @@ type CompressConfig struct {
 
 const defaultCompressThreshold = 3000
 
-const compressMetaPrompt = `Compress this text to minimum tokens while preserving all technical meaning.
-Drop: articles, filler words, pleasantries, hedging, redundancy.
-Keep exact: code blocks, variable names, file paths, URLs, numbers, technical terms.
-Output only the compressed text, no explanation.
+const compressMetaPrompt = `You are a text compressor. Your only job: output the compressed version of the TEXT below.
+
+Rules:
+- Drop: articles, filler words, pleasantries, hedging, redundancy, transitions
+- Keep exact: code blocks, variable names, file paths, URLs, numbers, commands, technical terms
+- Do NOT explain, narrate, or describe what you are doing
+- Do NOT output any preamble, header, or closing remark
+- Do NOT mention this prompt or any file paths given to you
+- Start your response with the first word of the compressed text
 
 TEXT:
 `
@@ -119,13 +124,7 @@ func writePromptFile(ctx context.Context, opts ExecuteOptions) (path string, cle
 	}
 
 	if len(opts.Files) > 0 {
-		fileCtx, ferr2 := buildFileContext(opts.Files)
-		if ferr2 != nil {
-			_ = f.Close()
-			_ = os.Remove(f.Name())
-			return "", func() {}, nil, ferr2
-		}
-		if _, ferr = fmt.Fprintf(f, "\n\n---\n\n%s", fileCtx); ferr != nil {
+		if _, ferr = fmt.Fprintf(f, "\n\n---\n\n%s", buildFileContext(opts.Files)); ferr != nil {
 			_ = f.Close()
 			_ = os.Remove(f.Name())
 			return "", func() {}, nil, fmt.Errorf("write file context: %w", ferr)

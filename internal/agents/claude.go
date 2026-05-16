@@ -229,7 +229,7 @@ func (a *ClaudeAgent) ExecuteWithFiles(ctx context.Context, prompt string, files
 	})
 }
 
-func (a *ClaudeAgent) buildFileContext(files []string) (string, error) {
+func (a *ClaudeAgent) buildFileContext(files []string) string {
 	return buildFileContext(files)
 }
 
