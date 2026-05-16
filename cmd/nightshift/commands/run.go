@@ -988,7 +988,7 @@ func compressionNotes(logs []orchestrator.LogEntry) string {
 			continue
 		}
 		if orig, ok := l.Fields["compress_original"]; ok {
-			pct, _ := l.Fields["compress_pct"]
+			pct := l.Fields["compress_pct"]
 			events = append(events, fmt.Sprintf("%v→%v chars (-%v%%)", orig, l.Fields["compress_result"], pct))
 		}
 	}
