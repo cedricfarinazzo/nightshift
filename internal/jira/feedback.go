@@ -260,15 +260,13 @@ func hasActionableComments(rs *PRReviewState) bool {
 
 // buildReworkPrompt constructs the agent prompt from PR review comments.
 // Ticket context prepended so agent can cross-reference original intent.
-// ~35% word reduction vs original (measured: 91 → 59 words static template).
 func buildReworkPrompt(ticket Ticket, review *PRReviewState, repo RepoWorkspace) string {
 	var b strings.Builder
 
-	// Ticket context — mirrors buildPlanPrompt / buildImplementPrompt pattern.
 	fmt.Fprintf(&b, "## Ticket\nKey: %s\nTitle: %s\n", ticket.Key, ticket.Summary)
-	fmt.Fprintf(&b, "Description:\n%s\n", compressText(ticket.Description))
+	fmt.Fprintf(&b, "Description:\n%s\n", ticket.Description)
 	if ticket.AcceptanceCriteria != "" {
-		fmt.Fprintf(&b, "\nAcceptance Criteria:\n%s\n", compressText(ticket.AcceptanceCriteria))
+		fmt.Fprintf(&b, "\nAcceptance Criteria:\n%s\n", ticket.AcceptanceCriteria)
 	}
 	buildCommentsSection(&b, ticket)
 	b.WriteString("\n---\n\n")
@@ -278,16 +276,16 @@ func buildReworkPrompt(ticket Ticket, review *PRReviewState, repo RepoWorkspace)
 	b.WriteString("### Reviewer Comments\n\n")
 	for _, r := range review.Reviews {
 		if r.State == "CHANGES_REQUESTED" || r.State == "COMMENTED" {
-			fmt.Fprintf(&b, "**%s** (%s):\n%s\n\n", r.Author, r.State, compressText(r.Body))
+			fmt.Fprintf(&b, "**%s** (%s):\n%s\n\n", r.Author, r.State, r.Body)
 		}
 	}
 	b.WriteString("### Inline Comments\n\n")
 	for _, c := range review.Comments {
 		if c.Path != "" && !c.Resolved {
 			if c.Outdated {
-				fmt.Fprintf(&b, "**%s:%d** (%s) [OUTDATED — verify if still applies]:\n%s\n\n", c.Path, c.Line, c.Author, compressText(c.Body))
+				fmt.Fprintf(&b, "**%s:%d** (%s) [OUTDATED — verify if still applies]:\n%s\n\n", c.Path, c.Line, c.Author, c.Body)
 			} else {
-				fmt.Fprintf(&b, "**%s:%d** (%s):\n%s\n\n", c.Path, c.Line, c.Author, compressText(c.Body))
+				fmt.Fprintf(&b, "**%s:%d** (%s):\n%s\n\n", c.Path, c.Line, c.Author, c.Body)
 			}
 		}
 	}

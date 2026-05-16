@@ -790,27 +790,25 @@ func buildParentSection(b *strings.Builder, ticket Ticket) {
 }
 
 // buildCommentsSection appends a comments section to b when the ticket has comments.
-// Comment bodies are passed through compressText to strip filler before injection.
 func buildCommentsSection(b *strings.Builder, ticket Ticket) {
 	if len(ticket.Comments) == 0 {
 		return
 	}
 	b.WriteString("\n## Comments\n")
 	for _, c := range ticket.Comments {
-		fmt.Fprintf(b, "- %s: %s\n", c.Author, compressText(c.Body))
+		fmt.Fprintf(b, "- %s: %s\n", c.Author, c.Body)
 	}
 }
 
 // buildPlanPrompt constructs the prompt for the plan phase.
-// ~44% word reduction vs original (measured: 54 → 30 words static template).
 func (o *Orchestrator) buildPlanPrompt(ticket Ticket) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Planning agent. Create implementation plan for ticket.\n\n")
 	buildParentSection(&b, ticket)
 	fmt.Fprintf(&b, "\n## Ticket\nKey: %s\nTitle: %s\n", ticket.Key, ticket.Summary)
-	fmt.Fprintf(&b, "Description:\n%s\n", compressText(ticket.Description))
+	fmt.Fprintf(&b, "Description:\n%s\n", ticket.Description)
 	if ticket.AcceptanceCriteria != "" {
-		fmt.Fprintf(&b, "\nAcceptance Criteria:\n%s\n", compressText(ticket.AcceptanceCriteria))
+		fmt.Fprintf(&b, "\nAcceptance Criteria:\n%s\n", ticket.AcceptanceCriteria)
 	}
 	buildCommentsSection(&b, ticket)
 	b.WriteString("\n## Instructions\n")
@@ -822,15 +820,14 @@ func (o *Orchestrator) buildPlanPrompt(ticket Ticket) string {
 }
 
 // buildImplementPrompt constructs the prompt for the implementation phase.
-// ~38% word reduction vs original (measured: 105 → 65 words static template).
 func (o *Orchestrator) buildImplementPrompt(ticket Ticket, plan string, ws *Workspace) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Implementation agent. Implement ticket below.\n\n")
 	buildParentSection(&b, ticket)
 	fmt.Fprintf(&b, "\n## Ticket\nKey: %s\nTitle: %s\n", ticket.Key, ticket.Summary)
-	fmt.Fprintf(&b, "Description:\n%s\n", compressText(ticket.Description))
+	fmt.Fprintf(&b, "Description:\n%s\n", ticket.Description)
 	if ticket.AcceptanceCriteria != "" {
-		fmt.Fprintf(&b, "\nAcceptance Criteria:\n%s\n", compressText(ticket.AcceptanceCriteria))
+		fmt.Fprintf(&b, "\nAcceptance Criteria:\n%s\n", ticket.AcceptanceCriteria)
 	}
 	buildCommentsSection(&b, ticket)
 	fmt.Fprintf(&b, "\n## Plan\n%s\n", plan)
