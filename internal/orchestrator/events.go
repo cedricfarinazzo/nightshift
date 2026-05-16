@@ -12,6 +12,7 @@ const (
 	EventIterationStart                  // new iteration of the implement-review loop
 	EventLog                             // internal log message
 	EventTaskEnd                         // task execution finished
+	EventCompression                     // prompt was compressed before agent execution
 )
 
 // Event carries data about an orchestrator lifecycle event.
@@ -29,6 +30,12 @@ type Event struct {
 	Status    TaskStatus     // for EventTaskEnd: final status
 	Duration  time.Duration  // for EventPhaseEnd/EventTaskEnd: elapsed time
 	Error     string         // error message if applicable
+
+	// EventCompression fields
+	CompressOriginal   int    // original prompt length in chars
+	CompressResult     int    // compressed prompt length in chars
+	CompressPct        int    // reduction percentage
+	CompressProvider   string // provider that ran compression
 }
 
 // EventHandler is a callback that receives orchestrator events.

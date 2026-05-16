@@ -79,8 +79,14 @@ func TestCodexAgent_Execute_Success(t *testing.T) {
 	if mock.CapturedName != "codex" {
 		t.Errorf("binary = %q, want %q", mock.CapturedName, "codex")
 	}
-	if len(mock.CapturedArgs) != 3 || mock.CapturedArgs[0] != "exec" || mock.CapturedArgs[1] != "--dangerously-bypass-approvals-and-sandbox" || mock.CapturedArgs[2] != "fix the bug" {
-		t.Errorf("args = %v, want [exec --dangerously-bypass-approvals-and-sandbox fix the bug]", mock.CapturedArgs)
+	if len(mock.CapturedArgs) != 3 || mock.CapturedArgs[0] != "exec" || mock.CapturedArgs[1] != "--dangerously-bypass-approvals-and-sandbox" {
+		t.Errorf("args = %v, want [exec --dangerously-bypass-approvals-and-sandbox <directive>]", mock.CapturedArgs)
+	}
+	if !strings.HasPrefix(mock.CapturedArgs[2], promptFileDirectivePrefix) {
+		t.Errorf("args[2] = %q, want prefix %q", mock.CapturedArgs[2], promptFileDirectivePrefix)
+	}
+	if !strings.Contains(mock.CapturedPromptFileData, "fix the bug") {
+		t.Errorf("prompt file content = %q, expected to contain %q", mock.CapturedPromptFileData, "fix the bug")
 	}
 	if mock.CapturedDir != "/project" {
 		t.Errorf("dir = %q, want %q", mock.CapturedDir, "/project")
@@ -225,11 +231,11 @@ func TestCodexAgent_Execute_WithFiles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(mock.CapturedStdin, "package main") {
-		t.Error("expected file content in stdin")
+	if !strings.Contains(mock.CapturedPromptFileData, testFile) {
+		t.Error("expected file path in prompt file")
 	}
-	if !strings.Contains(mock.CapturedStdin, "# Context Files") {
-		t.Error("expected context header in stdin")
+	if !strings.Contains(mock.CapturedPromptFileData, "# Related Files") {
+		t.Error("expected related files header in prompt file")
 	}
 	if result.Output != "analyzed file" {
 		t.Errorf("Output = %q", result.Output)
@@ -237,18 +243,20 @@ func TestCodexAgent_Execute_WithFiles(t *testing.T) {
 }
 
 func TestCodexAgent_Execute_MissingFile(t *testing.T) {
-	agent := NewCodexAgent(WithCodexRunner(&MockRunner{}))
+	mock := &MockRunner{Stdout: "ok", ExitCode: 0}
+	agent := NewCodexAgent(WithCodexRunner(mock))
 
-	result, err := agent.Execute(context.Background(), ExecuteOptions{
+	// Missing files are listed by path only — no read, no error.
+	_, err := agent.Execute(context.Background(), ExecuteOptions{
 		Prompt: "review",
 		Files:  []string{"/nonexistent/file.go"},
 	})
 
-	if err == nil {
-		t.Error("expected error for missing file")
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
 	}
-	if result.Error == "" {
-		t.Error("expected error message")
+	if !strings.Contains(mock.CapturedPromptFileData, "/nonexistent/file.go") {
+		t.Error("expected file path listed in prompt file")
 	}
 }
 
@@ -284,38 +292,20 @@ func TestCodexAgent_buildFileContext(t *testing.T) {
 	file1 := filepath.Join(tmpDir, "file1.txt")
 	file2 := filepath.Join(tmpDir, "file2.go")
 
-	if err := os.WriteFile(file1, []byte("content 1"), 0644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(file2, []byte("package main"), 0644); err != nil {
-		t.Fatal(err)
-	}
-
 	agent := NewCodexAgent()
-	ctx, err := agent.buildFileContext([]string{file1, file2})
-	if err != nil {
-		t.Fatalf("buildFileContext error: %v", err)
-	}
+	ctx := agent.buildFileContext([]string{file1, file2})
 
 	if ctx == "" {
 		t.Error("expected non-empty context")
 	}
-	if !strings.Contains(ctx, "content 1") {
-		t.Error("context missing file1 content")
+	if !strings.Contains(ctx, file1) {
+		t.Error("context missing file1 path")
 	}
-	if !strings.Contains(ctx, "package main") {
-		t.Error("context missing file2 content")
+	if !strings.Contains(ctx, file2) {
+		t.Error("context missing file2 path")
 	}
-	if !strings.Contains(ctx, "# Context Files") {
+	if !strings.Contains(ctx, "# Related Files") {
 		t.Error("context missing header")
-	}
-}
-
-func TestCodexAgent_buildFileContext_MissingFile(t *testing.T) {
-	agent := NewCodexAgent()
-	_, err := agent.buildFileContext([]string{"/nonexistent/file.txt"})
-	if err == nil {
-		t.Error("expected error for missing file")
 	}
 }
 

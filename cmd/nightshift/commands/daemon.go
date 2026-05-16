@@ -307,6 +307,7 @@ func runScheduledTasks(ctx context.Context, cfg *config.Config, database *db.DB,
 			orchestrator.WithConfig(orchestrator.Config{
 				MaxIterations: 3,
 				AgentTimeout:  daemonTimeoutFlag,
+				Compression:   compressionConfigFromApp(cfg),
 			}),
 			orchestrator.WithLogger(logging.Component("orchestrator")),
 		)

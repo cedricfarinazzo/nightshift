@@ -173,16 +173,23 @@ func (o *Orchestrator) ProcessFeedback(ctx context.Context, ticket Ticket, ws *W
 			o.emit("🤖 %s running: review-fix  (%s, timeout %s)", rfCfg.Provider, rfCfg.Model, timeout.Round(time.Minute))
 			rfStart := time.Now()
 			agentResult, err := agent.Execute(ctx, agents.ExecuteOptions{
-				Prompt:  prompt,
-				WorkDir: repo.Path,
-				Timeout: timeout,
-				Model:   rfCfg.Model,
+				Prompt:      prompt,
+				WorkDir:     repo.Path,
+				Timeout:     timeout,
+				Model:       rfCfg.Model,
+				Compression: o.compression,
 			})
 			if err != nil {
 				o.savePhaseLog(ctx, ticket.Key, PhaseReviewFix, rfCfg.Provider, rfCfg.Model, rfStart, false, "", err.Error())
 				return nil, fmt.Errorf("jira: feedback: rework agent %s: %w", repo.Name, err)
 			}
 			o.savePhaseLog(ctx, ticket.Key, PhaseReviewFix, rfCfg.Provider, rfCfg.Model, rfStart, true, agentResult.Output, "")
+			if s := agentResult.CompressStats; s != nil {
+				o.log.Infof("ticket %s: review-fix compress %d→%d chars (-%d%%) via %s", ticket.Key, s.OriginalLen, s.CompressedLen, s.ReductionPct, s.Provider)
+				if o.progressf != nil {
+					o.progressf("compress      %d→%d chars (-%d%%)", s.OriginalLen, s.CompressedLen, s.ReductionPct)
+				}
+			}
 
 			// Only commit and report when the agent produced file changes.
 			changed, err := o.fnHasChanges(ctx, repo.Path)
@@ -259,15 +266,13 @@ func hasActionableComments(rs *PRReviewState) bool {
 
 // buildReworkPrompt constructs the agent prompt from PR review comments.
 // Ticket context prepended so agent can cross-reference original intent.
-// ~35% word reduction vs original (measured: 91 → 59 words static template).
 func buildReworkPrompt(ticket Ticket, review *PRReviewState, repo RepoWorkspace) string {
 	var b strings.Builder
 
-	// Ticket context — mirrors buildPlanPrompt / buildImplementPrompt pattern.
 	fmt.Fprintf(&b, "## Ticket\nKey: %s\nTitle: %s\n", ticket.Key, ticket.Summary)
-	fmt.Fprintf(&b, "Description:\n%s\n", compressText(ticket.Description))
+	fmt.Fprintf(&b, "Description:\n%s\n", ticket.Description)
 	if ticket.AcceptanceCriteria != "" {
-		fmt.Fprintf(&b, "\nAcceptance Criteria:\n%s\n", compressText(ticket.AcceptanceCriteria))
+		fmt.Fprintf(&b, "\nAcceptance Criteria:\n%s\n", ticket.AcceptanceCriteria)
 	}
 	buildCommentsSection(&b, ticket)
 	b.WriteString("\n---\n\n")
@@ -277,16 +282,16 @@ func buildReworkPrompt(ticket Ticket, review *PRReviewState, repo RepoWorkspace)
 	b.WriteString("### Reviewer Comments\n\n")
 	for _, r := range review.Reviews {
 		if r.State == "CHANGES_REQUESTED" || r.State == "COMMENTED" {
-			fmt.Fprintf(&b, "**%s** (%s):\n%s\n\n", r.Author, r.State, compressText(r.Body))
+			fmt.Fprintf(&b, "**%s** (%s):\n%s\n\n", r.Author, r.State, r.Body)
 		}
 	}
 	b.WriteString("### Inline Comments\n\n")
 	for _, c := range review.Comments {
 		if c.Path != "" && !c.Resolved {
 			if c.Outdated {
-				fmt.Fprintf(&b, "**%s:%d** (%s) [OUTDATED — verify if still applies]:\n%s\n\n", c.Path, c.Line, c.Author, compressText(c.Body))
+				fmt.Fprintf(&b, "**%s:%d** (%s) [OUTDATED — verify if still applies]:\n%s\n\n", c.Path, c.Line, c.Author, c.Body)
 			} else {
-				fmt.Fprintf(&b, "**%s:%d** (%s):\n%s\n\n", c.Path, c.Line, c.Author, compressText(c.Body))
+				fmt.Fprintf(&b, "**%s:%d** (%s):\n%s\n\n", c.Path, c.Line, c.Author, c.Body)
 			}
 		}
 	}

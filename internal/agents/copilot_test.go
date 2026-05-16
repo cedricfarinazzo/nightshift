@@ -100,15 +100,22 @@ func TestCopilotAgent_Execute_Success(t *testing.T) {
 	if mock.CapturedName != "gh" {
 		t.Errorf("binary = %q, want %q", mock.CapturedName, "gh")
 	}
-	expectedArgs := []string{"copilot", "--", "-p", "how to list files", "--no-ask-user", "--silent"}
-	if len(mock.CapturedArgs) != len(expectedArgs) {
-		t.Errorf("args length = %d, want %d", len(mock.CapturedArgs), len(expectedArgs))
+	// Prompt is now a file directive, not the raw prompt string.
+	if len(mock.CapturedArgs) != 6 {
+		t.Errorf("args length = %d, want 6, args = %v", len(mock.CapturedArgs), mock.CapturedArgs)
 	} else {
-		for i, arg := range expectedArgs {
-			if mock.CapturedArgs[i] != arg {
-				t.Errorf("args[%d] = %q, want %q", i, mock.CapturedArgs[i], arg)
-			}
+		if mock.CapturedArgs[0] != "copilot" || mock.CapturedArgs[1] != "--" || mock.CapturedArgs[2] != "-p" {
+			t.Errorf("args prefix = %v, want [copilot -- -p]", mock.CapturedArgs[:3])
 		}
+		if !strings.HasPrefix(mock.CapturedArgs[3], promptFileDirectivePrefix) {
+			t.Errorf("args[3] = %q, want prefix %q", mock.CapturedArgs[3], promptFileDirectivePrefix)
+		}
+		if mock.CapturedArgs[4] != "--no-ask-user" || mock.CapturedArgs[5] != "--silent" {
+			t.Errorf("args[4:] = %v, want [--no-ask-user --silent]", mock.CapturedArgs[4:])
+		}
+	}
+	if !strings.Contains(mock.CapturedPromptFileData, "how to list files") {
+		t.Errorf("prompt file content = %q, expected to contain %q", mock.CapturedPromptFileData, "how to list files")
 	}
 	if mock.CapturedDir != "/project" {
 		t.Errorf("dir = %q, want %q", mock.CapturedDir, "/project")
@@ -208,12 +215,15 @@ func TestCopilotAgent_Execute_WithFiles(t *testing.T) {
 		t.Errorf("ExitCode = %d, want 0", result.ExitCode)
 	}
 
-	// Verify file content was included in stdin
-	if mock.CapturedStdin == "" {
-		t.Error("expected file context in stdin")
+	// Verify file path was included in prompt file
+	if mock.CapturedPromptFileData == "" {
+		t.Error("expected file context in prompt file")
 	}
-	if !containsString(mock.CapturedStdin, "test content") {
-		t.Error("expected file content in stdin")
+	if !containsString(mock.CapturedPromptFileData, testFile) {
+		t.Error("expected file path in prompt file")
+	}
+	if !containsString(mock.CapturedPromptFileData, "# Related Files") {
+		t.Error("expected related files header in prompt file")
 	}
 }
 

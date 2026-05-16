@@ -3,28 +3,23 @@ package agents
 import (
 	"encoding/json"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 )
 
-// buildFileContext reads the given files and formats them as a markdown context
-// block suitable for injection into an agent prompt.
-func buildFileContext(files []string) (string, error) {
+// buildFileContext formats the given file paths as a markdown list for injection
+// into an agent prompt. The agent reads files directly from disk as needed.
+func buildFileContext(files []string) string {
 	var sb strings.Builder
-	sb.WriteString("# Context Files\n\n")
+	sb.WriteString("# Related Files\n\n")
 	for _, path := range files {
-		content, err := os.ReadFile(path)
-		if err != nil {
-			return "", fmt.Errorf("reading %s: %w", path, err)
-		}
 		displayPath := path
 		if abs, err := filepath.Abs(path); err == nil {
 			displayPath = abs
 		}
-		fmt.Fprintf(&sb, "## File: %s\n\n```\n%s\n```\n\n", displayPath, string(content))
+		fmt.Fprintf(&sb, "- %s\n", displayPath)
 	}
-	return sb.String(), nil
+	return sb.String()
 }
 
 // extractJSON attempts to find and parse JSON from raw output bytes.

@@ -94,6 +94,9 @@ func renderPreviewText(result *previewResult, opts previewTextOptions) string {
 	if result.ProjectCount > 1 {
 		b.WriteString("  Note: budget is not split per project during preview/run\n")
 	}
+	if result.Compression != "" {
+		fmt.Fprintf(b, "  Compression: %s\n", result.Compression)
+	}
 
 	for _, run := range result.Runs {
 		b.WriteString("\n")

@@ -146,6 +146,7 @@ type previewResult struct {
 	Providers     []providerBudgetSummary
 	ConfigSources *previewConfigSources
 	Note          string
+	Compression   string
 }
 
 type previewRun struct {
@@ -274,6 +275,7 @@ func buildPreviewResult(cfg *config.Config, database *db.DB, projects []string, 
 		Providers:     collectProviderBudgets(cfg, budgetMgr, ignoreBudget),
 		ConfigSources: sources,
 		Note:          "Only the plan prompt is deterministic. Implement/review prompts are generated after plan output.",
+		Compression:   compressionSummary(cfg),
 	}
 
 	for i, runAt := range nextRuns {

@@ -91,6 +91,8 @@ type Orchestrator struct {
 	db    jiraDB
 	runID string
 
+	compression *agents.CompressConfig // optional LLM prompt compression
+
 	// ops are injectable for testing; set to real functions by NewOrchestrator.
 	fnHasChanges             func(ctx context.Context, repoPath string) (bool, error)
 	fnCommitAndPush          func(ctx context.Context, repoPath, message string) error
@@ -154,6 +156,11 @@ func WithDB(d jiraDB, runID string) OrchestratorOption {
 		o.db = d
 		o.runID = runID
 	}
+}
+
+// WithCompression enables LLM-based prompt compression for this orchestrator.
+func WithCompression(c *agents.CompressConfig) OrchestratorOption {
+	return func(o *Orchestrator) { o.compression = c }
 }
 
 // NewOrchestrator creates an Orchestrator with the given client, config, project, and options.
@@ -371,7 +378,7 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 		if !o.skipValidation {
 			validateStart := time.Now()
 			valCfg := o.cfg.EffectiveValidation(o.proj)
-			vr, err := ValidateTicket(ctx, o.validationAgent, ticket)
+			vr, err := ValidateTicket(ctx, o.validationAgent, ticket, o.compression)
 			if err != nil {
 				o.savePhaseLog(ctx, ticket.Key, PhaseValidate, valCfg.Provider, valCfg.Model, validateStart, false, "", err.Error())
 				o.postErrorComment(ctx, ticket.Key, PhaseValidate, err)
@@ -402,6 +409,12 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 				return result, nil
 			}
 			o.savePhaseLog(ctx, ticket.Key, PhaseValidate, valCfg.Provider, valCfg.Model, validateStart, true, strings.Join(vr.Suggestions, "; "), "")
+			if s := vr.CompressStats; s != nil {
+				o.log.Infof("ticket %s: validate compress %d→%d chars (-%d%%) via %s", ticket.Key, s.OriginalLen, s.CompressedLen, s.ReductionPct, s.Provider)
+				if o.progressf != nil {
+					o.progressf("compress      %d→%d chars (-%d%%)", s.OriginalLen, s.CompressedLen, s.ReductionPct)
+				}
+			}
 			o.postPhaseComment(ctx, ticket.Key, CommentValidation,
 				buildValidationComment(vr), time.Since(start))
 			o.log.Infof("ticket %s validated (score %.1f/10)", ticket.Key, vr.Score)
@@ -439,9 +452,10 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 			planAgent = o.implAgent
 		}
 		planResult, err := planAgent.Execute(ctx, agents.ExecuteOptions{
-			Prompt:  o.buildPlanPrompt(ticket),
-			Timeout: parseTimeout(planCfg.Timeout, 5*time.Minute),
-			Model:   planCfg.Model,
+			Prompt:      o.buildPlanPrompt(ticket),
+			Timeout:     parseTimeout(planCfg.Timeout, 5*time.Minute),
+			Model:       planCfg.Model,
+			Compression: o.compression,
 		})
 		if err != nil {
 			o.savePhaseLog(ctx, ticket.Key, PhasePlan, planCfg.Provider, planCfg.Model, planStart, false, "", err.Error())
@@ -457,6 +471,12 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 			return result, nil
 		}
 		o.savePhaseLog(ctx, ticket.Key, PhasePlan, planCfg.Provider, planCfg.Model, planStart, true, planResult.Output, "")
+		if s := planResult.CompressStats; s != nil {
+			o.log.Infof("ticket %s: plan compress %d→%d chars (-%d%%) via %s", ticket.Key, s.OriginalLen, s.CompressedLen, s.ReductionPct, s.Provider)
+			if o.progressf != nil {
+				o.progressf("compress      %d→%d chars (-%d%%)", s.OriginalLen, s.CompressedLen, s.ReductionPct)
+			}
+		}
 		result.Plan = planResult.Output
 		o.emit("📝 posting plan to Jira %s", ticket.Key)
 		o.postPhaseComment(ctx, ticket.Key, CommentPlan, planResult.Output, time.Since(planStart))
@@ -480,10 +500,11 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 			workDir = ws.Repos[0].Path
 		}
 		implResult, err := o.implAgent.Execute(ctx, agents.ExecuteOptions{
-			Prompt:  o.buildImplementPrompt(ticket, result.Plan, ws),
-			WorkDir: workDir,
-			Timeout: timeout,
-			Model:   implCfg.Model,
+			Prompt:      o.buildImplementPrompt(ticket, result.Plan, ws),
+			WorkDir:     workDir,
+			Timeout:     timeout,
+			Model:       implCfg.Model,
+			Compression: o.compression,
 		})
 		if err != nil {
 			o.savePhaseLog(ctx, ticket.Key, PhaseImplement, implCfg.Provider, implCfg.Model, implStart, false, "", err.Error())
@@ -499,6 +520,12 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 			return result, nil
 		}
 		o.savePhaseLog(ctx, ticket.Key, PhaseImplement, implCfg.Provider, implCfg.Model, implStart, true, implResult.Output, "")
+		if s := implResult.CompressStats; s != nil {
+			o.log.Infof("ticket %s: implement compress %d→%d chars (-%d%%) via %s", ticket.Key, s.OriginalLen, s.CompressedLen, s.ReductionPct, s.Provider)
+			if o.progressf != nil {
+				o.progressf("compress      %d→%d chars (-%d%%)", s.OriginalLen, s.CompressedLen, s.ReductionPct)
+			}
+		}
 		result.ImplementationSummary = implResult.Output
 		o.emit("📝 posting implementation summary to Jira %s", ticket.Key)
 		o.postPhaseComment(ctx, ticket.Key, CommentImplement, implResult.Output, time.Since(implStart))
@@ -781,27 +808,25 @@ func buildParentSection(b *strings.Builder, ticket Ticket) {
 }
 
 // buildCommentsSection appends a comments section to b when the ticket has comments.
-// Comment bodies are passed through compressText to strip filler before injection.
 func buildCommentsSection(b *strings.Builder, ticket Ticket) {
 	if len(ticket.Comments) == 0 {
 		return
 	}
 	b.WriteString("\n## Comments\n")
 	for _, c := range ticket.Comments {
-		fmt.Fprintf(b, "- %s: %s\n", c.Author, compressText(c.Body))
+		fmt.Fprintf(b, "- %s: %s\n", c.Author, c.Body)
 	}
 }
 
 // buildPlanPrompt constructs the prompt for the plan phase.
-// ~44% word reduction vs original (measured: 54 → 30 words static template).
 func (o *Orchestrator) buildPlanPrompt(ticket Ticket) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Planning agent. Create implementation plan for ticket.\n\n")
 	buildParentSection(&b, ticket)
 	fmt.Fprintf(&b, "\n## Ticket\nKey: %s\nTitle: %s\n", ticket.Key, ticket.Summary)
-	fmt.Fprintf(&b, "Description:\n%s\n", compressText(ticket.Description))
+	fmt.Fprintf(&b, "Description:\n%s\n", ticket.Description)
 	if ticket.AcceptanceCriteria != "" {
-		fmt.Fprintf(&b, "\nAcceptance Criteria:\n%s\n", compressText(ticket.AcceptanceCriteria))
+		fmt.Fprintf(&b, "\nAcceptance Criteria:\n%s\n", ticket.AcceptanceCriteria)
 	}
 	buildCommentsSection(&b, ticket)
 	b.WriteString("\n## Instructions\n")
@@ -813,15 +838,14 @@ func (o *Orchestrator) buildPlanPrompt(ticket Ticket) string {
 }
 
 // buildImplementPrompt constructs the prompt for the implementation phase.
-// ~38% word reduction vs original (measured: 105 → 65 words static template).
 func (o *Orchestrator) buildImplementPrompt(ticket Ticket, plan string, ws *Workspace) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Implementation agent. Implement ticket below.\n\n")
 	buildParentSection(&b, ticket)
 	fmt.Fprintf(&b, "\n## Ticket\nKey: %s\nTitle: %s\n", ticket.Key, ticket.Summary)
-	fmt.Fprintf(&b, "Description:\n%s\n", compressText(ticket.Description))
+	fmt.Fprintf(&b, "Description:\n%s\n", ticket.Description)
 	if ticket.AcceptanceCriteria != "" {
-		fmt.Fprintf(&b, "\nAcceptance Criteria:\n%s\n", compressText(ticket.AcceptanceCriteria))
+		fmt.Fprintf(&b, "\nAcceptance Criteria:\n%s\n", ticket.AcceptanceCriteria)
 	}
 	buildCommentsSection(&b, ticket)
 	fmt.Fprintf(&b, "\n## Plan\n%s\n", plan)

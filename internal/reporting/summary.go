@@ -31,6 +31,7 @@ type TaskResult struct {
 	TokensUsed int           `json:"tokens_used"`
 	SkipReason string        `json:"skip_reason,omitempty"` // e.g., "insufficient budget"
 	Duration   time.Duration `json:"duration,omitempty"`
+	Notes      string        `json:"notes,omitempty"` // e.g. compression savings
 }
 
 // RunResults holds all results from a nightshift run.

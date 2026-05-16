@@ -161,31 +161,30 @@ func (a *ClaudeAgent) Execute(ctx context.Context, opts ExecuteOptions) (*Execut
 		args = append(args, "--effort", effort)
 	}
 
-	// Add prompt directly as argument
+	// Write prompt (optionally compressed) + file context to a temp file.
+	// Pass a short directive as the arg to avoid OS ARG_MAX limits.
+	var compressStats *CompressStats
 	if opts.Prompt != "" {
-		args = append(args, opts.Prompt)
-	}
-
-	// Build stdin content from files if provided
-	var stdinContent string
-	if len(opts.Files) > 0 {
-		var err error
-		stdinContent, err = a.buildFileContext(opts.Files)
+		promptPath, cleanup, stats, err := writePromptFile(ctx, opts)
 		if err != nil {
 			return &ExecuteResult{
-				Error:    fmt.Sprintf("building file context: %v", err),
+				Error:    fmt.Sprintf("writing prompt file: %v", err),
 				Duration: time.Since(start),
 			}, err
 		}
+		defer cleanup()
+		compressStats = stats
+		args = append(args, fmt.Sprintf("Read and follow the task instructions in file: %s", promptPath))
 	}
 
 	// Run command
-	stdout, stderr, exitCode, err := a.runner.Run(ctx, a.binaryPath, args, opts.WorkDir, stdinContent)
+	stdout, stderr, exitCode, err := a.runner.Run(ctx, a.binaryPath, args, opts.WorkDir, "")
 
 	result := &ExecuteResult{
-		Output:   stdout,
-		ExitCode: exitCode,
-		Duration: time.Since(start),
+		Output:        stdout,
+		CompressStats: compressStats,
+		ExitCode:      exitCode,
+		Duration:      time.Since(start),
 	}
 
 	// Check for context timeout
@@ -230,7 +229,7 @@ func (a *ClaudeAgent) ExecuteWithFiles(ctx context.Context, prompt string, files
 	})
 }
 
-func (a *ClaudeAgent) buildFileContext(files []string) (string, error) {
+func (a *ClaudeAgent) buildFileContext(files []string) string {
 	return buildFileContext(files)
 }
 

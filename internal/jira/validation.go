@@ -14,22 +14,24 @@ const validationTimeout = 2 * time.Minute
 
 // ValidationResult holds the outcome of LLM-based ticket quality evaluation.
 type ValidationResult struct {
-	Valid       bool     `json:"valid"`
-	Score       float64  `json:"score"`
-	Issues      []string `json:"issues"`
-	Missing     []string `json:"missing"`
-	Suggestions []string `json:"suggestions"`
+	Valid         bool                  `json:"valid"`
+	Score         float64               `json:"score"`
+	Issues        []string              `json:"issues"`
+	Missing       []string              `json:"missing"`
+	Suggestions   []string              `json:"suggestions"`
+	CompressStats *agents.CompressStats `json:"compress_stats,omitempty"`
 }
 
 // ValidateTicket uses an LLM agent to evaluate whether a ticket has enough
 // information for autonomous implementation. Returns a ValidationResult where
 // Valid is true if the ticket meets the quality threshold (score >= 6).
-func ValidateTicket(ctx context.Context, agent agents.Agent, ticket Ticket) (*ValidationResult, error) {
+func ValidateTicket(ctx context.Context, agent agents.Agent, ticket Ticket, compression *agents.CompressConfig) (*ValidationResult, error) {
 	ctx, cancel := context.WithTimeout(ctx, validationTimeout)
 	defer cancel()
 
 	opts := agents.ExecuteOptions{
-		Prompt: buildValidationPrompt(ticket),
+		Prompt:      buildValidationPrompt(ticket),
+		Compression: compression,
 	}
 	result, err := agent.Execute(ctx, opts)
 	if err != nil {
@@ -39,65 +41,8 @@ func ValidateTicket(ctx context.Context, agent agents.Agent, ticket Ticket) (*Va
 	if err != nil {
 		return nil, fmt.Errorf("jira: parse validation response for %s: %w\nraw output:\n%s", ticket.Key, err, result.Output)
 	}
+	vr.CompressStats = result.CompressStats
 	return vr, nil
-}
-
-// compressText strips common filler words/phrases from dynamic content before
-// injection into agent prompts (~40-60% word reduction on typical Jira prose).
-// Preserves code blocks (fenced with ``` or ~~~), indented lines, and inline backticks.
-// All replacements use spaces as word boundaries to avoid mangling technical terms.
-func compressText(s string) string {
-	lines := strings.Split(s, "\n")
-	var result []string
-	var inCodeFence bool
-
-	for _, line := range lines {
-		trimmed := strings.TrimLeft(line, " \t")
-
-		// Toggle code fence (``` or ~~~)
-		if strings.HasPrefix(trimmed, "```") || strings.HasPrefix(trimmed, "~~~") {
-			inCodeFence = !inCodeFence
-			result = append(result, line)
-			continue
-		}
-
-		// Preserve lines inside code fences or indented blocks (likely code)
-		if inCodeFence || (len(line) > 0 && (line[0] == ' ' || line[0] == '\t')) {
-			result = append(result, line)
-			continue
-		}
-
-		// Compress non-code lines
-		compressed := compressLine(line)
-		result = append(result, compressed)
-	}
-
-	return strings.Join(result, "\n")
-}
-
-// compressLine applies filler word removal to a single line.
-// All patterns use word boundaries (trailing spaces) to prevent mangling.
-func compressLine(line string) string {
-	// Ordered replacements: longer phrases first to prevent partial matches.
-	r := strings.NewReplacer(
-		"in order to", "to",
-		"make sure to", "ensure",
-		"please make sure", "ensure",
-		"please note that", "note:",
-		"it is important to", "",
-		"you should ", "",
-		"you need to ", "",
-		"basically ", "",
-		"actually ", "",
-		"really ", "",
-		"just ", "",
-		"simply ", "",
-		"essentially ", "",
-		"a lot of ", "many ",
-	)
-	compressed := r.Replace(line)
-	// Collapse extra spaces created by deletions
-	return strings.Join(strings.Fields(compressed), " ")
 }
 
 // buildValidationPrompt constructs the prompt sent to the LLM validator.
@@ -105,7 +50,7 @@ func compressLine(line string) string {
 func buildValidationPrompt(ticket Ticket) string {
 	var comments strings.Builder
 	for _, c := range ticket.Comments {
-		fmt.Fprintf(&comments, "- %s: %s\n", c.Author, compressText(c.Body))
+		fmt.Fprintf(&comments, "- %s: %s\n", c.Author, c.Body)
 	}
 
 	return fmt.Sprintf(`Ticket quality validator. Assess if ticket has enough info for autonomous AI implementation.
@@ -124,8 +69,8 @@ Respond in JSON only (no markdown, no code fences):
 Valid if score >= 6 and no critical issues.`,
 		ticket.Key,
 		ticket.Summary,
-		compressText(ticket.Description),
-		compressText(ticket.AcceptanceCriteria),
+		ticket.Description,
+		ticket.AcceptanceCriteria,
 		comments.String(),
 	)
 }

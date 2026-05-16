@@ -51,6 +51,13 @@ func renderJiraPreviewText(result *jiraPreviewResult) string {
 	}
 	b.WriteString("\n")
 
+	// Compression config.
+	if result.Compression != "" {
+		b.WriteString(styles.Section.Render("Prompt Compression"))
+		b.WriteString("\n")
+		fmt.Fprintf(b, "  %s\n\n", result.Compression)
+	}
+
 	// Budget: per-provider capacity table.
 	if len(result.ProviderBudgets) > 0 || result.Budget != nil || result.BudgetErr != "" {
 		b.WriteString(styles.Section.Render("Budget"))

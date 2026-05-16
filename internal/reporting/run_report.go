@@ -134,6 +134,9 @@ func writeTaskSection(buf *bytes.Buffer, title string, tasks []TaskResult, reaso
 		if reasonPrefix != "" && task.SkipReason != "" {
 			line += fmt.Sprintf(" — %s%s", reasonPrefix, task.SkipReason)
 		}
+		if task.Notes != "" {
+			line += fmt.Sprintf(" — %s", task.Notes)
+		}
 		buf.WriteString(line + "\n")
 	}
 	buf.WriteString("\n")

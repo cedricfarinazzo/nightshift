@@ -251,6 +251,9 @@ func buildOrchestrator(client *jira.Client, cfg *config.Config, proj jira.Projec
 	if runDB != nil && runID != "" {
 		orchOpts = append(orchOpts, jira.WithDB(runDB, runID))
 	}
+	if cfg.PromptCompression.Enabled {
+		orchOpts = append(orchOpts, jira.WithCompression(compressionConfigFromApp(cfg)))
+	}
 	return jira.NewOrchestrator(client, jiracfg, proj, orchOpts...), nil
 }
 
