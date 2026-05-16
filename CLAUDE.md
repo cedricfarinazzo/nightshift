@@ -41,7 +41,9 @@ cmd/
       status.go         # `nightshift status` — current run status
       report.go         # `nightshift report` — generate/show run reports
       daemon.go         # `nightshift daemon` — run as background scheduler
-      setup.go          # `nightshift setup` — interactive onboarding wizard
+      setup.go          # `nightshift setup` — interactive onboarding wizard; steps: schedule, budget,
+                        # providers, model, effort, jira, compression (NEW), systemd, preview;
+                        # compressionConfigFromApp() in helpers.go bridges config↔agents packages
       config.go         # `nightshift config` — show/edit config
       logs.go           # `nightshift logs` — view log files
       init.go           # `nightshift init` — init config in new project
@@ -59,10 +61,17 @@ cmd/
 
 internal/
   agents/               # AI agent execution layer (spawns external CLI binaries)
-    agent.go            # Agent interface + ExecuteOptions/ExecuteResult types; DefaultTimeout = 30min
-    claude.go           # ClaudeAgent: spawns `claude` CLI; CommandRunner interface for testability
-    codex.go            # CodexAgent: spawns `codex` CLI; supports --dangerously-bypass-approvals
-    copilot.go          # CopilotAgent: spawns `gh copilot` or standalone `copilot`; use --no-ask-user --silent for non-interactive
+    agent.go            # Agent interface + ExecuteOptions/ExecuteResult types; DefaultTimeout = 30min;
+                        # ExecuteOptions.Compression *CompressConfig enables pre-execution prompt compression
+    claude.go           # ClaudeAgent: spawns `claude` CLI; CommandRunner interface for testability;
+                        # prompt written to temp file, short directive passed as arg (avoids ARG_MAX)
+    codex.go            # CodexAgent: spawns `codex` CLI; supports --dangerously-bypass-approvals;
+                        # same temp-file prompt pattern as claude.go
+    copilot.go          # CopilotAgent: spawns `gh copilot` or standalone `copilot`; use --no-ask-user --silent for non-interactive;
+                        # same temp-file prompt pattern; directive passed via -p flag
+    compress.go         # CompressConfig struct; CompressPrompt() threshold check + fallback;
+                        # compressViaAgent() calls configured provider CLI (claude/codex/copilot) with
+                        # caveman meta-prompt; writePromptFile() creates temp file, appends file context
 
   analysis/             # Bus-factor / code ownership analysis
     analyzer.go         # GitParser: extracts commit authors from git history
@@ -76,7 +85,8 @@ internal/
 
   config/               # YAML config loading and validation
     config.go           # Config struct (Schedule, Budget, Providers, Projects, Tasks, Integrations,
-                        # Logging, Reporting); uses viper; env var overrides supported
+                        # Logging, Reporting, PromptCompression); uses viper; env var overrides supported;
+                        # PromptCompressionConfig: enabled/provider/model/reasoning_effort/threshold
 
   db/                   # SQLite persistence layer — all SQL lives here, nowhere else
     db.go               # DB struct; DefaultPath = ~/.local/share/nightshift/nightshift.db;
@@ -338,3 +348,7 @@ Agents MUST follow these rules:
 - **`require_active_sprint`** — opt-in per-project flag in `ProjectConfig`. When `true`, `FetchTodoTickets` injects `AND sprint in openSprints()` into the JQL so only tickets in an active sprint are processed. Applied only to the TODO fetch, not to in-progress or review fetches, so in-flight tickets can always be resumed. Default `false` preserves existing behaviour for Kanban/non-sprint projects. Requires Jira Software license (`openSprints()` is not available on Jira Work Management).
 - **Kanban backlog filtering requires `board_id`** — JQL alone cannot distinguish Kanban board items from backlog items (both have `sprint is EMPTY`). Set `board_type: kanban`, `board_id: <N>`, and `require_active_sprint: true` to use the Agile board API. The board ID is visible in your Jira board URL. Without `board_id`, nightshift falls back to label-only JQL and will include backlog tickets.
 - **`board/{id}/issue` includes backlog items** — Contrary to what some docs imply, `GET /rest/agile/1.0/board/{id}/issue` returns ALL board-associated issues including backlog items. To get only on-board items, `fetchKanbanBoardTickets` calls `board/{id}/backlog` to get the backlog key set and subtracts it. Both endpoints support the same `jql` query param for pre-filtering.
+- **Prompt temp-file pattern** — All three agents write the full prompt to `os.CreateTemp("", "nightshift-prompt-*.md")` and pass a short directive `"Read and follow the task instructions in file: <path>"` as the CLI arg. This bypasses OS ARG_MAX (~128KB on Linux). Temp file is deleted via `defer cleanup()` after `runner.Run()` returns. Never pass large prompts as positional args.
+- **Compression import cycle** — `agents` cannot import `config` (config→jira→agents creates a cycle). `CompressConfig` lives in `agents` package; `PromptCompressionConfig` lives in `config` package. `compressionConfigFromApp()` in `cmd/nightshift/commands/helpers.go` bridges them. Do not try to unify these structs.
+- **Compression uses CLI, not API** — `compressViaAgent()` calls the provider's `agent.Execute()`, which itself uses `writePromptFile()`. The compression meta-prompt+content goes through the same temp-file path. Never add direct HTTP/API calls to `compress.go`.
+- **`ValidateTicket` signature** — takes 4 args: `(ctx, agent, ticket, compression *agents.CompressConfig)`. Pass `nil` for compression when not needed (e.g. jira_preview.go).
