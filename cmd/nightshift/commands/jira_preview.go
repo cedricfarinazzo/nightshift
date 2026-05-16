@@ -52,6 +52,7 @@ type jiraPreviewResult struct {
 	ProviderBudgets []jiraPreviewProviderBudget `json:"provider_budgets,omitempty"`
 	SkippedTickets  []jiraPreviewSkipped        `json:"skipped_tickets,omitempty"`
 	Phases          []jiraPreviewPhase          `json:"phases"`
+	Compression     string                      `json:"compression,omitempty"`
 }
 
 type jiraPreviewOrderEntry struct {
@@ -165,6 +166,7 @@ func runJiraPreview(cmd *cobra.Command, _ []string) error {
 		GeneratedAt: time.Now(),
 		JiraProject: strings.Join(keys, ", "),
 		Phases:      buildPhases(),
+		Compression: compressionSummary(cfg),
 	}
 
 	// Connect to Jira.

@@ -131,6 +131,28 @@ func compressionConfigFromApp(cfg *config.Config) *agents.CompressConfig {
 	}
 }
 
+// compressionSummary returns a human-readable description of the compression config.
+// Returns empty string when compression is disabled.
+func compressionSummary(cfg *config.Config) string {
+	if cfg == nil || !cfg.PromptCompression.Enabled {
+		return ""
+	}
+	c := cfg.PromptCompression
+	threshold := c.Threshold
+	if threshold <= 0 {
+		threshold = 3000
+	}
+	model := c.Model
+	if model == "" {
+		model = "default"
+	}
+	s := fmt.Sprintf("enabled  provider=%s  model=%s  threshold=%d chars", c.Provider, model, threshold)
+	if c.ReasoningEffort != "" {
+		s += "  effort=" + c.ReasoningEffort
+	}
+	return s
+}
+
 // newBudgetManager builds a budget.Manager from config and an open database.
 func newBudgetManager(cfg *config.Config, _ *db.DB) *budget.Manager {
 	return budget.NewManagerWithTracking(cfg)

@@ -430,6 +430,7 @@ type preflightPlan struct {
 	skipReasons  []string // global skip reasons (e.g., no provider)
 	ignoreBudget bool
 	branch       string // base branch for feature branches
+	compression  string // human-readable compression config, empty when disabled
 }
 
 // buildPreflight performs the planning phase: resolve provider, select tasks
@@ -438,6 +439,7 @@ func buildPreflight(p executeRunParams) (*preflightPlan, error) {
 	plan := &preflightPlan{
 		ignoreBudget: p.ignoreBudget,
 		branch:       p.branch,
+		compression:  compressionSummary(p.cfg),
 	}
 
 	eligibleCount := 0
@@ -536,6 +538,9 @@ func displayPreflight(w io.Writer, plan *preflightPlan) {
 				pp.provider.name, pp.provider.allowance.HourlyCapacity*100, pp.provider.allowance.BottleneckUsedPct)
 			break
 		}
+	}
+	if plan.compression != "" {
+		_, _ = fmt.Fprintf(w, "Compression: %s\n", plan.compression)
 	}
 
 	// Count active projects (those with tasks)
