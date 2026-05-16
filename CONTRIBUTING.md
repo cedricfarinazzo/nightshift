@@ -1,32 +1,24 @@
 # Contributing
 
 ## Branching & PR workflow
-- Branch from feat/prompt-tempfile-compression:
-  git checkout feat/prompt-tempfile-compression && git pull --ff-only
-- Create feature branch:
-  git checkout -b feat/docs-backfill-nightshift
-- Push branch:
-  git push --set-upstream origin feat/docs-backfill-nightshift
-- Open PR targeting feat/prompt-tempfile-compression using the gh CLI (example below).
+- Base: feat/prompt-tempfile-compression (or repository default).
+- Create feature branch: git checkout -b feat/your-topic <base>
+- Keep commits focused; rebase before merge.
+- Open PR against base branch.
 
 ## Commit message format
-- Use Conventional Commits for subject, e.g. `docs: add CONTRIBUTING.md`
-- Include these git trailers in commit body (exact):
+- Format: type(scope): summary
+- Include trailers in body:
   Nightshift-Task: docs-backfill
   Nightshift-Ref: https://github.com/marcus/nightshift
-- Add Co-authored-by trailer when applicable:
-  Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>
+- Add Co-authored-by when applicable.
 
 ## Running tests & linters
-- Run Go tests: `make test` or `go test ./...`
-- Format: `gofmt -w .`
-- Vet: `go vet ./...`
+- Prefer Makefile targets:
+  make test
+  make lint
+- Or go test ./... (Go projects)
 
-## How to open a PR (gh)
-Create PR from local branch:
-```
-gh pr create --base feat/prompt-tempfile-compression --head feat/docs-backfill-nightshift \
-  --title "docs(backfill): add CONTRIBUTING.md" \
-  --body "Minimal docs backfill: CONTRIBUTING.md + README link. Nightshift task: docs-backfill."
-```
-
+## Creating a PR (gh)
+git push --set-upstream origin feat/docs-backfill-nightshift
+gh pr create --base feat/prompt-tempfile-compression --head feat/docs-backfill-nightshift --title "docs(backfill): add CONTRIBUTING.md" --body "Minimal docs backfill: CONTRIBUTING.md + README link. Nightshift task: docs-backfill."
