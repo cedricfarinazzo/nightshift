@@ -195,10 +195,6 @@ func (a *CopilotAgent) ExecuteWithFiles(ctx context.Context, prompt string, file
 	})
 }
 
-func (a *CopilotAgent) buildFileContext(files []string) (string, error) {
-	return buildFileContext(files)
-}
-
 func (a *CopilotAgent) extractJSON(output []byte) []byte {
 	return extractJSON(output)
 }
