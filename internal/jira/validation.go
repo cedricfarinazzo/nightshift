@@ -14,11 +14,12 @@ const validationTimeout = 2 * time.Minute
 
 // ValidationResult holds the outcome of LLM-based ticket quality evaluation.
 type ValidationResult struct {
-	Valid       bool     `json:"valid"`
-	Score       float64  `json:"score"`
-	Issues      []string `json:"issues"`
-	Missing     []string `json:"missing"`
-	Suggestions []string `json:"suggestions"`
+	Valid         bool                  `json:"valid"`
+	Score         float64               `json:"score"`
+	Issues        []string              `json:"issues"`
+	Missing       []string              `json:"missing"`
+	Suggestions   []string              `json:"suggestions"`
+	CompressStats *agents.CompressStats `json:"compress_stats,omitempty"`
 }
 
 // ValidateTicket uses an LLM agent to evaluate whether a ticket has enough
@@ -40,6 +41,7 @@ func ValidateTicket(ctx context.Context, agent agents.Agent, ticket Ticket, comp
 	if err != nil {
 		return nil, fmt.Errorf("jira: parse validation response for %s: %w\nraw output:\n%s", ticket.Key, err, result.Output)
 	}
+	vr.CompressStats = result.CompressStats
 	return vr, nil
 }
 

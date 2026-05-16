@@ -182,6 +182,11 @@ func (r *liveRenderer) HandleEvent(e orchestrator.Event) {
 		case "error":
 			fmt.Printf("  %s %s\n", r.styles.Error.Render("ERROR"), e.Message)
 		}
+
+	case orchestrator.EventCompression:
+		fmt.Printf("  %s %d→%d chars (-%d%%) via %s\n",
+			r.styles.Muted.Render("compress:"),
+			e.CompressOriginal, e.CompressResult, e.CompressPct, e.CompressProvider)
 	}
 }
 

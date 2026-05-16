@@ -32,11 +32,12 @@ type ExecuteOptions struct {
 
 // ExecuteResult holds the outcome of an agent execution.
 type ExecuteResult struct {
-	Output   string        // Agent's text output
-	JSON     []byte        // Structured JSON output if available
-	ExitCode int           // Process exit code
-	Duration time.Duration // Execution duration
-	Error    string        // Error message if failed
+	Output        string        // Agent's text output
+	JSON          []byte        // Structured JSON output if available
+	ExitCode      int           // Process exit code
+	Duration      time.Duration // Execution duration
+	Error         string        // Error message if failed
+	CompressStats *CompressStats // non-nil when prompt was compressed before execution
 }
 
 // IsSuccess returns true if the execution succeeded.

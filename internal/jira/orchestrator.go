@@ -409,6 +409,12 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 				return result, nil
 			}
 			o.savePhaseLog(ctx, ticket.Key, PhaseValidate, valCfg.Provider, valCfg.Model, validateStart, true, strings.Join(vr.Suggestions, "; "), "")
+			if s := vr.CompressStats; s != nil {
+				o.log.Infof("ticket %s: validate compress %d→%d chars (-%d%%) via %s", ticket.Key, s.OriginalLen, s.CompressedLen, s.ReductionPct, s.Provider)
+				if o.progressf != nil {
+					o.progressf("compress      %d→%d chars (-%d%%)", s.OriginalLen, s.CompressedLen, s.ReductionPct)
+				}
+			}
 			o.postPhaseComment(ctx, ticket.Key, CommentValidation,
 				buildValidationComment(vr), time.Since(start))
 			o.log.Infof("ticket %s validated (score %.1f/10)", ticket.Key, vr.Score)
@@ -465,6 +471,12 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 			return result, nil
 		}
 		o.savePhaseLog(ctx, ticket.Key, PhasePlan, planCfg.Provider, planCfg.Model, planStart, true, planResult.Output, "")
+		if s := planResult.CompressStats; s != nil {
+			o.log.Infof("ticket %s: plan compress %d→%d chars (-%d%%) via %s", ticket.Key, s.OriginalLen, s.CompressedLen, s.ReductionPct, s.Provider)
+			if o.progressf != nil {
+				o.progressf("compress      %d→%d chars (-%d%%)", s.OriginalLen, s.CompressedLen, s.ReductionPct)
+			}
+		}
 		result.Plan = planResult.Output
 		o.emit("📝 posting plan to Jira %s", ticket.Key)
 		o.postPhaseComment(ctx, ticket.Key, CommentPlan, planResult.Output, time.Since(planStart))
@@ -508,6 +520,12 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 			return result, nil
 		}
 		o.savePhaseLog(ctx, ticket.Key, PhaseImplement, implCfg.Provider, implCfg.Model, implStart, true, implResult.Output, "")
+		if s := implResult.CompressStats; s != nil {
+			o.log.Infof("ticket %s: implement compress %d→%d chars (-%d%%) via %s", ticket.Key, s.OriginalLen, s.CompressedLen, s.ReductionPct, s.Provider)
+			if o.progressf != nil {
+				o.progressf("compress      %d→%d chars (-%d%%)", s.OriginalLen, s.CompressedLen, s.ReductionPct)
+			}
+		}
 		result.ImplementationSummary = implResult.Output
 		o.emit("📝 posting implementation summary to Jira %s", ticket.Key)
 		o.postPhaseComment(ctx, ticket.Key, CommentImplement, implResult.Output, time.Since(implStart))

@@ -779,6 +779,7 @@ func executeRun(ctx context.Context, p executeRunParams) error {
 						OutputRef:  result.OutputRef,
 						TokensUsed: maxTok,
 						Duration:   result.Duration,
+						Notes:      compressionNotes(result.Logs),
 					})
 				}
 			case orchestrator.StatusAbandoned:
@@ -972,4 +973,22 @@ func ensurePATH() {
 		newPath := current + string(os.PathListSeparator) + strings.Join(added, string(os.PathListSeparator))
 		_ = os.Setenv("PATH", newPath)
 	}
+}
+
+// compressionNotes scans task logs for compression events and returns a summary string.
+func compressionNotes(logs []orchestrator.LogEntry) string {
+	var events []string
+	for _, l := range logs {
+		if l.Level != "info" {
+			continue
+		}
+		if orig, ok := l.Fields["compress_original"]; ok {
+			pct, _ := l.Fields["compress_pct"]
+			events = append(events, fmt.Sprintf("%v→%v chars (-%v%%)", orig, l.Fields["compress_result"], pct))
+		}
+	}
+	if len(events) == 0 {
+		return ""
+	}
+	return "compressed: " + strings.Join(events, ", ")
 }

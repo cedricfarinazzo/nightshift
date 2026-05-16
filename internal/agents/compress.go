@@ -26,25 +26,45 @@ Output only the compressed text, no explanation.
 TEXT:
 `
 
+// CompressStats holds metrics from a single compression call.
+type CompressStats struct {
+	OriginalLen   int
+	CompressedLen int
+	ReductionPct  int
+	Provider      string
+}
+
 // CompressPrompt compresses prompt via agent CLI if enabled and above threshold.
+// Returns the (possibly compressed) prompt and stats; stats is nil when no compression ran.
 // Always returns a usable prompt — falls back to original on any error.
-func CompressPrompt(ctx context.Context, cfg *CompressConfig, prompt string) string {
+func CompressPrompt(ctx context.Context, cfg *CompressConfig, prompt string) (string, *CompressStats) {
 	if cfg == nil || !cfg.Enabled {
-		return prompt
+		return prompt, nil
 	}
 	threshold := cfg.Threshold
 	if threshold <= 0 {
 		threshold = defaultCompressThreshold
 	}
 	if len(prompt) <= threshold {
-		return prompt
+		return prompt, nil
 	}
 
+	orig := len(prompt)
 	compressed, err := compressViaAgent(ctx, cfg, prompt)
 	if err != nil || compressed == "" {
-		return prompt
+		return prompt, nil
 	}
-	return compressed
+	cl := len(compressed)
+	pct := 0
+	if orig > 0 {
+		pct = 100 - (cl*100)/orig
+	}
+	return compressed, &CompressStats{
+		OriginalLen:   orig,
+		CompressedLen: cl,
+		ReductionPct:  pct,
+		Provider:      cfg.Provider,
+	}
 }
 
 // compressViaAgent spawns the configured provider CLI with a short timeout
@@ -83,41 +103,40 @@ func compressViaAgent(ctx context.Context, cfg *CompressConfig, prompt string) (
 }
 
 // writePromptFile writes the (optionally compressed) prompt and any file context
-// to a temp file. Returns the file path and a cleanup func. Caller must call cleanup.
-func writePromptFile(ctx context.Context, opts ExecuteOptions) (path string, cleanup func(), err error) {
-	prompt := CompressPrompt(ctx, opts.Compression, opts.Prompt)
+// to a temp file. Returns the file path, cleanup func, and compression stats (nil = no compression).
+func writePromptFile(ctx context.Context, opts ExecuteOptions) (path string, cleanup func(), stats *CompressStats, err error) {
+	prompt, stats := CompressPrompt(ctx, opts.Compression, opts.Prompt)
 
-	f, err := os.CreateTemp("", "nightshift-prompt-*.md")
-	if err != nil {
-		return "", func() {}, fmt.Errorf("create prompt file: %w", err)
+	f, ferr := os.CreateTemp("", "nightshift-prompt-*.md")
+	if ferr != nil {
+		return "", func() {}, nil, fmt.Errorf("create prompt file: %w", ferr)
 	}
 
-	_, err = f.WriteString(prompt)
-	if err != nil {
+	if _, ferr = f.WriteString(prompt); ferr != nil {
 		_ = f.Close()
 		_ = os.Remove(f.Name())
-		return "", func() {}, fmt.Errorf("write prompt: %w", err)
+		return "", func() {}, nil, fmt.Errorf("write prompt: %w", ferr)
 	}
 
 	if len(opts.Files) > 0 {
-		fileCtx, ferr := buildFileContext(opts.Files)
-		if ferr != nil {
+		fileCtx, ferr2 := buildFileContext(opts.Files)
+		if ferr2 != nil {
 			_ = f.Close()
 			_ = os.Remove(f.Name())
-			return "", func() {}, ferr
+			return "", func() {}, nil, ferr2
 		}
-		if _, err = fmt.Fprintf(f, "\n\n---\n\n%s", fileCtx); err != nil {
+		if _, ferr = fmt.Fprintf(f, "\n\n---\n\n%s", fileCtx); ferr != nil {
 			_ = f.Close()
 			_ = os.Remove(f.Name())
-			return "", func() {}, fmt.Errorf("write file context: %w", err)
+			return "", func() {}, nil, fmt.Errorf("write file context: %w", ferr)
 		}
 	}
 
-	if err = f.Close(); err != nil {
+	if ferr = f.Close(); ferr != nil {
 		_ = os.Remove(f.Name())
-		return "", func() {}, fmt.Errorf("close prompt file: %w", err)
+		return "", func() {}, nil, fmt.Errorf("close prompt file: %w", ferr)
 	}
 
 	name := f.Name()
-	return name, func() { _ = os.Remove(name) }, nil
+	return name, func() { _ = os.Remove(name) }, stats, nil
 }
