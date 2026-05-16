@@ -295,3 +295,7 @@ rm "$(which nightshift)"
 ## License
 
 MIT - see [LICENSE](LICENSE) for details.
+
+## Contributing
+
+See CONTRIBUTING.md for contribution guidelines, branch/PR workflow, commit message format, and how to run tests & linters.
