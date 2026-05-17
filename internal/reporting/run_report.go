@@ -74,42 +74,49 @@ func SaveRunReport(results *RunResults, path string, logPath string) error {
 	return nil
 }
 
+// costRowStrings returns the used/remaining/budget display strings for a single
+// cost snapshot. Both run reports and daily summaries share this formatting logic.
+func costRowStrings(s usage.CostSnapshot) (usedStr, remStr, budgetStr string) {
+	usedStr, remStr, budgetStr = "-", "-", "-"
+	switch s.Provider {
+	case "anthropic":
+		if s.Used != nil {
+			usedStr = fmt.Sprintf("$%.2f", *s.Used)
+		}
+		if s.Remaining != nil {
+			remStr = fmt.Sprintf("$%.2f", *s.Remaining)
+		}
+		if s.TotalBudget != nil {
+			budgetStr = fmt.Sprintf("$%.2f/mo", *s.TotalBudget)
+		}
+	case "codex":
+		if s.Remaining != nil {
+			remStr = fmt.Sprintf("$%.2f", *s.Remaining)
+		}
+		budgetStr = "credits"
+	case "copilot":
+		if s.OverageCount > 0 {
+			usedStr = fmt.Sprintf("%d overage", s.OverageCount)
+		} else {
+			usedStr = "0 overage"
+		}
+		if s.Remaining != nil {
+			remStr = fmt.Sprintf("%.0f left", *s.Remaining)
+		}
+		if s.TotalBudget != nil {
+			budgetStr = fmt.Sprintf("%.0f/mo", *s.TotalBudget)
+		}
+	}
+	return
+}
+
 // renderCostSection writes a markdown Cost Summary table to buf.
 func renderCostSection(buf *bytes.Buffer, snapshots []usage.CostSnapshot) {
 	buf.WriteString("## Cost Summary\n")
 	buf.WriteString("| Provider | Used | Remaining | Budget |\n")
 	buf.WriteString("|----------|------|-----------|--------|\n")
 	for _, s := range snapshots {
-		usedStr, remStr, budgetStr := "-", "-", "-"
-		switch s.Provider {
-		case "anthropic":
-			if s.Used != nil {
-				usedStr = fmt.Sprintf("$%.2f", *s.Used)
-			}
-			if s.Remaining != nil {
-				remStr = fmt.Sprintf("$%.2f", *s.Remaining)
-			}
-			if s.TotalBudget != nil {
-				budgetStr = fmt.Sprintf("$%.2f/mo", *s.TotalBudget)
-			}
-		case "codex":
-			if s.Remaining != nil {
-				remStr = fmt.Sprintf("$%.2f", *s.Remaining)
-			}
-			budgetStr = "credits"
-		case "copilot":
-			if s.OverageCount > 0 {
-				usedStr = fmt.Sprintf("%d overage", s.OverageCount)
-			} else {
-				usedStr = "0 overage"
-			}
-			if s.Remaining != nil {
-				remStr = fmt.Sprintf("%.0f left", *s.Remaining)
-			}
-			if s.TotalBudget != nil {
-				budgetStr = fmt.Sprintf("%.0f/mo", *s.TotalBudget)
-			}
-		}
+		usedStr, remStr, budgetStr := costRowStrings(s)
 		fmt.Fprintf(buf, "| %s | %s | %s | %s |\n", s.Provider, usedStr, remStr, budgetStr)
 	}
 	buf.WriteString("\n")
