@@ -1,0 +1,9 @@
+ M cmd/nightshift/commands/jira_run_test.go
+ M cmd/nightshift/commands/setup.go
+ M internal/agents/agent.go
+ M internal/agents/claude_test.go
+ M internal/config/config.go
+ M internal/jira/config_test.go
+ M internal/jira/validation_test.go
+ M internal/orchestrator/events.go
+?? artifacts/

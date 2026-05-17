@@ -243,8 +243,8 @@ func TestMergePhaseConfig_ReasoningEffort(t *testing.T) {
 
 func TestEffectivePhase_ReasoningEffort(t *testing.T) {
 	cfg := JiraConfig{
-		Site:  "x",
-		Email: "a@b",
+		Site:      "x",
+		Email:     "a@b",
 		Implement: PhaseConfig{Provider: "claude", Model: "claude-sonnet-4-6", ReasoningEffort: "high"},
 		Plan:      PhaseConfig{Provider: "claude", ReasoningEffort: "medium"},
 		Projects: []ProjectConfig{

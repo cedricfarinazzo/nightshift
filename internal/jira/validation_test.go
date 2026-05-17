@@ -26,7 +26,6 @@ func (s *stubAgent) Execute(_ context.Context, opts agents.ExecuteOptions) (*age
 	return &agents.ExecuteResult{Output: s.output}, nil
 }
 
-
 // ── parseValidationResponse ────────────────────────────────────────────────
 
 func TestParseValidationResponse(t *testing.T) {

@@ -35,7 +35,7 @@ type Config struct {
 // before being written to the temp file. Falls back to the original prompt on any error.
 type PromptCompressionConfig struct {
 	Enabled         bool   `mapstructure:"enabled"`
-	Provider        string `mapstructure:"provider"`         // "claude", "codex", or "copilot"
+	Provider        string `mapstructure:"provider"` // "claude", "codex", or "copilot"
 	Model           string `mapstructure:"model"`
 	ReasoningEffort string `mapstructure:"reasoning_effort"`
 	Threshold       int    `mapstructure:"threshold"` // min chars to trigger compression; default 3000

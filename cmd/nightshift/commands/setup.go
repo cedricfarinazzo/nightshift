@@ -260,38 +260,38 @@ type setupModel struct {
 	daemonAction string
 
 	// Jira step state
-	jiraSubStep       int
-	jiraInput         textinput.Model
-	jiraEnableCursor  int
-	jiraEnabled       bool
-	jiraSite          string
-	jiraEmail         string
-	jiraTokenEnv      string
-	jiraMaxTickets    int
-	jiraRepos         []jiraRepoEntry
-	jiraRepoCursor    int
-	jiraRepoEditing   bool
-	jiraRepoField     int
-	jiraRepoEditURL   string
+	jiraSubStep        int
+	jiraInput          textinput.Model
+	jiraEnableCursor   int
+	jiraEnabled        bool
+	jiraSite           string
+	jiraEmail          string
+	jiraTokenEnv       string
+	jiraMaxTickets     int
+	jiraRepos          []jiraRepoEntry
+	jiraRepoCursor     int
+	jiraRepoEditing    bool
+	jiraRepoField      int
+	jiraRepoEditURL    string
 	jiraPhaseCursor    int
 	jiraPhaseModelIdx  [4]int
 	jiraPhaseProvider  [4]string // provider per phase: claude, codex, or copilot
 	jiraPhaseEffortIdx [4]int    // effort index per phase, into provider-specific effort slice
-	jiraPinging       bool
-	jiraPingOK        bool
-	jiraPingErr       string
-	jiraErr           string
+	jiraPinging        bool
+	jiraPingOK         bool
+	jiraPingErr        string
+	jiraErr            string
 
 	// Multi-project Jira state
-	jiraProjects            []jiraProjectEntry
-	jiraProjectCursor       int
-	jiraProjectEditMode     bool
-	jiraProjectEditSubStep  int // 0=key, 1=label, 2=repos
-	jiraEditProjectKey      string
-	jiraEditProjectLabel    string
+	jiraProjects           []jiraProjectEntry
+	jiraProjectCursor      int
+	jiraProjectEditMode    bool
+	jiraProjectEditSubStep int // 0=key, 1=label, 2=repos
+	jiraEditProjectKey     string
+	jiraEditProjectLabel   string
 
 	// Prompt compression step state
-	compressionCursor    int    // 0=enable toggle, 1=provider, 2=model, 3=effort
+	compressionCursor    int // 0=enable toggle, 1=provider, 2=model, 3=effort
 	compressionEnabled   bool
 	compressionProvider  string // "claude" or "codex"
 	compressionModelIdx  int
@@ -430,33 +430,33 @@ func newSetupModel() (*setupModel, error) {
 	}
 
 	model := &setupModel{
-		step:              stepWelcome,
-		cfg:               cfg,
-		configPath:        configPath,
-		configExist:       configExist,
-		includePathStep:   includePathStep,
-		projects:          projects,
-		projectInput:      projectInput,
-		budgetInput:       budgetInput,
-		taskItems:         taskItems,
-		preset:            preset,
-		scheduleMode:      "interval",
-		scheduleStart:     "22:00",
-		scheduleCycles:    3,
-		scheduleInterval:  "30m",
-		scheduleCron:      "0 2 * * *",
-		scheduleInput:     scheduleInput,
-		spinner:           spin,
-		nightshiftInPath:  nightshiftInPath,
-		modelsLoading:     pendingFetches,
-		claudeModelIdx:    modelIndex(claudeModels, cfg.Providers.Claude.Model),
-		codexModelIdx:     modelIndex(codexModels, cfg.Providers.Codex.Model),
-		copilotModelIdx:   modelIndex(copilotModels, cfg.Providers.Copilot.Model),
-		claudeEffortIdx:   effortIndex(claudeEfforts, cfg.Providers.Claude.ReasoningEffort),
-		codexEffortIdx:    effortIndex(codexEfforts, cfg.Providers.Codex.ReasoningEffort),
-		copilotEffortIdx:  effortIndex(copilotEfforts, cfg.Providers.Copilot.ReasoningEffort),
-		compressionEnabled:   cfg.PromptCompression.Enabled,
-		compressionProvider:  func() string {
+		step:               stepWelcome,
+		cfg:                cfg,
+		configPath:         configPath,
+		configExist:        configExist,
+		includePathStep:    includePathStep,
+		projects:           projects,
+		projectInput:       projectInput,
+		budgetInput:        budgetInput,
+		taskItems:          taskItems,
+		preset:             preset,
+		scheduleMode:       "interval",
+		scheduleStart:      "22:00",
+		scheduleCycles:     3,
+		scheduleInterval:   "30m",
+		scheduleCron:       "0 2 * * *",
+		scheduleInput:      scheduleInput,
+		spinner:            spin,
+		nightshiftInPath:   nightshiftInPath,
+		modelsLoading:      pendingFetches,
+		claudeModelIdx:     modelIndex(claudeModels, cfg.Providers.Claude.Model),
+		codexModelIdx:      modelIndex(codexModels, cfg.Providers.Codex.Model),
+		copilotModelIdx:    modelIndex(copilotModels, cfg.Providers.Copilot.Model),
+		claudeEffortIdx:    effortIndex(claudeEfforts, cfg.Providers.Claude.ReasoningEffort),
+		codexEffortIdx:     effortIndex(codexEfforts, cfg.Providers.Codex.ReasoningEffort),
+		copilotEffortIdx:   effortIndex(copilotEfforts, cfg.Providers.Copilot.ReasoningEffort),
+		compressionEnabled: cfg.PromptCompression.Enabled,
+		compressionProvider: func() string {
 			if cfg.PromptCompression.Provider != "" {
 				return cfg.PromptCompression.Provider
 			}
@@ -464,9 +464,9 @@ func newSetupModel() (*setupModel, error) {
 		}(),
 		compressionModelIdx:  0,
 		compressionEffortIdx: 0,
-		jiraInput:         jiraInput,
-		jiraTokenEnv:      "JIRA_API_TOKEN",
-		systemdInput:      systemdInput,
+		jiraInput:            jiraInput,
+		jiraTokenEnv:         "JIRA_API_TOKEN",
+		systemdInput:         systemdInput,
 		systemdOnCalendar: func() string {
 			if cfg.Jira.SystemdOnCalendar != "" {
 				return cfg.Jira.SystemdOnCalendar

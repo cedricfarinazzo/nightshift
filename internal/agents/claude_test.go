@@ -19,12 +19,12 @@ type MockRunner struct {
 	Delay    time.Duration // Simulate slow command
 
 	// Captured values
-	CapturedName            string
-	CapturedArgs            []string
-	CapturedDir             string
-	CapturedStdin           string
-	CapturedPromptFile      string // path extracted from directive arg
-	CapturedPromptFileData  string // content of the prompt temp file (read during Run)
+	CapturedName           string
+	CapturedArgs           []string
+	CapturedDir            string
+	CapturedStdin          string
+	CapturedPromptFile     string // path extracted from directive arg
+	CapturedPromptFileData string // content of the prompt temp file (read during Run)
 }
 
 const promptFileDirectivePrefix = "Read and follow the task instructions in file: "
@@ -709,11 +709,11 @@ func TestClaudeAgent_Execute_ModelFromOptions(t *testing.T) {
 
 func TestClaudeAgent_Effort(t *testing.T) {
 	tests := []struct {
-		name         string
-		agentEffort  string
-		optsEffort   string
-		wantEffort   string
-		wantFlag     bool
+		name        string
+		agentEffort string
+		optsEffort  string
+		wantEffort  string
+		wantFlag    bool
 	}{
 		{"agent default used", "high", "", "high", true},
 		{"opts override agent default", "high", "max", "max", true},

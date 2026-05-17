@@ -1,0 +1,17 @@
+total 56
+drwxrwxr-x  2 sed sed 4096 May 17 09:34 .
+drwxrwxr-x 12 sed sed 4096 May 17 09:33 ..
+-rw-rw-r--  1 sed sed    0 May 17 09:34 artifacts_list.txt
+-rw-rw-r--  1 sed sed   51 May 17 09:33 git_checkout_new.txt
+-rw-rw-r--  1 sed sed 2941 May 17 09:34 golangci-lint.json
+-rw-rw-r--  1 sed sed  969 May 17 09:34 go_list.txt
+-rw-rw-r--  1 sed sed   16 May 17 09:34 go_test_exit.txt
+-rw-rw-r--  1 sed sed 1271 May 17 09:34 go_test.txt
+-rw-rw-r--  1 sed sed   32 May 17 09:33 go_version.txt
+-rw-rw-r--  1 sed sed    0 May 17 09:33 go_vet.txt
+-rw-rw-r--  1 sed sed   30 May 17 09:33 make_test.txt
+-rw-rw-r--  1 sed sed   19 May 17 09:33 original_branch.txt
+-rw-rw-r--  1 sed sed   41 May 17 09:33 original_sha.txt
+-rw-rw-r--  1 sed sed  288 May 17 09:33 original_status.txt
+-rw-rw-r--  1 sed sed    5 May 17 09:34 run_complete.txt
+-rw-rw-r--  1 sed sed   22 May 17 09:34 staticcheck.txt
