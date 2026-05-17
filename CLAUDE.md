@@ -72,6 +72,8 @@ internal/
     compress.go         # CompressConfig struct; CompressPrompt() threshold check + fallback;
                         # compressViaAgent() calls configured provider CLI (claude/codex/copilot) with
                         # caveman meta-prompt; writePromptFile() creates temp file, appends file context
+    util.go             # handleExecuteResult(): shared post-run logic for all three agents (exit code
+                        # mapping, timeout detection, JSON extraction, CompressStats propagation)
 
   analysis/             # Bus-factor / code ownership analysis
     analyzer.go         # GitParser: extracts commit authors from git history
@@ -91,7 +93,8 @@ internal/
   db/                   # SQLite persistence layer — all SQL lives here, nowhere else
     db.go               # DB struct; DefaultPath = ~/.local/share/nightshift/nightshift.db;
                         # Open() applies pragmas + auto-runs migrations
-    migrations.go       # Versioned schema migrations; auto-applied on Open()
+    migrations.go       # Versioned schema migrations (001–009); auto-applied on Open();
+                        # migration009 adds UNIQUE index on jira_ticket_results(run_id, ticket_key)
     import.go           # Bulk data import utilities
 
   jira/                 # Jira autonomous system — drives ticket lifecycle via AI agents
@@ -114,29 +117,25 @@ internal/
     feedback.go         # ProcessFeedback, buildReworkPrompt, filterNewComments; idempotency filter
                         # by lastReworkAt — skips review comments posted before the last CommentRework
 
-  integrations/         # Readers for external config and task sources
-    integrations.go     # Reader interface + Result/TaskItem/Hint types
-    claudemd.go         # ClaudeMDReader: reads CLAUDE.md from project root; enabled via cfg.Integrations.ClaudeMD
-    agentsmd.go         # AgentsMDReader: reads AGENTS.md from project root (legacy); returns nil if file absent
-    td.go               # TDReader: integrates with `td` CLI for task sourcing; enabled via config
-    github.go           # GitHub integration reader
-
   logging/              # zerolog setup
     logging.go          # Logger init; log files → ~/.local/share/nightshift/logs/nightshift-YYYY-MM-DD.log
 
   orchestrator/         # Coordinates agent execution (plan-implement-review loop)
     orchestrator.go     # Orchestrator: task lifecycle; statuses: pending→planning→executing→reviewing
-                        # →completed/failed/abandoned; DefaultMaxIterations=3
+                        # →completed/failed/abandoned; DefaultMaxIterations=3;
+                        # RunTask() validates workDir via gitValidator (blocks non-git dirs and $HOME);
+                        # saves current branch before task and restores via defer checkoutBranch();
+                        # gitValidator field is injectable for tests (WithGitValidator option);
+                        # prompts split: compressible Prompt (task data) + protected PromptSuffix (instructions/schema)
     events.go           # Event types emitted during orchestration (consumed by TUI and logging)
 
   projects/             # Project discovery and management
     projects.go         # Scans configured paths; returns ProjectConfig list
 
-  providers/            # AI provider API backends (distinct from agents: providers track usage/cost)
-    provider.go         # Provider interface: Name(), Execute(), Cost() (inputCents, outputCents per 1K tokens)
-    claude.go           # Claude provider: usage/cost tracking via Anthropic API
-    codex.go            # Codex provider: usage/cost tracking via OpenAI API
-    copilot.go          # Copilot provider: usage/cost tracking
+  providers/            # AI provider usage/quota tracking (distinct from agents/ which spawns binaries)
+    claude.go           # Claude provider: token usage tracking via Anthropic API
+    codex.go            # Codex provider: usage tracking via OpenAI API
+    copilot.go          # Copilot provider: request-count tracking (monthly, no API exposure)
 
   reporting/            # Report generation
     run_report.go       # Per-run report → ~/.local/share/nightshift/reports/run-YYYY-MM-DD-HHMMSS.md
@@ -144,7 +143,8 @@ internal/
     summary.go          # Daily summary → ~/.local/share/nightshift/summaries/summary-YYYY-MM-DD.md
 
   scheduler/            # Cron-based scheduling
-    scheduler.go        # Wraps robfig/cron; reads schedule config; triggers runs
+    scheduler.go        # Wraps robfig/cron with SkipIfStillRunning middleware (prevents concurrent fires);
+                        # reads schedule config; triggers runs
 
   security/             # Credential management — env vars only, never config files
     credentials.go      # CredentialManager: validates ANTHROPIC_API_KEY, OPENAI_API_KEY;
@@ -166,15 +166,12 @@ internal/
   stats/                # Performance metrics
     stats.go            # Aggregates historical run data for display
 
-  tasks/                # Task registry and queue
+  tasks/                # Task registry and selector
     tasks.go            # TaskDefinition: Type, Category, Name, Description,
                         # CostTier (Low/Medium/High/VeryHigh), RiskLevel, Interval;
                         # 6 categories: PR, Analysis, Options, Safe, Map, Emergency
     register.go         # RegisterCustomTasksFromConfig(): config → TaskDefinition; rolls back on failure
     selector.go         # Task selection logic (budget-aware, staleness-aware)
-
-  trends/               # Historical trend analysis
-    analyzer.go         # Analyzes run history for trends and anomalies
 
 docs/                   # Internal developer docs (NOT user-facing)
   guides/
@@ -225,8 +222,7 @@ SECURITY_AUDIT.md       # Security findings
 
 ## Critical Integrations (Claude / Codex / Copilot)
 
-- **CLAUDE.md** (this file) is read at runtime by `internal/integrations/claudemd.go` and injected as context into agent prompts. Keep it accurate and up to date.
-- **AGENTS.md** legacy reader (`internal/integrations/agentsmd.go`) gracefully returns nil when the file is absent — no code change needed after removal.
+- **CLAUDE.md** (this file) is injected as context into agent prompts via the `Hint` mechanism in `cmd/nightshift/commands/daemon.go`. Keep it accurate and up to date.
 - **Authentication** — credentials from env vars only:
   - `ANTHROPIC_API_KEY` — Claude
   - `OPENAI_API_KEY` — Codex
@@ -331,7 +327,7 @@ Agents MUST follow these rules:
 - `modernc.org/sqlite` is pure Go — no CGO needed. Do not switch to `mattn/go-sqlite3`.
 - Agent binaries (`claude`, `codex`, `gh`) must be in PATH. Always use the `CommandRunner` interface for testability; never call `exec.Command` directly in agent code.
 - Credentials are **env-var only** — `CredentialManager` never reads from config files or disk.
-- `internal/integrations/agentsmd.go` still exists and looks for `AGENTS.md` at runtime. It returns `nil` if the file is absent — this is intentional and not an error.
+- `internal/integrations/` package does **not exist** — it was removed. Do not re-create it. CLAUDE.md context is passed via Hints in `cmd/nightshift/commands/daemon.go`.
 - `internal/logging.Logger` does NOT use zerolog's chainable API (`.Error().Str().Msg()`). Use `log.Infof(format, args...)` / `log.Errorf(format, args...)` directly. The zerolog chain is internal.
 - `internal/jira.Orchestrator` stores `jiraClient` as an interface (not `*Client`) for testability. `*Client` satisfies the interface implicitly. The `log` field is lazily initialized inside `ProcessTicket` when nil — safe to omit in tests.
 - `NIGHTSHIFT_JIRA_TOKEN` must be set for all e2e tests in `internal/jira/e2e_test.go`. Tests skip automatically when it is absent.
@@ -352,3 +348,10 @@ Agents MUST follow these rules:
 - **Compression import cycle** — `agents` cannot import `config` (config→jira→agents creates a cycle). `CompressConfig` lives in `agents` package; `PromptCompressionConfig` lives in `config` package. `compressionConfigFromApp()` in `cmd/nightshift/commands/helpers.go` bridges them. Do not try to unify these structs.
 - **Compression uses CLI, not API** — `compressViaAgent()` calls the provider's `agent.Execute()`, which itself uses `writePromptFile()`. The compression meta-prompt+content goes through the same temp-file path. Never add direct HTTP/API calls to `compress.go`.
 - **`ValidateTicket` signature** — takes 4 args: `(ctx, agent, ticket, compression *agents.CompressConfig)`. Pass `nil` for compression when not needed (e.g. jira_preview.go).
+- **workDir git validation** — `orchestrator.RunTask()` calls `validateGitRepo(ctx, workDir)` before executing any task. Refuses to run if workDir is not inside a git repo, or if the repo root is `$HOME`. Prevents agents from running `git init` in unintended locations. Injectable via `WithGitValidator()` for tests.
+- **Branch save/restore in RunTask()** — `RunTask()` calls `CurrentBranch()` before executing and uses `defer checkoutBranch()` to restore it on exit (regardless of outcome). Prevents stacked branches when multiple tasks run sequentially. If `CurrentBranch` fails or returns "HEAD" (detached), no restore is attempted.
+- **Prompt split: compressible vs protected** — `ExecuteOptions.Prompt` is the compressible payload (task data only). `PromptPrefix` and `PromptSuffix` are never compressed. All critical instructions (output format, JSON schemas, behavioral rules) MUST go in `PromptSuffix`, not `Prompt`. Putting instructions in `Prompt` risks them being stripped by the compression agent.
+- **PID file is atomic** — `writePidFile()` uses `O_CREATE|O_EXCL` so only one daemon can start even under a race. If a stale PID file exists (process gone), it is removed and retried. Never use `O_TRUNC` for PID files.
+- **SkipIfStillRunning on cron** — `scheduler.go` wraps the cron instance with `cron.SkipIfStillRunning(cron.DiscardLogger)`. If a scheduled run exceeds its interval, the next fire is silently skipped rather than overlapping. This prevents unbounded goroutine growth on slow runs.
+- **`internal/providers` has no Execute/Name/Cost** — the `Provider` interface and its stubs were removed. `providers/` only tracks quota/usage (token counts, request counts). Do not add `Execute()` back; agent invocation belongs in `internal/agents/`.
+- **`handleExecuteResult` in util.go** — all three agents (claude, codex, copilot) share `handleExecuteResult()` for post-run logic. When adding a new agent, use this helper instead of duplicating exit-code/timeout/JSON-extraction logic.

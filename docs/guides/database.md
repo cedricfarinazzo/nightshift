@@ -38,7 +38,7 @@ Always use `db.Open()` — never `sql.Open("sqlite", ...)` directly.
 
 ## Schema
 
-Current schema (migration 005):
+Current schema (migration 009):
 
 ```sql
 -- Projects scanned by nightshift
@@ -99,6 +99,22 @@ CREATE TABLE bus_factor_results (
 );
 
 CREATE INDEX idx_bus_factor_component_time ON bus_factor_results(component, timestamp DESC);
+
+-- Jira ticket processing results (added migration 007+)
+CREATE TABLE jira_ticket_results (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id       TEXT NOT NULL,
+    ticket_key   TEXT NOT NULL,
+    status       TEXT NOT NULL,
+    phase        TEXT,
+    pr_url       TEXT,
+    error        TEXT,
+    created_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- migration009: prevents duplicate rows when a ticket is retried in the same run
+CREATE UNIQUE INDEX IF NOT EXISTS idx_jira_ticket_results_run_key
+    ON jira_ticket_results(run_id, ticket_key);
 ```
 
 ---
