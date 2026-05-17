@@ -196,6 +196,8 @@ curl -fsSL https://gh.io/copilot-install | bash
 
 Requires GitHub Copilot subscription.
 
+For non-interactive/daemon usage ensure the GitHub CLI is authenticated (`gh auth login`) and the account or machine token has a Copilot subscription. Nightshift uses the `gh` credential store for Copilot operations; verify with `gh auth status`. For CI or headless runs, provide an authenticated machine user or set a `GH_TOKEN` with appropriate scopes. Nightshift does not store secrets in config files.
+
 If you prefer API-based usage, you can authenticate Claude and Codex CLIs with API keys instead.
 
 ## Configuration
@@ -211,7 +213,19 @@ Nightshift uses YAML config files to define:
 
 Run `nightshift setup` to create/update the global config at `~/.config/nightshift/config.yaml`.
 
+Local data & DB paths
+
+Nightshift stores runtime data under `~/.local/share/nightshift`:
+
+- Database: `~/.local/share/nightshift/nightshift.db`
+- Reports: `~/.local/share/nightshift/reports/`
+- Logs: `~/.local/share/nightshift/logs/`
+
 See the [full configuration docs](https://nightshift.haplab.com/docs/configuration) for detailed options.
+
+Website publishing
+
+If these docs are copied into the Docusaurus website (`website/docs/`), add Docusaurus frontmatter at the top of each file (example: `---\ntitle: CLI Reference\nsidebar_position: 8\n---`). The website/ files already include frontmatter where required.
 
 Minimal example:
 

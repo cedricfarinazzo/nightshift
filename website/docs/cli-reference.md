@@ -3,6 +3,8 @@ sidebar_position: 8
 title: CLI Reference
 ---
 
+<!-- This file is intended for Docusaurus; keep the frontmatter at the top. -->
+
 # CLI Reference
 
 ## Core Commands

@@ -6,6 +6,10 @@ Nightshift is a CLI tool that orchestrates AI coding agents (Claude Code, Codex,
 
 Repo: https://github.com/cedricfarinazzo/nightshift
 
+Docs: https://nightshift.haplab.com/docs/intro · website/docs/
+
+Runtime data: ~/.local/share/nightshift (database, reports, logs)
+
 ---
 
 ## Stack
