@@ -500,7 +500,7 @@ func (o *Orchestrator) plan(ctx context.Context, task *tasks.Task, workDir strin
 	execResult, err := o.agent.Execute(ctx, agents.ExecuteOptions{
 		Prompt:       o.buildPlanContent(task),
 		PromptPrefix: "You are a planning agent. Create a detailed execution plan for this task.\n\n",
-		PromptSuffix: taskPlanOutputSuffix,
+		PromptSuffix: o.buildPlanInstructions(task) + taskPlanOutputSuffix,
 		WorkDir:      workDir,
 		Timeout:      o.config.AgentTimeout,
 		Compression:  o.config.Compression,
@@ -561,7 +561,7 @@ func (o *Orchestrator) implement(ctx context.Context, task *tasks.Task, plan *Pl
 	execResult, err := o.agent.Execute(ctx, agents.ExecuteOptions{
 		Prompt:       o.buildImplementContent(task, plan, iteration, workDir),
 		PromptPrefix: "You are an implementation agent. Execute the plan for this task.\n\n",
-		PromptSuffix: taskImplementOutputSuffix,
+		PromptSuffix: o.buildImplementInstructions(task, workDir) + taskImplementOutputSuffix,
 		WorkDir:      workDir,
 		Files:        files,
 		Timeout:      o.config.AgentTimeout,
@@ -676,7 +676,7 @@ func (o *Orchestrator) review(ctx context.Context, task *tasks.Task, impl *Imple
 	execResult, err := o.agent.Execute(ctx, agents.ExecuteOptions{
 		Prompt:       o.buildReviewContent(task, impl),
 		PromptPrefix: "You are a code review agent. Review this implementation.\n\n",
-		PromptSuffix: taskReviewOutputSuffix,
+		PromptSuffix: taskReviewInstructionsSuffix + taskReviewOutputSuffix,
 		WorkDir:      workDir,
 		Files:        files,
 		Timeout:      o.config.AgentTimeout,
@@ -787,20 +787,23 @@ const taskPlanOutputSuffix = `
 `
 
 func (o *Orchestrator) buildPlanPrompt(task *tasks.Task) string {
-	return o.buildPlanContent(task) + taskPlanOutputSuffix
+	return o.buildPlanContent(task) + o.buildPlanInstructions(task) + taskPlanOutputSuffix
 }
 
+// buildPlanContent returns only the compressible task data.
+// ## Instructions is in buildPlanInstructions — never passes through the compressor.
 func (o *Orchestrator) buildPlanContent(task *tasks.Task) string {
+	return fmt.Sprintf("## Task\nID: %s\nTitle: %s\nDescription: %s\n", task.ID, task.Title, task.Description)
+}
+
+// buildPlanInstructions returns critical operational instructions for the plan phase.
+// Delivered via PromptSuffix so the compressor cannot strip git/branch directives.
+func (o *Orchestrator) buildPlanInstructions(task *tasks.Task) string {
 	branchInstruction := ""
 	if o.runMeta != nil && o.runMeta.Branch != "" {
 		branchInstruction = fmt.Sprintf("\n   Create your feature branch from `%s`.", o.runMeta.Branch)
 	}
-
-	return fmt.Sprintf(`## Task
-ID: %s
-Title: %s
-Description: %s
-
+	return fmt.Sprintf(`
 ## Instructions
 0. You are running autonomously. If the task is broad or ambiguous, choose a concrete, minimal scope that delivers value and state any assumptions in the description.
 1. Work on a new branch and plan to submit a PR. Never work directly on the primary branch.%s
@@ -810,7 +813,7 @@ Description: %s
    Nightshift-Ref: https://github.com/marcus/nightshift
 4. Analyze the task requirements
 5. Identify files that need to be modified
-6. Create step-by-step implementation plan`, task.ID, task.Title, task.Description, branchInstruction, task.Type)
+6. Create step-by-step implementation plan`, branchInstruction, task.Type)
 }
 
 // taskImplementOutputSuffix is the JSON schema for implement output — protected
@@ -825,23 +828,15 @@ const taskImplementOutputSuffix = `
 `
 
 func (o *Orchestrator) buildImplementPrompt(task *tasks.Task, plan *PlanOutput, iteration int, workDir string) string {
-	return o.buildImplementContent(task, plan, iteration, workDir) + taskImplementOutputSuffix
+	return o.buildImplementContent(task, plan, iteration, workDir) + o.buildImplementInstructions(task, workDir) + taskImplementOutputSuffix
 }
 
+// buildImplementContent returns only the compressible task + plan data.
+// ## Instructions is in buildImplementInstructions — never passes through the compressor.
 func (o *Orchestrator) buildImplementContent(task *tasks.Task, plan *PlanOutput, iteration int, workDir string) string {
 	iterationNote := ""
 	if iteration > 1 {
 		iterationNote = fmt.Sprintf("\n\n## Note\nThis is iteration %d. Previous attempts did not pass review. Pay attention to the feedback in the plan description.", iteration)
-	}
-
-	branchInstruction := ""
-	if o.runMeta != nil && o.runMeta.Branch != "" {
-		branchInstruction = fmt.Sprintf("\n   Checkout `%s` before creating your feature branch.", o.runMeta.Branch)
-	}
-
-	workDirNote := ""
-	if workDir != "" {
-		workDirNote = fmt.Sprintf("\n   Your working directory is `%s`. Do not navigate outside it. Never run `git init`.", workDir)
 	}
 
 	return fmt.Sprintf(`## Task
@@ -854,7 +849,21 @@ Description: %s
 
 ## Steps
 %v
-%s
+%s`, task.ID, task.Title, task.Description, plan.Description, plan.Steps, iterationNote)
+}
+
+// buildImplementInstructions returns critical operational instructions for the implement phase.
+// Delivered via PromptSuffix so the compressor cannot strip git/branch/workdir directives.
+func (o *Orchestrator) buildImplementInstructions(task *tasks.Task, workDir string) string {
+	branchInstruction := ""
+	if o.runMeta != nil && o.runMeta.Branch != "" {
+		branchInstruction = fmt.Sprintf("\n   Checkout `%s` before creating your feature branch.", o.runMeta.Branch)
+	}
+	workDirNote := ""
+	if workDir != "" {
+		workDirNote = fmt.Sprintf("\n   Your working directory is `%s`. Do not navigate outside it. Never run `git init`.", workDir)
+	}
+	return fmt.Sprintf(`
 ## Instructions
 0. Before creating your branch, record the current branch name. Create and work on a new branch. Never modify or commit directly to the primary branch.%s%s
    When finished, open a PR. After the PR is submitted, switch back to the original branch. If you cannot open a PR, leave the branch and explain next steps.
@@ -863,8 +872,17 @@ Description: %s
    Nightshift-Ref: https://github.com/marcus/nightshift
 2. Implement the plan step by step
 3. Make all necessary code changes
-4. Ensure tests pass`, task.ID, task.Title, task.Description, plan.Description, plan.Steps, iterationNote, branchInstruction, workDirNote, task.Type)
+4. Ensure tests pass`, branchInstruction, workDirNote, task.Type)
 }
+
+// taskReviewInstructionsSuffix is the review criteria — protected from compression
+// via PromptSuffix so the checklist is never mangled.
+const taskReviewInstructionsSuffix = `
+## Instructions
+1. Confirm work was done on a branch (not primary) and is ready for a PR
+2. Check if implementation meets task requirements
+3. Verify code quality and correctness
+4. Check for bugs or issues`
 
 // taskReviewOutputSuffix is the JSON schema for review output — protected from
 // compression via PromptSuffix.
@@ -881,9 +899,11 @@ Set "passed" to true ONLY if the implementation is correct and complete.
 `
 
 func (o *Orchestrator) buildReviewPrompt(task *tasks.Task, impl *ImplementOutput) string {
-	return o.buildReviewContent(task, impl) + taskReviewOutputSuffix
+	return o.buildReviewContent(task, impl) + taskReviewInstructionsSuffix + taskReviewOutputSuffix
 }
 
+// buildReviewContent returns only the compressible implementation data.
+// ## Instructions is in taskReviewInstructionsSuffix — never passes through the compressor.
 func (o *Orchestrator) buildReviewContent(task *tasks.Task, impl *ImplementOutput) string {
 	return fmt.Sprintf(`## Task
 ID: %s
@@ -894,13 +914,7 @@ Description: %s
 %s
 
 ## Files Modified
-%v
-
-## Instructions
-1. Confirm work was done on a branch (not primary) and is ready for a PR
-2. Check if implementation meets task requirements
-3. Verify code quality and correctness
-4. Check for bugs or issues`, task.ID, task.Title, task.Description, impl.Summary, impl.FilesModified)
+%v`, task.ID, task.Title, task.Description, impl.Summary, impl.FilesModified)
 }
 
 // prURLPattern matches standard GitHub pull request URLs.
