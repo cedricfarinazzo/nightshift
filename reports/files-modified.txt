@@ -1,0 +1,3 @@
+.github/workflows/security-scan.yml
+README.md
+reports/security-footgun-summary.md

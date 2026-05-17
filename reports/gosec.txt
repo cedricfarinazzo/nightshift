@@ -1,0 +1,834 @@
+[gosec] 2026/05/17 09:53:11 Including rules: default
+[gosec] 2026/05/17 09:53:11 Excluding rules: default
+[gosec] 2026/05/17 09:53:11 Including analyzers: default
+[gosec] 2026/05/17 09:53:11 Excluding analyzers: default
+[gosec] 2026/05/17 09:53:11 Import directory: /home/sed/doc/github/nightshift/internal/setup
+[gosec] 2026/05/17 09:53:11 Import directory: /home/sed/doc/github/nightshift/internal/state
+[gosec] 2026/05/17 09:53:11 Import directory: /home/sed/doc/github/nightshift/internal/stats
+[gosec] 2026/05/17 09:53:11 Import directory: /home/sed/doc/github/nightshift/internal/tasks
+[gosec] 2026/05/17 09:53:11 Import directory: /home/sed/doc/github/nightshift/internal/agents
+[gosec] 2026/05/17 09:53:11 Import directory: /home/sed/doc/github/nightshift/internal/config
+[gosec] 2026/05/17 09:53:11 Import directory: /home/sed/doc/github/nightshift/internal/db
+[gosec] 2026/05/17 09:53:11 Import directory: /home/sed/doc/github/nightshift/internal/logging
+[gosec] 2026/05/17 09:53:12 Checking package: logging
+[gosec] 2026/05/17 09:53:12 Checking file: /home/sed/doc/github/nightshift/internal/logging/logging.go
+[gosec] 2026/05/17 09:53:12 Import directory: /home/sed/doc/github/nightshift/internal/projects
+[gosec] 2026/05/17 09:53:12 Checking package: agents
+[gosec] 2026/05/17 09:53:12 Checking file: /home/sed/doc/github/nightshift/internal/agents/agent.go
+[gosec] 2026/05/17 09:53:12 Checking file: /home/sed/doc/github/nightshift/internal/agents/claude.go
+[gosec] 2026/05/17 09:53:12 Checking file: /home/sed/doc/github/nightshift/internal/agents/codex.go
+[gosec] 2026/05/17 09:53:12 Checking file: /home/sed/doc/github/nightshift/internal/agents/compress.go
+[gosec] 2026/05/17 09:53:12 Checking file: /home/sed/doc/github/nightshift/internal/agents/copilot.go
+[gosec] 2026/05/17 09:53:12 Checking file: /home/sed/doc/github/nightshift/internal/agents/util.go
+[gosec] 2026/05/17 09:53:12 Checking package: setup
+[gosec] 2026/05/17 09:53:12 Checking file: /home/sed/doc/github/nightshift/internal/setup/presets.go
+[gosec] 2026/05/17 09:53:12 Import directory: /home/sed/doc/github/nightshift/internal/providers
+[gosec] 2026/05/17 09:53:12 Import directory: /home/sed/doc/github/nightshift/internal/scheduler
+[gosec] 2026/05/17 09:53:12 Checking package: config
+[gosec] 2026/05/17 09:53:12 Checking file: /home/sed/doc/github/nightshift/internal/config/config.go
+[gosec] 2026/05/17 09:53:12 Import directory: /home/sed/doc/github/nightshift/internal/security
+[gosec] 2026/05/17 09:53:12 Checking package: state
+[gosec] 2026/05/17 09:53:12 Checking file: /home/sed/doc/github/nightshift/internal/state/state.go
+[gosec] 2026/05/17 09:53:12 Checking package: stats
+[gosec] 2026/05/17 09:53:12 Checking file: /home/sed/doc/github/nightshift/internal/stats/stats.go
+[gosec] 2026/05/17 09:53:12 Import directory: /home/sed/doc/github/nightshift/cmd/nightshift/commands
+[gosec] 2026/05/17 09:53:12 Import directory: /home/sed/doc/github/nightshift/cmd/nightshift
+[gosec] 2026/05/17 09:53:12 Checking package: db
+[gosec] 2026/05/17 09:53:12 Checking file: /home/sed/doc/github/nightshift/internal/db/db.go
+[gosec] 2026/05/17 09:53:12 Checking file: /home/sed/doc/github/nightshift/internal/db/import.go
+[gosec] 2026/05/17 09:53:12 Checking file: /home/sed/doc/github/nightshift/internal/db/migrations.go
+[gosec] 2026/05/17 09:53:12 Import directory: /home/sed/doc/github/nightshift/internal/budget
+[gosec] 2026/05/17 09:53:12 Checking package: tasks
+[gosec] 2026/05/17 09:53:12 Checking file: /home/sed/doc/github/nightshift/internal/tasks/register.go
+[gosec] 2026/05/17 09:53:12 Checking file: /home/sed/doc/github/nightshift/internal/tasks/selector.go
+[gosec] 2026/05/17 09:53:12 Checking file: /home/sed/doc/github/nightshift/internal/tasks/tasks.go
+[gosec] 2026/05/17 09:53:12 Import directory: /home/sed/doc/github/nightshift/internal/jira
+[gosec] 2026/05/17 09:53:12 Checking package: projects
+[gosec] 2026/05/17 09:53:12 Checking file: /home/sed/doc/github/nightshift/internal/projects/projects.go
+[gosec] 2026/05/17 09:53:12 Checking package: security
+[gosec] 2026/05/17 09:53:12 Checking file: /home/sed/doc/github/nightshift/internal/security/audit.go
+[gosec] 2026/05/17 09:53:12 Checking file: /home/sed/doc/github/nightshift/internal/security/credentials.go
+[gosec] 2026/05/17 09:53:12 Checking package: scheduler
+[gosec] 2026/05/17 09:53:12 Checking file: /home/sed/doc/github/nightshift/internal/scheduler/scheduler.go
+[gosec] 2026/05/17 09:53:12 Import directory: /home/sed/doc/github/nightshift/internal/reporting
+[gosec] 2026/05/17 09:53:12 Checking file: /home/sed/doc/github/nightshift/internal/security/sandbox.go
+[gosec] 2026/05/17 09:53:12 Import directory: /home/sed/doc/github/nightshift/internal/usage
+[gosec] 2026/05/17 09:53:12 Checking file: /home/sed/doc/github/nightshift/internal/security/security.go
+[gosec] 2026/05/17 09:53:12 Import directory: /home/sed/doc/github/nightshift/internal/analysis
+[gosec] 2026/05/17 09:53:12 Checking package: main
+[gosec] 2026/05/17 09:53:12 Checking file: /home/sed/doc/github/nightshift/cmd/nightshift/main.go
+[gosec] 2026/05/17 09:53:12 Import directory: /home/sed/doc/github/nightshift/internal/integrations
+[gosec] 2026/05/17 09:53:12 Checking package: providers
+[gosec] 2026/05/17 09:53:12 Checking file: /home/sed/doc/github/nightshift/internal/providers/claude.go
+[gosec] 2026/05/17 09:53:12 Checking file: /home/sed/doc/github/nightshift/internal/providers/codex.go
+[gosec] 2026/05/17 09:53:12 Checking file: /home/sed/doc/github/nightshift/internal/providers/copilot.go
+[gosec] 2026/05/17 09:53:12 Checking file: /home/sed/doc/github/nightshift/internal/providers/models.go
+[gosec] 2026/05/17 09:53:12 Checking file: /home/sed/doc/github/nightshift/internal/providers/provider.go
+[gosec] 2026/05/17 09:53:12 Import directory: /home/sed/doc/github/nightshift/internal/orchestrator
+[gosec] 2026/05/17 09:53:12 Checking package: budget
+[gosec] 2026/05/17 09:53:12 Checking file: /home/sed/doc/github/nightshift/internal/budget/active.go
+[gosec] 2026/05/17 09:53:12 Checking file: /home/sed/doc/github/nightshift/internal/budget/budget.go
+[gosec] 2026/05/17 09:53:13 Checking package: analysis
+[gosec] 2026/05/17 09:53:13 Checking file: /home/sed/doc/github/nightshift/internal/analysis/analyzer.go
+[gosec] 2026/05/17 09:53:13 Checking file: /home/sed/doc/github/nightshift/internal/analysis/db.go
+[gosec] 2026/05/17 09:53:13 Checking file: /home/sed/doc/github/nightshift/internal/analysis/metrics.go
+[gosec] 2026/05/17 09:53:13 Checking file: /home/sed/doc/github/nightshift/internal/analysis/report.go
+[gosec] 2026/05/17 09:53:13 Checking package: reporting
+[gosec] 2026/05/17 09:53:13 Checking file: /home/sed/doc/github/nightshift/internal/reporting/run_report.go
+[gosec] 2026/05/17 09:53:13 Checking file: /home/sed/doc/github/nightshift/internal/reporting/run_results.go
+[gosec] 2026/05/17 09:53:13 Checking file: /home/sed/doc/github/nightshift/internal/reporting/summary.go
+[gosec] 2026/05/17 09:53:13 Checking package: usage
+[gosec] 2026/05/17 09:53:13 Checking file: /home/sed/doc/github/nightshift/internal/usage/anthropic_client.go
+[gosec] 2026/05/17 09:53:13 Checking file: /home/sed/doc/github/nightshift/internal/usage/anthropic_token.go
+[gosec] 2026/05/17 09:53:13 Checking file: /home/sed/doc/github/nightshift/internal/usage/anthropic_types.go
+[gosec] 2026/05/17 09:53:13 Checking file: /home/sed/doc/github/nightshift/internal/usage/codex_client.go
+[gosec] 2026/05/17 09:53:13 Checking file: /home/sed/doc/github/nightshift/internal/usage/codex_credentials.go
+[gosec] 2026/05/17 09:53:13 Checking file: /home/sed/doc/github/nightshift/internal/usage/codex_oauth.go
+[gosec] 2026/05/17 09:53:13 Checking file: /home/sed/doc/github/nightshift/internal/usage/codex_types.go
+[gosec] 2026/05/17 09:53:13 Checking file: /home/sed/doc/github/nightshift/internal/usage/copilot_client.go
+[gosec] 2026/05/17 09:53:13 Checking file: /home/sed/doc/github/nightshift/internal/usage/copilot_types.go
+[gosec] 2026/05/17 09:53:13 Checking file: /home/sed/doc/github/nightshift/internal/usage/costs.go
+[gosec] 2026/05/17 09:53:13 Checking file: /home/sed/doc/github/nightshift/internal/usage/doc.go
+[gosec] 2026/05/17 09:53:13 Checking package: integrations
+[gosec] 2026/05/17 09:53:13 Checking file: /home/sed/doc/github/nightshift/internal/integrations/agentsmd.go
+[gosec] 2026/05/17 09:53:13 Checking file: /home/sed/doc/github/nightshift/internal/integrations/claudemd.go
+[gosec] 2026/05/17 09:53:13 Checking file: /home/sed/doc/github/nightshift/internal/integrations/github.go
+[gosec] 2026/05/17 09:53:13 Checking file: /home/sed/doc/github/nightshift/internal/integrations/integrations.go
+[gosec] 2026/05/17 09:53:13 Checking file: /home/sed/doc/github/nightshift/internal/integrations/td.go
+[gosec] 2026/05/17 09:53:13 Checking package: orchestrator
+[gosec] 2026/05/17 09:53:13 Checking file: /home/sed/doc/github/nightshift/internal/orchestrator/events.go
+[gosec] 2026/05/17 09:53:13 Checking file: /home/sed/doc/github/nightshift/internal/orchestrator/orchestrator.go
+[gosec] 2026/05/17 09:53:13 Checking package: jira
+[gosec] 2026/05/17 09:53:13 Checking file: /home/sed/doc/github/nightshift/internal/jira/branch.go
+[gosec] 2026/05/17 09:53:13 Checking file: /home/sed/doc/github/nightshift/internal/jira/client.go
+[gosec] 2026/05/17 09:53:13 Checking file: /home/sed/doc/github/nightshift/internal/jira/comments.go
+[gosec] 2026/05/17 09:53:13 Checking file: /home/sed/doc/github/nightshift/internal/jira/config.go
+[gosec] 2026/05/17 09:53:13 Checking file: /home/sed/doc/github/nightshift/internal/jira/dependencies.go
+[gosec] 2026/05/17 09:53:13 Checking file: /home/sed/doc/github/nightshift/internal/jira/feedback.go
+[gosec] 2026/05/17 09:53:13 Checking file: /home/sed/doc/github/nightshift/internal/jira/orchestrator.go
+[gosec] 2026/05/17 09:53:13 Checking file: /home/sed/doc/github/nightshift/internal/jira/pr.go
+[gosec] 2026/05/17 09:53:13 Checking file: /home/sed/doc/github/nightshift/internal/jira/status.go
+[gosec] 2026/05/17 09:53:13 Checking file: /home/sed/doc/github/nightshift/internal/jira/tickets.go
+[gosec] 2026/05/17 09:53:13 Checking file: /home/sed/doc/github/nightshift/internal/jira/validation.go
+[gosec] 2026/05/17 09:53:13 Checking file: /home/sed/doc/github/nightshift/internal/jira/workspace.go
+[gosec] 2026/05/17 09:53:14 Checking package: commands
+[gosec] 2026/05/17 09:53:14 Checking file: /home/sed/doc/github/nightshift/cmd/nightshift/commands/budget.go
+[gosec] 2026/05/17 09:53:14 Checking file: /home/sed/doc/github/nightshift/cmd/nightshift/commands/budget_helpers.go
+[gosec] 2026/05/17 09:53:14 Checking file: /home/sed/doc/github/nightshift/cmd/nightshift/commands/busfactor.go
+[gosec] 2026/05/17 09:53:14 Checking file: /home/sed/doc/github/nightshift/cmd/nightshift/commands/config.go
+[gosec] 2026/05/17 09:53:14 Checking file: /home/sed/doc/github/nightshift/cmd/nightshift/commands/daemon.go
+[gosec] 2026/05/17 09:53:14 Checking file: /home/sed/doc/github/nightshift/cmd/nightshift/commands/doctor.go
+[gosec] 2026/05/17 09:53:14 Checking file: /home/sed/doc/github/nightshift/cmd/nightshift/commands/helpers.go
+[gosec] 2026/05/17 09:53:14 Checking file: /home/sed/doc/github/nightshift/cmd/nightshift/commands/init.go
+[gosec] 2026/05/17 09:53:14 Checking file: /home/sed/doc/github/nightshift/cmd/nightshift/commands/install.go
+[gosec] 2026/05/17 09:53:14 Checking file: /home/sed/doc/github/nightshift/cmd/nightshift/commands/jira.go
+[gosec] 2026/05/17 09:53:14 Checking file: /home/sed/doc/github/nightshift/cmd/nightshift/commands/jira_logs.go
+[gosec] 2026/05/17 09:53:14 Checking file: /home/sed/doc/github/nightshift/cmd/nightshift/commands/jira_logs_output.go
+[gosec] 2026/05/17 09:53:14 Checking file: /home/sed/doc/github/nightshift/cmd/nightshift/commands/jira_preview.go
+[gosec] 2026/05/17 09:53:14 Checking file: /home/sed/doc/github/nightshift/cmd/nightshift/commands/jira_preview_output.go
+[gosec] 2026/05/17 09:53:14 Checking file: /home/sed/doc/github/nightshift/cmd/nightshift/commands/jira_run.go
+[gosec] 2026/05/17 09:53:14 Checking file: /home/sed/doc/github/nightshift/cmd/nightshift/commands/logs.go
+[gosec] 2026/05/17 09:53:14 Checking file: /home/sed/doc/github/nightshift/cmd/nightshift/commands/preview.go
+[gosec] 2026/05/17 09:53:14 Checking file: /home/sed/doc/github/nightshift/cmd/nightshift/commands/preview_output.go
+[gosec] 2026/05/17 09:53:14 Checking file: /home/sed/doc/github/nightshift/cmd/nightshift/commands/report.go
+[gosec] 2026/05/17 09:53:14 Checking file: /home/sed/doc/github/nightshift/cmd/nightshift/commands/root.go
+[gosec] 2026/05/17 09:53:14 Checking file: /home/sed/doc/github/nightshift/cmd/nightshift/commands/run.go
+[gosec] 2026/05/17 09:53:14 Checking file: /home/sed/doc/github/nightshift/cmd/nightshift/commands/run_output.go
+[gosec] 2026/05/17 09:53:14 Checking file: /home/sed/doc/github/nightshift/cmd/nightshift/commands/run_reporting.go
+[gosec] 2026/05/17 09:53:14 Checking file: /home/sed/doc/github/nightshift/cmd/nightshift/commands/setup.go
+[gosec] 2026/05/17 09:53:14 Checking file: /home/sed/doc/github/nightshift/cmd/nightshift/commands/stats.go
+[gosec] 2026/05/17 09:53:14 Checking file: /home/sed/doc/github/nightshift/cmd/nightshift/commands/status.go
+[gosec] 2026/05/17 09:53:14 Checking file: /home/sed/doc/github/nightshift/cmd/nightshift/commands/task.go
+[gosec] 2026/05/17 09:53:14 Checking file: /home/sed/doc/github/nightshift/cmd/nightshift/commands/time_parse.go
+Results:
+
+
+[[97;41m/home/sed/doc/github/nightshift/internal/tasks/selector.go:298[0m] - G404 (CWE-338): Use of weak random number generator (math/rand or math/rand/v2 instead of crypto/rand) (Confidence: MEDIUM, Severity: HIGH)
+    297: 	// Pick a random task from the eligible pool
+  > 298: 	pick := scored[rand.IntN(len(scored))]
+    299: 	return &pick
+
+Autofix: 
+
+[[97;41m/home/sed/doc/github/nightshift/internal/reporting/summary.go:408[0m] - G707 (CWE-93): SMTP command/header injection via taint analysis (Confidence: HIGH, Severity: HIGH)
+    407: 	addr := fmt.Sprintf("%s:%s", smtpHost, smtpPort)
+  > 408: 	if err := smtp.SendMail(addr, auth, smtpFrom, []string{to}, []byte(msg)); err != nil {
+    409: 		return fmt.Errorf("sending email: %w", err)
+
+Autofix: 
+
+[[97;41m/home/sed/doc/github/nightshift/cmd/nightshift/commands/setup.go:432-479[0m] - G101 (CWE-798): Potential hardcoded credentials (Confidence: LOW, Severity: HIGH)
+    431: 
+  > 432: 	model := &setupModel{
+  > 433: 		step:               stepWelcome,
+  > 434: 		cfg:                cfg,
+  > 435: 		configPath:         configPath,
+  > 436: 		configExist:        configExist,
+  > 437: 		includePathStep:    includePathStep,
+  > 438: 		projects:           projects,
+  > 439: 		projectInput:       projectInput,
+  > 440: 		budgetInput:        budgetInput,
+  > 441: 		taskItems:          taskItems,
+  > 442: 		preset:             preset,
+  > 443: 		scheduleMode:       "interval",
+  > 444: 		scheduleStart:      "22:00",
+  > 445: 		scheduleCycles:     3,
+  > 446: 		scheduleInterval:   "30m",
+  > 447: 		scheduleCron:       "0 2 * * *",
+  > 448: 		scheduleInput:      scheduleInput,
+  > 449: 		spinner:            spin,
+  > 450: 		nightshiftInPath:   nightshiftInPath,
+  > 451: 		modelsLoading:      pendingFetches,
+  > 452: 		claudeModelIdx:     modelIndex(claudeModels, cfg.Providers.Claude.Model),
+  > 453: 		codexModelIdx:      modelIndex(codexModels, cfg.Providers.Codex.Model),
+  > 454: 		copilotModelIdx:    modelIndex(copilotModels, cfg.Providers.Copilot.Model),
+  > 455: 		claudeEffortIdx:    effortIndex(claudeEfforts, cfg.Providers.Claude.ReasoningEffort),
+  > 456: 		codexEffortIdx:     effortIndex(codexEfforts, cfg.Providers.Codex.ReasoningEffort),
+  > 457: 		copilotEffortIdx:   effortIndex(copilotEfforts, cfg.Providers.Copilot.ReasoningEffort),
+  > 458: 		compressionEnabled: cfg.PromptCompression.Enabled,
+  > 459: 		compressionProvider: func() string {
+  > 460: 			if cfg.PromptCompression.Provider != "" {
+  > 461: 				return cfg.PromptCompression.Provider
+  > 462: 			}
+  > 463: 			return "claude"
+  > 464: 		}(),
+  > 465: 		compressionModelIdx:  0,
+  > 466: 		compressionEffortIdx: 0,
+  > 467: 		jiraInput:            jiraInput,
+  > 468: 		jiraTokenEnv:         "JIRA_API_TOKEN",
+  > 469: 		systemdInput:         systemdInput,
+  > 470: 		systemdOnCalendar: func() string {
+  > 471: 			if cfg.Jira.SystemdOnCalendar != "" {
+  > 472: 				return cfg.Jira.SystemdOnCalendar
+  > 473: 			}
+  > 474: 			return "*-*-* 22:00:00"
+  > 475: 		}(),
+  > 476: 		jiraMaxTickets:    10,
+  > 477: 		jiraPhaseProvider: defaultJiraPhaseProviders(cfg.Providers.Preference),
+  > 478: 		jiraPhaseModelIdx: defaultJiraPhaseModelIdxs(cfg.Providers.Preference),
+  > 479: 	}
+    480: 
+
+Autofix: 
+
+[[97;41m/home/sed/doc/github/nightshift/cmd/nightshift/commands/setup.go:1666[0m] - G703 (CWE-22): Path traversal via taint analysis (Confidence: HIGH, Severity: HIGH)
+    1665: 	existing += line + "\n"
+  > 1666: 	return true, os.WriteFile(configPath, []byte(existing), 0644)
+    1667: }
+
+Autofix: 
+
+[[97;41m/home/sed/doc/github/nightshift/cmd/nightshift/commands/run.go:972[0m] - G703 (CWE-22): Path traversal via taint analysis (Confidence: HIGH, Severity: HIGH)
+    971: 		}
+  > 972: 		if info, err := os.Stat(dir); err == nil && info.IsDir() {
+    973: 			added = append(added, dir)
+
+Autofix: 
+
+[[97;41m/home/sed/doc/github/nightshift/internal/usage/anthropic_client.go:296[0m] - G702 (CWE-78): Command injection via taint analysis (Confidence: HIGH, Severity: HIGH)
+    295: func (r *ExecKeychainRunner) Run(ctx context.Context, name string, args []string, _ string, _ string) (string, string, int, error) {
+  > 296: 	cmd := exec.CommandContext(ctx, name, args...)
+    297: 	var stdout, stderr bytes.Buffer
+
+Autofix: 
+
+[[30;43m/home/sed/doc/github/nightshift/internal/usage/copilot_client.go:108[0m] - G204 (CWE-78): Subprocess launched with variable (Confidence: HIGH, Severity: MEDIUM)
+    107: 	defer cancel()
+  > 108: 	return exec.CommandContext(ctx, "gh", args...).Output()
+    109: }
+
+Autofix: 
+
+[[30;43m/home/sed/doc/github/nightshift/internal/usage/anthropic_client.go:296[0m] - G204 (CWE-78): Subprocess launched with variable (Confidence: HIGH, Severity: MEDIUM)
+    295: func (r *ExecKeychainRunner) Run(ctx context.Context, name string, args []string, _ string, _ string) (string, string, int, error) {
+  > 296: 	cmd := exec.CommandContext(ctx, name, args...)
+    297: 	var stdout, stderr bytes.Buffer
+
+Autofix: 
+
+[[30;43m/home/sed/doc/github/nightshift/internal/security/sandbox.go:170[0m] - G204 (CWE-78): Subprocess launched with variable (Confidence: HIGH, Severity: MEDIUM)
+    169: 
+  > 170: 	cmd := exec.CommandContext(ctx, name, args...)
+    171: 
+
+Autofix: 
+
+[[30;43m/home/sed/doc/github/nightshift/internal/security/sandbox.go:106[0m] - G204 (CWE-78): Subprocess launched with variable (Confidence: HIGH, Severity: MEDIUM)
+    105: 	// Build command
+  > 106: 	cmd := exec.CommandContext(ctx, name, args...)
+    107: 
+
+Autofix: 
+
+[[30;43m/home/sed/doc/github/nightshift/internal/orchestrator/orchestrator.go:448[0m] - G204 (CWE-78): Subprocess launched with variable (Confidence: HIGH, Severity: MEDIUM)
+    447: 	// Update PR body
+  > 448: 	editCmd := exec.CommandContext(ctx, "gh", "pr", "edit", prURL, "--body", newBody)
+    449: 	editCmd.Dir = workDir
+
+Autofix: 
+
+[[30;43m/home/sed/doc/github/nightshift/internal/orchestrator/orchestrator.go:430[0m] - G204 (CWE-78): Subprocess launched with variable (Confidence: HIGH, Severity: MEDIUM)
+    429: 	// Read current PR body
+  > 430: 	readCmd := exec.CommandContext(ctx, "gh", "pr", "view", prURL, "--json", "body", "-q", ".body")
+    431: 	readCmd.Dir = workDir
+
+Autofix: 
+
+[[30;43m/home/sed/doc/github/nightshift/internal/jira/pr.go:463[0m] - G204 (CWE-78): Subprocess launched with variable (Confidence: HIGH, Severity: MEDIUM)
+    462: var ghExec = func(ctx context.Context, repoPath string, args ...string) (string, error) {
+  > 463: 	cmd := exec.CommandContext(ctx, "gh", args...)
+    464: 	cmd.Dir = repoPath
+
+Autofix: 
+
+[[30;43m/home/sed/doc/github/nightshift/internal/jira/branch.go:189[0m] - G204 (CWE-78): Subprocess launched with variable (Confidence: HIGH, Severity: MEDIUM)
+    188: func gitExec(ctx context.Context, repoPath string, args ...string) (string, error) {
+  > 189: 	cmd := exec.CommandContext(ctx, "git", args...)
+    190: 	cmd.Dir = repoPath
+
+Autofix: 
+
+[[30;43m/home/sed/doc/github/nightshift/internal/integrations/td.go:158[0m] - G204 (CWE-78): Subprocess launched with variable (Confidence: HIGH, Severity: MEDIUM)
+    157: func (r *TDReader) Complete(ctx context.Context, projectPath, taskID string) error {
+  > 158: 	cmd := exec.CommandContext(ctx, "td", "complete", taskID)
+    159: 	cmd.Dir = projectPath
+
+Autofix: 
+
+[[30;43m/home/sed/doc/github/nightshift/internal/integrations/td.go:151[0m] - G204 (CWE-78): Subprocess launched with variable (Confidence: HIGH, Severity: MEDIUM)
+    150: func (r *TDReader) Assign(ctx context.Context, projectPath, taskID string) error {
+  > 151: 	cmd := exec.CommandContext(ctx, "td", "assign", taskID)
+    152: 	cmd.Dir = projectPath
+
+Autofix: 
+
+[[30;43m/home/sed/doc/github/nightshift/internal/integrations/github.go:85[0m] - G204 (CWE-78): Subprocess launched with variable (Confidence: HIGH, Severity: MEDIUM)
+    84: 
+  > 85: 	cmd := exec.CommandContext(ctx, "gh", args...)
+    86: 	cmd.Dir = projectPath
+
+Autofix: 
+
+[[30;43m/home/sed/doc/github/nightshift/internal/agents/claude.go:24[0m] - G204 (CWE-78): Subprocess launched with variable (Confidence: HIGH, Severity: MEDIUM)
+    23: func (r *ExecRunner) Run(ctx context.Context, name string, args []string, dir string, stdin string) (string, string, int, error) {
+  > 24: 	cmd := exec.CommandContext(ctx, name, args...)
+    25: 	if dir != "" {
+
+Autofix: 
+
+[[30;43m/home/sed/doc/github/nightshift/cmd/nightshift/commands/install.go:714[0m] - G204 (CWE-78): Subprocess launched with variable (Confidence: HIGH, Severity: MEDIUM)
+    713: 	}
+  > 714: 	out, err := exec.Command(path, "calendar", expr).CombinedOutput()
+    715: 	if err != nil {
+
+Autofix: 
+
+[[30;43m/home/sed/doc/github/nightshift/cmd/nightshift/commands/install.go:583[0m] - G204 (CWE-78): Subprocess launched with variable (Confidence: HIGH, Severity: MEDIUM)
+    582: func defaultExecRunner(name string, args ...string) error {
+  > 583: 	return exec.Command(name, args...).Run()
+    584: }
+
+Autofix: 
+
+[[30;43m/home/sed/doc/github/nightshift/cmd/nightshift/commands/install.go:449[0m] - G204 (CWE-78): Subprocess launched with variable (Confidence: HIGH, Severity: MEDIUM)
+    448: 	// Unload the service
+  > 449: 	_ = exec.Command("launchctl", "unload", plistPath).Run()
+    450: 
+
+Autofix: 
+
+[[30;43m/home/sed/doc/github/nightshift/cmd/nightshift/commands/install.go:170[0m] - G204 (CWE-78): Subprocess launched with variable (Confidence: HIGH, Severity: MEDIUM)
+    169: 	// Load the service
+  > 170: 	if err := exec.Command("launchctl", "load", plistPath).Run(); err != nil {
+    171: 		return fmt.Errorf("loading launchd service: %w", err)
+
+Autofix: 
+
+[[30;43m/home/sed/doc/github/nightshift/cmd/nightshift/commands/install.go:162[0m] - G204 (CWE-78): Subprocess launched with variable (Confidence: HIGH, Severity: MEDIUM)
+    161: 	// Unload existing service if present
+  > 162: 	_ = exec.Command("launchctl", "unload", plistPath).Run()
+    163: 
+
+Autofix: 
+
+[[30;43m/home/sed/doc/github/nightshift/cmd/nightshift/commands/daemon.go:158[0m] - G204 (CWE-78): Subprocess launched with variable (Confidence: HIGH, Severity: MEDIUM)
+    157: 
+  > 158: 	daemonCmd := exec.Command(executable, "daemon", "start", "--foreground", "--timeout", daemonTimeoutFlag.String())
+    159: 	daemonCmd.Stdout = nil
+
+Autofix: 
+
+[[30;43m/home/sed/doc/github/nightshift/internal/integrations/github.go:171-173[0m] - G204 (CWE-78): Subprocess launched with a potential tainted input or cmd arguments (Confidence: HIGH, Severity: MEDIUM)
+    170: func (r *GitHubReader) Close(ctx context.Context, projectPath string, issueNumber int) error {
+  > 171: 	cmd := exec.CommandContext(ctx, "gh", "issue", "close",
+  > 172: 		strconv.Itoa(issueNumber),
+  > 173: 	)
+    174: 	cmd.Dir = projectPath
+
+Autofix: 
+
+[[30;43m/home/sed/doc/github/nightshift/internal/integrations/github.go:161-164[0m] - G204 (CWE-78): Subprocess launched with a potential tainted input or cmd arguments (Confidence: HIGH, Severity: MEDIUM)
+    160: func (r *GitHubReader) Comment(ctx context.Context, projectPath string, issueNumber int, body string) error {
+  > 161: 	cmd := exec.CommandContext(ctx, "gh", "issue", "comment",
+  > 162: 		strconv.Itoa(issueNumber),
+  > 163: 		"--body", body,
+  > 164: 	)
+    165: 	cmd.Dir = projectPath
+
+Autofix: 
+
+[[30;43m/home/sed/doc/github/nightshift/internal/agents/copilot.go:236[0m] - G204 (CWE-78): Subprocess launched with a potential tainted input or cmd arguments (Confidence: HIGH, Severity: MEDIUM)
+    235: 	} else {
+  > 236: 		cmd = exec.Command(a.binaryPath, "--version")
+    237: 	}
+
+Autofix: 
+
+[[30;43m/home/sed/doc/github/nightshift/internal/agents/copilot.go:219[0m] - G204 (CWE-78): Subprocess launched with a potential tainted input or cmd arguments (Confidence: HIGH, Severity: MEDIUM)
+    218: 	// Run: gh extension list | grep copilot
+  > 219: 	cmd := exec.Command(a.binaryPath, "extension", "list")
+    220: 	output, err := cmd.Output()
+
+Autofix: 
+
+[[30;43m/home/sed/doc/github/nightshift/internal/agents/codex.go:203[0m] - G204 (CWE-78): Subprocess launched with a potential tainted input or cmd arguments (Confidence: HIGH, Severity: MEDIUM)
+    202: func (a *CodexAgent) Version() (string, error) {
+  > 203: 	cmd := exec.Command(a.binaryPath, "--version")
+    204: 	output, err := cmd.Output()
+
+Autofix: 
+
+[[30;43m/home/sed/doc/github/nightshift/internal/agents/claude.go:248[0m] - G204 (CWE-78): Subprocess launched with a potential tainted input or cmd arguments (Confidence: HIGH, Severity: MEDIUM)
+    247: func (a *ClaudeAgent) Version() (string, error) {
+  > 248: 	cmd := exec.Command(a.binaryPath, "--version")
+    249: 	output, err := cmd.Output()
+
+Autofix: 
+
+[[30;43m/home/sed/doc/github/nightshift/internal/usage/codex_credentials.go:51[0m] - G304 (CWE-22): Potential file inclusion via variable (Confidence: HIGH, Severity: MEDIUM)
+    50: 
+  > 51: 	data, err := os.ReadFile(path)
+    52: 	if err != nil {
+
+Autofix: Consider using os.Root to scope file access under a fixed root (Go >=1.24). Prefer root.Open/root.Stat over os.Open/os.Stat to prevent directory traversal.
+
+[[30;43m/home/sed/doc/github/nightshift/internal/security/credentials.go:139[0m] - G304 (CWE-22): Potential file inclusion via variable (Confidence: HIGH, Severity: MEDIUM)
+    138: 
+  > 139: 	content, err := os.ReadFile(path)
+    140: 	if err != nil {
+
+Autofix: Consider using os.Root to scope file access under a fixed root (Go >=1.24). Prefer root.Open/root.Stat over os.Open/os.Stat to prevent directory traversal.
+
+[[30;43m/home/sed/doc/github/nightshift/internal/security/audit.go:305[0m] - G304 (CWE-22): Potential file inclusion via variable (Confidence: HIGH, Severity: MEDIUM)
+    304: func ReadEvents(path string) ([]AuditEvent, error) {
+  > 305: 	data, err := os.ReadFile(path)
+    306: 	if err != nil {
+
+Autofix: Consider using os.Root to scope file access under a fixed root (Go >=1.24). Prefer root.Open/root.Stat over os.Open/os.Stat to prevent directory traversal.
+
+[[30;43m/home/sed/doc/github/nightshift/internal/security/audit.go:93[0m] - G304 (CWE-22): Potential file inclusion via variable (Confidence: HIGH, Severity: MEDIUM)
+    92: 	// Open in append-only mode
+  > 93: 	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
+    94: 	if err != nil {
+
+Autofix: Consider using os.Root to scope file access under a fixed root (Go >=1.24). Prefer root.Open/root.Stat over os.Open/os.Stat to prevent directory traversal.
+
+[[30;43m/home/sed/doc/github/nightshift/internal/reporting/run_results.go:43[0m] - G304 (CWE-22): Potential file inclusion via variable (Confidence: HIGH, Severity: MEDIUM)
+    42: func LoadRunResults(path string) (*RunResults, error) {
+  > 43: 	payload, err := os.ReadFile(path)
+    44: 	if err != nil {
+
+Autofix: Consider using os.Root to scope file access under a fixed root (Go >=1.24). Prefer root.Open/root.Stat over os.Open/os.Stat to prevent directory traversal.
+
+[[30;43m/home/sed/doc/github/nightshift/internal/providers/copilot.go:90[0m] - G304 (CWE-22): Potential file inclusion via variable (Confidence: HIGH, Severity: MEDIUM)
+    89: 	path := c.usageFilePath()
+  > 90: 	data, err := os.ReadFile(path)
+    91: 	if err != nil {
+
+Autofix: Consider using os.Root to scope file access under a fixed root (Go >=1.24). Prefer root.Open/root.Stat over os.Open/os.Stat to prevent directory traversal.
+
+[[30;43m/home/sed/doc/github/nightshift/internal/providers/codex.go:328[0m] - G304 (CWE-22): Potential file inclusion via variable (Confidence: HIGH, Severity: MEDIUM)
+    327: func (c *Codex) ParseSessionTokenUsage(path string) (*CodexTokenUsage, error) {
+  > 328: 	file, err := os.Open(path)
+    329: 	if err != nil {
+
+Autofix: Consider using os.Root to scope file access under a fixed root (Go >=1.24). Prefer root.Open/root.Stat over os.Open/os.Stat to prevent directory traversal.
+
+[[30;43m/home/sed/doc/github/nightshift/internal/providers/codex.go:108[0m] - G304 (CWE-22): Potential file inclusion via variable (Confidence: HIGH, Severity: MEDIUM)
+    107: func (c *Codex) ParseSessionJSONL(path string) (*CodexRateLimits, error) {
+  > 108: 	file, err := os.Open(path)
+    109: 	if err != nil {
+
+Autofix: Consider using os.Root to scope file access under a fixed root (Go >=1.24). Prefer root.Open/root.Stat over os.Open/os.Stat to prevent directory traversal.
+
+[[30;43m/home/sed/doc/github/nightshift/internal/providers/claude.go:377[0m] - G304 (CWE-22): Potential file inclusion via variable (Confidence: HIGH, Severity: MEDIUM)
+    376: func scanFileTokens(path string, cutoffDate string) (int64, error) {
+  > 377: 	file, err := os.Open(path)
+    378: 	if err != nil {
+
+Autofix: Consider using os.Root to scope file access under a fixed root (Go >=1.24). Prefer root.Open/root.Stat over os.Open/os.Stat to prevent directory traversal.
+
+[[30;43m/home/sed/doc/github/nightshift/internal/providers/claude.go:177[0m] - G304 (CWE-22): Potential file inclusion via variable (Confidence: HIGH, Severity: MEDIUM)
+    176: func ParseSessionJSONL(path string) (*TokenUsage, error) {
+  > 177: 	file, err := os.Open(path)
+    178: 	if err != nil {
+
+Autofix: Consider using os.Root to scope file access under a fixed root (Go >=1.24). Prefer root.Open/root.Stat over os.Open/os.Stat to prevent directory traversal.
+
+[[30;43m/home/sed/doc/github/nightshift/internal/providers/claude.go:121[0m] - G304 (CWE-22): Potential file inclusion via variable (Confidence: HIGH, Severity: MEDIUM)
+    120: func ParseStatsCache(path string) (*StatsCache, error) {
+  > 121: 	data, err := os.ReadFile(path)
+    122: 	if err != nil {
+
+Autofix: Consider using os.Root to scope file access under a fixed root (Go >=1.24). Prefer root.Open/root.Stat over os.Open/os.Stat to prevent directory traversal.
+
+[[30;43m/home/sed/doc/github/nightshift/internal/logging/logging.go:107[0m] - G304 (CWE-22): Potential file inclusion via variable (Confidence: HIGH, Severity: MEDIUM)
+    106: 		logFile := logger.currentLogPath()
+  > 107: 		f, err := os.OpenFile(logFile, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+    108: 		if err != nil {
+
+Autofix: Consider using os.Root to scope file access under a fixed root (Go >=1.24). Prefer root.Open/root.Stat over os.Open/os.Stat to prevent directory traversal.
+
+[[30;43m/home/sed/doc/github/nightshift/internal/integrations/claudemd.go:48[0m] - G304 (CWE-22): Potential file inclusion via variable (Confidence: HIGH, Severity: MEDIUM)
+    47: 	for _, path := range candidates {
+  > 48: 		data, err := os.ReadFile(path)
+    49: 		if err == nil {
+
+Autofix: Consider using os.Root to scope file access under a fixed root (Go >=1.24). Prefer root.Open/root.Stat over os.Open/os.Stat to prevent directory traversal.
+
+[[30;43m/home/sed/doc/github/nightshift/internal/integrations/agentsmd.go:48[0m] - G304 (CWE-22): Potential file inclusion via variable (Confidence: HIGH, Severity: MEDIUM)
+    47: 	for _, path := range candidates {
+  > 48: 		data, err := os.ReadFile(path)
+    49: 		if err == nil {
+
+Autofix: Consider using os.Root to scope file access under a fixed root (Go >=1.24). Prefer root.Open/root.Stat over os.Open/os.Stat to prevent directory traversal.
+
+[[30;43m/home/sed/doc/github/nightshift/internal/db/import.go:50[0m] - G304 (CWE-22): Potential file inclusion via variable (Confidence: HIGH, Severity: MEDIUM)
+    49: 
+  > 50: 	data, err := os.ReadFile(path)
+    51: 	if err != nil {
+
+Autofix: Consider using os.Root to scope file access under a fixed root (Go >=1.24). Prefer root.Open/root.Stat over os.Open/os.Stat to prevent directory traversal.
+
+[[30;43m/home/sed/doc/github/nightshift/cmd/nightshift/commands/setup.go:2564[0m] - G304 (CWE-22): Potential file inclusion via variable (Confidence: HIGH, Severity: MEDIUM)
+    2563: 	var existing string
+  > 2564: 	if data, err := os.ReadFile(gitignorePath); err == nil {
+    2565: 		existing = string(data)
+
+Autofix: Consider using os.Root to scope file access under a fixed root (Go >=1.24). Prefer root.Open/root.Stat over os.Open/os.Stat to prevent directory traversal.
+
+[[30;43m/home/sed/doc/github/nightshift/cmd/nightshift/commands/setup.go:1772[0m] - G304 (CWE-22): Potential file inclusion via variable (Confidence: HIGH, Severity: MEDIUM)
+    1771: 
+  > 1772: 	out, err := os.Create(dst)
+    1773: 	if err != nil {
+
+Autofix: Consider using os.Root to scope file access under a fixed root (Go >=1.24). Prefer root.Open/root.Stat over os.Open/os.Stat to prevent directory traversal.
+
+[[30;43m/home/sed/doc/github/nightshift/cmd/nightshift/commands/setup.go:1766[0m] - G304 (CWE-22): Potential file inclusion via variable (Confidence: HIGH, Severity: MEDIUM)
+    1765: func copyFile(src, dst string) error {
+  > 1766: 	in, err := os.Open(src)
+    1767: 	if err != nil {
+
+Autofix: Consider using os.Root to scope file access under a fixed root (Go >=1.24). Prefer root.Open/root.Stat over os.Open/os.Stat to prevent directory traversal.
+
+[[30;43m/home/sed/doc/github/nightshift/cmd/nightshift/commands/setup.go:1652[0m] - G304 (CWE-22): Potential file inclusion via variable (Confidence: HIGH, Severity: MEDIUM)
+    1651: 	var existing string
+  > 1652: 	if data, err := os.ReadFile(configPath); err == nil {
+    1653: 		existing = string(data)
+
+Autofix: Consider using os.Root to scope file access under a fixed root (Go >=1.24). Prefer root.Open/root.Stat over os.Open/os.Stat to prevent directory traversal.
+
+[[30;43m/home/sed/doc/github/nightshift/cmd/nightshift/commands/logs.go:403[0m] - G304 (CWE-22): Potential file inclusion via variable (Confidence: HIGH, Severity: MEDIUM)
+    402: func processLogFile(path string, filter logFilter, tail int, entries *[]logRecord, stats *logStats) error {
+  > 403: 	f, err := os.Open(path)
+    404: 	if err != nil {
+
+Autofix: Consider using os.Root to scope file access under a fixed root (Go >=1.24). Prefer root.Open/root.Stat over os.Open/os.Stat to prevent directory traversal.
+
+[[30;43m/home/sed/doc/github/nightshift/cmd/nightshift/commands/logs.go:349[0m] - G304 (CWE-22): Potential file inclusion via variable (Confidence: HIGH, Severity: MEDIUM)
+    348: 
+  > 349: 	out, err := os.Create(outFile)
+    350: 	if err != nil {
+
+Autofix: Consider using os.Root to scope file access under a fixed root (Go >=1.24). Prefer root.Open/root.Stat over os.Open/os.Stat to prevent directory traversal.
+
+[[30;43m/home/sed/doc/github/nightshift/cmd/nightshift/commands/logs.go:302[0m] - G304 (CWE-22): Potential file inclusion via variable (Confidence: HIGH, Severity: MEDIUM)
+    301: 				currentFile = newFile
+  > 302: 				file, err = os.Open(currentFile)
+    303: 				if err != nil {
+
+Autofix: Consider using os.Root to scope file access under a fixed root (Go >=1.24). Prefer root.Open/root.Stat over os.Open/os.Stat to prevent directory traversal.
+
+[[30;43m/home/sed/doc/github/nightshift/cmd/nightshift/commands/logs.go:267[0m] - G304 (CWE-22): Potential file inclusion via variable (Confidence: HIGH, Severity: MEDIUM)
+    266: 	if currentFile != "" {
+  > 267: 		file, err = os.Open(currentFile)
+    268: 		if err == nil {
+
+Autofix: Consider using os.Root to scope file access under a fixed root (Go >=1.24). Prefer root.Open/root.Stat over os.Open/os.Stat to prevent directory traversal.
+
+[[30;43m/home/sed/doc/github/nightshift/internal/reporting/summary.go:444[0m] - G107 (CWE-88): Potential HTTP request made with variable url (Confidence: MEDIUM, Severity: MEDIUM)
+    443: 
+  > 444: 	resp, err := http.Post(webhookURL, "application/json", bytes.NewReader(jsonPayload))
+    445: 	if err != nil {
+
+Autofix: 
+
+[[30;43m/home/sed/doc/github/nightshift/internal/logging/logging.go:107[0m] - G302 (CWE-276): Expect file permissions to be 0600 or less (Confidence: HIGH, Severity: MEDIUM)
+    106: 		logFile := logger.currentLogPath()
+  > 107: 		f, err := os.OpenFile(logFile, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+    108: 		if err != nil {
+
+Autofix: 
+
+[[30;43m/home/sed/doc/github/nightshift/cmd/nightshift/commands/setup.go:1786[0m] - G302 (CWE-276): Expect file permissions to be 0600 or less (Confidence: HIGH, Severity: MEDIUM)
+    1785: 	}
+  > 1786: 	return os.Chmod(dst, 0755)
+    1787: }
+
+Autofix: 
+
+[[30;43m/home/sed/doc/github/nightshift/internal/security/security.go:90[0m] - G301 (CWE-276): Expect directory permissions to be 0750 or less (Confidence: HIGH, Severity: MEDIUM)
+    89: 	dir := filepath.Dir(m.config.FirstRunFile)
+  > 90: 	if err := os.MkdirAll(dir, 0755); err != nil {
+    91: 		return fmt.Errorf("creating dir: %w", err)
+
+Autofix: 
+
+[[30;43m/home/sed/doc/github/nightshift/internal/reporting/summary.go:322[0m] - G301 (CWE-276): Expect directory permissions to be 0750 or less (Confidence: HIGH, Severity: MEDIUM)
+    321: 	dir := filepath.Dir(path)
+  > 322: 	if err := os.MkdirAll(dir, 0755); err != nil {
+    323: 		return fmt.Errorf("creating summary directory: %w", err)
+
+Autofix: 
+
+[[30;43m/home/sed/doc/github/nightshift/internal/reporting/run_results.go:28[0m] - G301 (CWE-276): Expect directory permissions to be 0750 or less (Confidence: HIGH, Severity: MEDIUM)
+    27: 	}
+  > 28: 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+    29: 		return fmt.Errorf("creating results dir: %w", err)
+
+Autofix: 
+
+[[30;43m/home/sed/doc/github/nightshift/internal/reporting/run_report.go:68[0m] - G301 (CWE-276): Expect directory permissions to be 0750 or less (Confidence: HIGH, Severity: MEDIUM)
+    67: 	}
+  > 68: 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+    69: 		return fmt.Errorf("creating report dir: %w", err)
+
+Autofix: 
+
+[[30;43m/home/sed/doc/github/nightshift/internal/providers/copilot.go:115[0m] - G301 (CWE-276): Expect directory permissions to be 0750 or less (Confidence: HIGH, Severity: MEDIUM)
+    114: 	// Ensure directory exists
+  > 115: 	if err := os.MkdirAll(c.dataPath, 0755); err != nil {
+    116: 		return fmt.Errorf("creating data directory: %w", err)
+
+Autofix: 
+
+[[30;43m/home/sed/doc/github/nightshift/internal/logging/logging.go:92[0m] - G301 (CWE-276): Expect directory permissions to be 0750 or less (Confidence: HIGH, Severity: MEDIUM)
+    91: 		cfg.Path = expandPath(cfg.Path)
+  > 92: 		if err := os.MkdirAll(cfg.Path, 0755); err != nil {
+    93: 			return nil, fmt.Errorf("creating log dir: %w", err)
+
+Autofix: 
+
+[[30;43m/home/sed/doc/github/nightshift/internal/jira/workspace.go:51[0m] - G301 (CWE-276): Expect directory permissions to be 0750 or less (Confidence: HIGH, Severity: MEDIUM)
+    50: 	wsRoot := filepath.Join(root, ticketKey)
+  > 51: 	if err := os.MkdirAll(wsRoot, 0o755); err != nil {
+    52: 		return nil, fmt.Errorf("mkdir workspace: %w", err)
+
+Autofix: 
+
+[[30;43m/home/sed/doc/github/nightshift/cmd/nightshift/commands/setup.go:2408[0m] - G301 (CWE-276): Expect directory permissions to be 0750 or less (Confidence: HIGH, Severity: MEDIUM)
+    2407: func writeGlobalConfigToPath(cfg *config.Config, configPath string) error {
+  > 2408: 	if err := os.MkdirAll(filepath.Dir(configPath), 0755); err != nil {
+    2409: 		return fmt.Errorf("create config dir: %w", err)
+
+Autofix: 
+
+[[30;43m/home/sed/doc/github/nightshift/cmd/nightshift/commands/setup.go:1741[0m] - G301 (CWE-276): Expect directory permissions to be 0750 or less (Confidence: HIGH, Severity: MEDIUM)
+    1740: 	targetDir = expandPath(targetDir)
+  > 1741: 	if err := os.MkdirAll(targetDir, 0755); err != nil {
+    1742: 		return "", err
+
+Autofix: 
+
+[[30;43m/home/sed/doc/github/nightshift/cmd/nightshift/commands/setup.go:1644[0m] - G301 (CWE-276): Expect directory permissions to be 0750 or less (Confidence: HIGH, Severity: MEDIUM)
+    1643: 	}
+  > 1644: 	if err := os.MkdirAll(filepath.Dir(configPath), 0755); err != nil {
+    1645: 		return false, err
+
+Autofix: 
+
+[[30;43m/home/sed/doc/github/nightshift/cmd/nightshift/commands/preview.go:254[0m] - G301 (CWE-276): Expect directory permissions to be 0750 or less (Confidence: HIGH, Severity: MEDIUM)
+    253: 	if writeDir != "" {
+  > 254: 		if err := os.MkdirAll(writeDir, 0755); err != nil {
+    255: 			return nil, fmt.Errorf("create write dir: %w", err)
+
+Autofix: 
+
+[[30;43m/home/sed/doc/github/nightshift/cmd/nightshift/commands/install.go:725[0m] - G301 (CWE-276): Expect directory permissions to be 0750 or less (Confidence: HIGH, Severity: MEDIUM)
+    724: 	logDir := filepath.Join(home, ".local", "share", "nightshift", "logs")
+  > 725: 	_ = os.MkdirAll(logDir, 0755)
+    726: 
+
+Autofix: 
+
+[[30;43m/home/sed/doc/github/nightshift/cmd/nightshift/commands/install.go:601[0m] - G301 (CWE-276): Expect directory permissions to be 0750 or less (Confidence: HIGH, Severity: MEDIUM)
+    600: 	systemdDir := filepath.Join(home, ".config", "systemd", "user")
+  > 601: 	if err := os.MkdirAll(systemdDir, 0755); err != nil {
+    602: 		return fmt.Errorf("creating systemd directory: %w", err)
+
+Autofix: 
+
+[[30;43m/home/sed/doc/github/nightshift/cmd/nightshift/commands/install.go:230[0m] - G301 (CWE-276): Expect directory permissions to be 0750 or less (Confidence: HIGH, Severity: MEDIUM)
+    229: 	systemdDir := filepath.Join(home, ".config", "systemd", "user")
+  > 230: 	if err := os.MkdirAll(systemdDir, 0755); err != nil {
+    231: 		return fmt.Errorf("creating systemd directory: %w", err)
+
+Autofix: 
+
+[[30;43m/home/sed/doc/github/nightshift/cmd/nightshift/commands/install.go:152[0m] - G301 (CWE-276): Expect directory permissions to be 0750 or less (Confidence: HIGH, Severity: MEDIUM)
+    151: 	launchAgentsDir := filepath.Join(home, "Library", "LaunchAgents")
+  > 152: 	if err := os.MkdirAll(launchAgentsDir, 0755); err != nil {
+    153: 		return fmt.Errorf("creating LaunchAgents directory: %w", err)
+
+Autofix: 
+
+[[30;43m/home/sed/doc/github/nightshift/cmd/nightshift/commands/init.go:75[0m] - G301 (CWE-276): Expect directory permissions to be 0750 or less (Confidence: HIGH, Severity: MEDIUM)
+    74: 	dir := filepath.Dir(configPath)
+  > 75: 	if err := os.MkdirAll(dir, 0755); err != nil {
+    76: 		return fmt.Errorf("create directory %s: %w", dir, err)
+
+Autofix: 
+
+[[30;43m/home/sed/doc/github/nightshift/cmd/nightshift/commands/daemon.go:82[0m] - G301 (CWE-276): Expect directory permissions to be 0750 or less (Confidence: HIGH, Severity: MEDIUM)
+    81: 	dir := filepath.Dir(pidFilePath())
+  > 82: 	return os.MkdirAll(dir, 0755)
+    83: }
+
+Autofix: 
+
+[[30;43m/home/sed/doc/github/nightshift/cmd/nightshift/commands/config.go:161[0m] - G301 (CWE-276): Expect directory permissions to be 0750 or less (Confidence: HIGH, Severity: MEDIUM)
+    160: 	configDir := filepath.Dir(configPath)
+  > 161: 	if err := os.MkdirAll(configDir, 0755); err != nil {
+    162: 		return fmt.Errorf("creating config directory: %w", err)
+
+Autofix: 
+
+[[30;43m/home/sed/doc/github/nightshift/internal/reporting/summary.go:327[0m] - G306 (CWE-276): Expect WriteFile permissions to be 0600 or less (Confidence: HIGH, Severity: MEDIUM)
+    326: 	// Write file
+  > 327: 	if err := os.WriteFile(path, []byte(summary.Content), 0644); err != nil {
+    328: 		return fmt.Errorf("writing summary file: %w", err)
+
+Autofix: 
+
+[[30;43m/home/sed/doc/github/nightshift/internal/reporting/run_results.go:35[0m] - G306 (CWE-276): Expect WriteFile permissions to be 0600 or less (Confidence: HIGH, Severity: MEDIUM)
+    34: 	}
+  > 35: 	if err := os.WriteFile(path, payload, 0644); err != nil {
+    36: 		return fmt.Errorf("writing results: %w", err)
+
+Autofix: 
+
+[[30;43m/home/sed/doc/github/nightshift/internal/reporting/run_report.go:71[0m] - G306 (CWE-276): Expect WriteFile permissions to be 0600 or less (Confidence: HIGH, Severity: MEDIUM)
+    70: 	}
+  > 71: 	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+    72: 		return fmt.Errorf("writing report: %w", err)
+
+Autofix: 
+
+[[30;43m/home/sed/doc/github/nightshift/internal/providers/copilot.go:125[0m] - G306 (CWE-276): Expect WriteFile permissions to be 0600 or less (Confidence: HIGH, Severity: MEDIUM)
+    124: 	path := c.usageFilePath()
+  > 125: 	if err := os.WriteFile(path, jsonData, 0644); err != nil {
+    126: 		return fmt.Errorf("writing usage data: %w", err)
+
+Autofix: 
+
+[[30;43m/home/sed/doc/github/nightshift/cmd/nightshift/commands/setup.go:2588[0m] - G306 (CWE-276): Expect WriteFile permissions to be 0600 or less (Confidence: HIGH, Severity: MEDIUM)
+    2587: 	// but ensure proper atomic write to prevent corruption
+  > 2588: 	return true, os.WriteFile(gitignorePath, []byte(b.String()), 0644)
+    2589: }
+
+Autofix: 
+
+[[30;43m/home/sed/doc/github/nightshift/cmd/nightshift/commands/setup.go:1666[0m] - G306 (CWE-276): Expect WriteFile permissions to be 0600 or less (Confidence: HIGH, Severity: MEDIUM)
+    1665: 	existing += line + "\n"
+  > 1666: 	return true, os.WriteFile(configPath, []byte(existing), 0644)
+    1667: }
+
+Autofix: 
+
+[[30;43m/home/sed/doc/github/nightshift/cmd/nightshift/commands/preview.go:372[0m] - G306 (CWE-276): Expect WriteFile permissions to be 0600 or less (Confidence: HIGH, Severity: MEDIUM)
+    371: 					fullPath := filepath.Join(writeDir, filename)
+  > 372: 					if err := os.WriteFile(fullPath, []byte(prompt), 0644); err != nil {
+    373: 						taskPreview.PromptFileError = err.Error()
+
+Autofix: 
+
+[[30;43m/home/sed/doc/github/nightshift/cmd/nightshift/commands/install.go:622[0m] - G306 (CWE-276): Expect WriteFile permissions to be 0600 or less (Confidence: HIGH, Severity: MEDIUM)
+    621: 	timer := generateSystemdJiraTimer(onCalendar)
+  > 622: 	if err := os.WriteFile(timerPath, []byte(timer), 0644); err != nil {
+    623: 		return fmt.Errorf("writing jira timer file: %w", err)
+
+Autofix: 
+
+[[30;43m/home/sed/doc/github/nightshift/cmd/nightshift/commands/install.go:607[0m] - G306 (CWE-276): Expect WriteFile permissions to be 0600 or less (Confidence: HIGH, Severity: MEDIUM)
+    606: 	service := generateSystemdJiraService()
+  > 607: 	if err := os.WriteFile(servicePath, []byte(service), 0644); err != nil {
+    608: 		return fmt.Errorf("writing jira service file: %w", err)
+
+Autofix: 
+
+[[30;43m/home/sed/doc/github/nightshift/cmd/nightshift/commands/install.go:251[0m] - G306 (CWE-276): Expect WriteFile permissions to be 0600 or less (Confidence: HIGH, Severity: MEDIUM)
+    250: 	// Write timer file
+  > 251: 	if err := os.WriteFile(timerPath, []byte(timer), 0644); err != nil {
+    252: 		return fmt.Errorf("writing timer file: %w", err)
+
+Autofix: 
+
+[[30;43m/home/sed/doc/github/nightshift/cmd/nightshift/commands/install.go:246[0m] - G306 (CWE-276): Expect WriteFile permissions to be 0600 or less (Confidence: HIGH, Severity: MEDIUM)
+    245: 	// Write service file
+  > 246: 	if err := os.WriteFile(servicePath, []byte(service), 0644); err != nil {
+    247: 		return fmt.Errorf("writing service file: %w", err)
+
+Autofix: 
+
+[[30;43m/home/sed/doc/github/nightshift/cmd/nightshift/commands/install.go:165[0m] - G306 (CWE-276): Expect WriteFile permissions to be 0600 or less (Confidence: HIGH, Severity: MEDIUM)
+    164: 	// Write plist file
+  > 165: 	if err := os.WriteFile(plistPath, []byte(plist), 0644); err != nil {
+    166: 		return fmt.Errorf("writing plist: %w", err)
+
+Autofix: 
+
+[[30;43m/home/sed/doc/github/nightshift/cmd/nightshift/commands/init.go:81[0m] - G306 (CWE-276): Expect WriteFile permissions to be 0600 or less (Confidence: HIGH, Severity: MEDIUM)
+    80: 	content := generateDefaultConfig(global)
+  > 81: 	if err := os.WriteFile(configPath, []byte(content), 0644); err != nil {
+    82: 		return fmt.Errorf("write config: %w", err)
+
+Autofix: 
+
+[[30;43m/home/sed/doc/github/nightshift/cmd/nightshift/commands/daemon.go:90[0m] - G306 (CWE-276): Expect WriteFile permissions to be 0600 or less (Confidence: HIGH, Severity: MEDIUM)
+    89: 	}
+  > 90: 	return os.WriteFile(pidFilePath(), []byte(strconv.Itoa(os.Getpid())), 0644)
+    91: }
+
+Autofix: 
+
+[[37;40m/home/sed/doc/github/nightshift/internal/usage/codex_oauth.go:115[0m] - G104 (CWE-703): Errors unhandled (Confidence: HIGH, Severity: LOW)
+    114: 	if _, err := tmp.Write(data); err != nil {
+  > 115: 		tmp.Close()
+    116: 		_ = os.Remove(tmpPath)
+
+Autofix: 
+
+[[37;40m/home/sed/doc/github/nightshift/internal/usage/codex_client.go:116[0m] - G104 (CWE-703): Errors unhandled (Confidence: HIGH, Severity: LOW)
+    115: 		// Drain and close current body before retry.
+  > 116: 		resp.Body.Close()
+    117: 		if err := refreshTokenWithURL(ctx, c.creds, c.oauthURL); err != nil {
+
+Autofix: 
+
+[1;36mSummary:[0m
+  Gosec  : dev
+  Files  : 96
+  Lines  : 32282
+  Nosec  : 0
+  Issues : [1;31m90[0m
+

@@ -1,0 +1,2 @@
+BRANCH=fix/security/triage-footguns-202605170749
+COMMIT=524f0e6

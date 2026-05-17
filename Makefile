@@ -82,3 +82,5 @@ help:
 install-hooks:
 	@ln -sf ../../scripts/pre-commit.sh .git/hooks/pre-commit
 	@echo "✓ pre-commit hook installed (.git/hooks/pre-commit → scripts/pre-commit.sh)"
+security-scan:
+@./scripts/security-scan.sh
