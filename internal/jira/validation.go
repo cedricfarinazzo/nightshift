@@ -32,6 +32,7 @@ func ValidateTicket(ctx context.Context, agent agents.Agent, ticket Ticket, comp
 
 	opts := agents.ExecuteOptions{
 		Prompt:       buildValidationContent(ticket),
+		PromptPrefix: validationRolePrefix,
 		PromptSuffix: validationFormatInstructions,
 		Compression:  compression,
 		OnCompress: func(s *agents.CompressStats) {
@@ -52,7 +53,15 @@ func ValidateTicket(ctx context.Context, agent agents.Agent, ticket Ticket, comp
 	return vr, nil
 }
 
-// validationFormatInstructions is the critical output-format spec appended after
+// validationRolePrefix is the role/task context prepended after compression
+// so the compressor cannot strip the agent's role definition.
+const validationRolePrefix = `Ticket quality validator. Assess if ticket has enough info for autonomous AI implementation.
+
+Criteria: CLEAR OBJECTIVE, SUFFICIENT CONTEXT, ACCEPTANCE CRITERIA, SCOPE, NO AMBIGUITY
+
+`
+
+// validationFormatInstructions is the output-format spec appended after
 // compression so the compressor cannot mangle the JSON schema.
 const validationFormatInstructions = `
 Respond in JSON only (no markdown, no code fences):
@@ -60,24 +69,21 @@ Respond in JSON only (no markdown, no code fences):
 
 Valid if score >= 6 and no critical issues.`
 
-// buildValidationContent returns the compressible portion of the validation prompt
-// (ticket data only). validationFormatInstructions is appended separately via
-// ExecuteOptions.PromptSuffix so it is never passed through the compressor.
+// buildValidationContent returns only the compressible ticket data portion.
+// validationRolePrefix and validationFormatInstructions are delivered via
+// PromptPrefix/PromptSuffix and never pass through the compressor.
 func buildValidationContent(ticket Ticket) string {
 	var comments strings.Builder
 	for _, c := range ticket.Comments {
 		fmt.Fprintf(&comments, "- %s: %s\n", c.Author, c.Body)
 	}
 
-	return fmt.Sprintf(`Ticket quality validator. Assess if ticket has enough info for autonomous AI implementation.
-
-Ticket: %s
+	return fmt.Sprintf(`Ticket: %s
 Title: %s
 Description: %s
 Acceptance Criteria: %s
 Comments:
-%s
-Criteria: CLEAR OBJECTIVE, SUFFICIENT CONTEXT, ACCEPTANCE CRITERIA, SCOPE, NO AMBIGUITY`,
+%s`,
 		ticket.Key,
 		ticket.Summary,
 		ticket.Description,
@@ -86,10 +92,10 @@ Criteria: CLEAR OBJECTIVE, SUFFICIENT CONTEXT, ACCEPTANCE CRITERIA, SCOPE, NO AM
 	)
 }
 
-// buildValidationPrompt returns the full prompt (content + format instructions).
+// buildValidationPrompt returns the full prompt (prefix + content + suffix).
 // Used by tests and callers that do not use compression.
 func buildValidationPrompt(ticket Ticket) string {
-	return buildValidationContent(ticket) + validationFormatInstructions
+	return validationRolePrefix + buildValidationContent(ticket) + validationFormatInstructions
 }
 
 // parseValidationResponse parses the LLM output into a ValidationResult.

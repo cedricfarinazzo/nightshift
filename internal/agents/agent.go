@@ -28,6 +28,9 @@ type ExecuteOptions struct {
 	Model           string        // Model to use (optional, uses agent default if empty)
 	ReasoningEffort string        // Reasoning effort (optional; precedence: this value, then agent default, then CLI default)
 	Compression     *CompressConfig // nil = no compression
+	// PromptPrefix is prepended to Prompt after compression runs, so role
+	// definitions and task context are never stripped by the compressor.
+	PromptPrefix    string
 	// PromptSuffix is appended to Prompt after compression runs, so critical
 	// output-format instructions are never passed through the compressor.
 	PromptSuffix    string

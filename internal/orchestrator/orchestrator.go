@@ -460,6 +460,7 @@ func (o *Orchestrator) plan(ctx context.Context, task *tasks.Task, workDir strin
 
 	execResult, err := o.agent.Execute(ctx, agents.ExecuteOptions{
 		Prompt:       o.buildPlanContent(task),
+		PromptPrefix: "You are a planning agent. Create a detailed execution plan for this task.\n\n",
 		PromptSuffix: taskPlanOutputSuffix,
 		WorkDir:      workDir,
 		Timeout:      o.config.AgentTimeout,
@@ -520,6 +521,7 @@ func (o *Orchestrator) implement(ctx context.Context, task *tasks.Task, plan *Pl
 
 	execResult, err := o.agent.Execute(ctx, agents.ExecuteOptions{
 		Prompt:       o.buildImplementContent(task, plan, iteration),
+		PromptPrefix: "You are an implementation agent. Execute the plan for this task.\n\n",
 		PromptSuffix: taskImplementOutputSuffix,
 		WorkDir:      workDir,
 		Files:        files,
@@ -634,6 +636,7 @@ func (o *Orchestrator) review(ctx context.Context, task *tasks.Task, impl *Imple
 
 	execResult, err := o.agent.Execute(ctx, agents.ExecuteOptions{
 		Prompt:       o.buildReviewContent(task, impl),
+		PromptPrefix: "You are a code review agent. Review this implementation.\n\n",
 		PromptSuffix: taskReviewOutputSuffix,
 		WorkDir:      workDir,
 		Files:        files,
@@ -754,9 +757,7 @@ func (o *Orchestrator) buildPlanContent(task *tasks.Task) string {
 		branchInstruction = fmt.Sprintf("\n   Create your feature branch from `%s`.", o.runMeta.Branch)
 	}
 
-	return fmt.Sprintf(`You are a planning agent. Create a detailed execution plan for this task.
-
-## Task
+	return fmt.Sprintf(`## Task
 ID: %s
 Title: %s
 Description: %s
@@ -799,9 +800,7 @@ func (o *Orchestrator) buildImplementContent(task *tasks.Task, plan *PlanOutput,
 		branchInstruction = fmt.Sprintf("\n   Checkout `%s` before creating your feature branch.", o.runMeta.Branch)
 	}
 
-	return fmt.Sprintf(`You are an implementation agent. Execute the plan for this task.
-
-## Task
+	return fmt.Sprintf(`## Task
 ID: %s
 Title: %s
 Description: %s
@@ -842,9 +841,7 @@ func (o *Orchestrator) buildReviewPrompt(task *tasks.Task, impl *ImplementOutput
 }
 
 func (o *Orchestrator) buildReviewContent(task *tasks.Task, impl *ImplementOutput) string {
-	return fmt.Sprintf(`You are a code review agent. Review this implementation.
-
-## Task
+	return fmt.Sprintf(`## Task
 ID: %s
 Title: %s
 Description: %s

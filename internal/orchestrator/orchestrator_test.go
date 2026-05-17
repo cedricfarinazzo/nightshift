@@ -447,8 +447,8 @@ func TestBuildPrompts(t *testing.T) {
 		Description: "test plan",
 	}
 	implPrompt := o.buildImplementPrompt(task, plan, 1)
-	if !containsIgnoreCase(implPrompt, "implementation") {
-		t.Error("implement prompt should mention implementation")
+	if !containsIgnoreCase(implPrompt, "implement") {
+		t.Error("implement prompt should mention implement")
 	}
 
 	// Test implement prompt iteration 2

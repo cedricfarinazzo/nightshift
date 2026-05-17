@@ -121,6 +121,9 @@ func writePromptFile(ctx context.Context, opts ExecuteOptions) (path string, cle
 		return "", func() {}, nil, fmt.Errorf("create prompt file: %w", ferr)
 	}
 
+	if opts.PromptPrefix != "" {
+		prompt = opts.PromptPrefix + prompt
+	}
 	if opts.PromptSuffix != "" {
 		prompt = prompt + opts.PromptSuffix
 	}
