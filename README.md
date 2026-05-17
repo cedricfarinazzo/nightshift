@@ -243,11 +243,11 @@ providers:
   claude:
     enabled: true
     data_path: "~/.claude"
-    dangerously_skip_permissions: true
+    dangerously_skip_permissions: false
   codex:
     enabled: true
     data_path: "~/.codex"
-    dangerously_bypass_approvals_and_sandbox: true
+    dangerously_bypass_approvals_and_sandbox: false
 
 projects:
   - path: ~/code/sidecar
