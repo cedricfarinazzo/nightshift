@@ -134,45 +134,7 @@ func (a *CodexAgent) Execute(ctx context.Context, opts ExecuteOptions) (*Execute
 
 	// Run command
 	stdout, stderr, exitCode, err := a.runner.Run(ctx, a.binaryPath, args, opts.WorkDir, "")
-
-	result := &ExecuteResult{
-		Output:        stdout,
-		CompressStats: compressStats,
-		ExitCode:      exitCode,
-		Duration:      time.Since(start),
-	}
-
-	// Check for context timeout
-	if ctx.Err() == context.DeadlineExceeded {
-		result.Error = fmt.Sprintf("timeout after %v", timeout)
-		if stderr != "" {
-			result.Error = fmt.Sprintf("timeout after %v; stderr: %s", timeout, truncate(stderr, 2000))
-		}
-		if stdout != "" {
-			result.Output = stdout
-		}
-		result.ExitCode = -1
-		return result, ctx.Err()
-	}
-
-	// Check for other errors
-	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			result.ExitCode = exitErr.ExitCode()
-			result.Error = stderr
-		} else {
-			result.Error = err.Error()
-			if stderr != "" {
-				result.Error = fmt.Sprintf("%s; stderr: %s", err.Error(), truncate(stderr, 2000))
-			}
-		}
-		return result, err
-	}
-
-	// Try to parse JSON output
-	result.JSON = a.extractJSON([]byte(stdout))
-
-	return result, nil
+	return handleExecuteResult(ctx, stdout, stderr, exitCode, err, timeout, start, compressStats, a.extractJSON)
 }
 
 // ExecuteWithFiles runs codex with file context included.
@@ -184,9 +146,6 @@ func (a *CodexAgent) ExecuteWithFiles(ctx context.Context, prompt string, files 
 	})
 }
 
-func (a *CodexAgent) buildFileContext(files []string) string {
-	return buildFileContext(files)
-}
 
 func (a *CodexAgent) extractJSON(output []byte) []byte {
 	return extractJSON(output)

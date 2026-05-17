@@ -504,20 +504,3 @@ func TestAllDefinitionsSorted(t *testing.T) {
 	}
 }
 
-func TestQueue_NewAndNext(t *testing.T) {
-	q := NewQueue()
-	if q == nil {
-		t.Fatal("NewQueue returned nil")
-	}
-	// Next on empty queue returns nil.
-	if q.Next() != nil {
-		t.Error("Next on empty queue should return nil")
-	}
-}
-
-func TestQueue_AddAndNext(t *testing.T) {
-	q := NewQueue()
-	q.Add(Task{ID: "t1", Title: "First"})
-	// Current impl is a TODO stub — Next always returns nil.
-	// Test that Add doesn't panic.
-}

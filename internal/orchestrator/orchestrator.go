@@ -112,13 +112,12 @@ func DefaultConfig() Config {
 
 // Orchestrator manages agent execution using plan-implement-review loop.
 type Orchestrator struct {
-	agent         agents.Agent
-	queue         *tasks.Queue
-	config        Config
-	logger        *logging.Logger
-	eventHandler  EventHandler // optional callback for real-time events
-	runMeta       *RunMetadata
-	gitValidator  func(ctx context.Context, workDir string) error // injectable for tests
+	agent        agents.Agent
+	config       Config
+	logger       *logging.Logger
+	eventHandler EventHandler // optional callback for real-time events
+	runMeta      *RunMetadata
+	gitValidator func(ctx context.Context, workDir string) error // injectable for tests
 }
 
 // Option configures an Orchestrator.
@@ -128,13 +127,6 @@ type Option func(*Orchestrator)
 func WithAgent(a agents.Agent) Option {
 	return func(o *Orchestrator) {
 		o.agent = a
-	}
-}
-
-// WithQueue sets the task queue.
-func WithQueue(q *tasks.Queue) Option {
-	return func(o *Orchestrator) {
-		o.queue = q
 	}
 }
 
@@ -732,39 +724,6 @@ func (o *Orchestrator) commit(_ context.Context, task *tasks.Task, impl *Impleme
 	// - Send notifications
 	o.logger.Infof("commit: task=%s files=%d", task.ID, len(impl.FilesModified))
 	return nil
-}
-
-// Run processes all tasks in queue until empty or budget exhausted.
-func (o *Orchestrator) Run(ctx context.Context) error {
-	if o.queue == nil {
-		return errors.New("no task queue configured")
-	}
-
-	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
-
-		task := o.queue.Next()
-		if task == nil {
-			o.logger.Info("queue empty, stopping")
-			return nil
-		}
-
-		// Check budget before running
-		// TODO: Implement budget check based on task cost estimate
-
-		result, err := o.RunTask(ctx, task, o.config.WorkDir)
-		if err != nil {
-			o.logger.Errorf("task %s failed: %v", task.ID, err)
-			continue
-		}
-
-		o.logger.Infof("task %s: status=%s iterations=%d duration=%s",
-			result.TaskID, result.Status, result.Iterations, result.Duration)
-	}
 }
 
 // Prompt builders

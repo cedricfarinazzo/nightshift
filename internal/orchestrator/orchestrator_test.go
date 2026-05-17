@@ -3,7 +3,6 @@ package orchestrator
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"os/exec"
 	"strings"
 	"testing"
@@ -414,19 +413,6 @@ func TestDefaultConfig(t *testing.T) {
 	}
 }
 
-func TestRunNoQueue(t *testing.T) {
-	o := New()
-	err := o.Run(context.Background())
-	if err == nil {
-		t.Error("expected error for nil queue")
-	}
-	if !errors.Is(err, errors.New("no task queue configured")) {
-		// Just check error message contains expected text
-		if err.Error() != "no task queue configured" {
-			t.Errorf("error = %q, want 'no task queue configured'", err.Error())
-		}
-	}
-}
 
 func TestBuildPrompts(t *testing.T) {
 	o := New()

@@ -365,14 +365,13 @@ func TestClaudeAgent_ExecuteWithFiles(t *testing.T) {
 	}
 }
 
-func TestClaudeAgent_buildFileContext(t *testing.T) {
+func TestBuildFileContext(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	file1 := filepath.Join(tmpDir, "file1.txt")
 	file2 := filepath.Join(tmpDir, "file2.go")
 
-	agent := NewClaudeAgent()
-	ctx := agent.buildFileContext([]string{file1, file2})
+	ctx := buildFileContext([]string{file1, file2})
 
 	if ctx == "" {
 		t.Error("expected non-empty context")
