@@ -1,2 +1,0 @@
-?? reports/branch.txt
-?? reports/git-status.txt
