@@ -4,7 +4,6 @@ package providers
 import (
 	"bufio"
 	"bytes"
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -76,25 +75,6 @@ func NewCodexWithPath(dataPath string) *Codex {
 	return &Codex{
 		dataPath: dataPath,
 	}
-}
-
-// Name returns "codex".
-func (c *Codex) Name() string {
-	return "codex"
-}
-
-// Execute runs a task via Codex CLI.
-func (c *Codex) Execute(ctx context.Context, task Task) (Result, error) {
-	// TODO: Implement - spawn codex CLI process
-	return Result{}, nil
-}
-
-// Cost returns Codex's token pricing (cents per 1K tokens).
-// Based on GPT-4 pricing estimates.
-func (c *Codex) Cost() (inputCents, outputCents int64) {
-	// GPT-4: ~$10/M input, ~$30/M output (estimates)
-	// Per 1K: 1 cent input, 3 cents output
-	return 100, 300 // in hundredths of a cent for precision
 }
 
 // DataPath returns the configured data path.

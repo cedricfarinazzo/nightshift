@@ -604,23 +604,6 @@ func TestCodexRefreshRateLimits(t *testing.T) {
 	}
 }
 
-func TestCodexProvider_Name(t *testing.T) {
-	provider := NewCodex()
-	if provider.Name() != "codex" {
-		t.Errorf("Name() = %q, want %q", provider.Name(), "codex")
-	}
-}
-
-func TestCodexProvider_Cost(t *testing.T) {
-	provider := NewCodex()
-	input, output := provider.Cost()
-	if input != 100 {
-		t.Errorf("input cost = %d, want 100", input)
-	}
-	if output != 300 {
-		t.Errorf("output cost = %d, want 300", output)
-	}
-}
 
 func TestCodexProvider_DataPath(t *testing.T) {
 	path := "/custom/path"

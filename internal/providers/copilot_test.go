@@ -8,9 +8,6 @@ import (
 
 func TestNewCopilot_Defaults(t *testing.T) {
 	provider := NewCopilot()
-	if provider.Name() != "copilot" {
-		t.Errorf("Name() = %q, want %q", provider.Name(), "copilot")
-	}
 	if provider.dataPath == "" {
 		t.Error("expected non-empty dataPath")
 	}
@@ -24,13 +21,6 @@ func TestNewCopilotWithPath(t *testing.T) {
 	}
 }
 
-func TestCopilot_Cost(t *testing.T) {
-	provider := NewCopilot()
-	input, output := provider.Cost()
-	if input != 0 || output != 0 {
-		t.Errorf("Cost() = (%d, %d), want (0, 0) for request-based pricing", input, output)
-	}
-}
 
 func TestCopilot_LoadUsageData_NoFile(t *testing.T) {
 	tmpDir := t.TempDir()

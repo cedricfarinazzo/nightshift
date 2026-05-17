@@ -2,7 +2,6 @@
 package providers
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -48,30 +47,6 @@ func NewCopilotWithPath(dataPath string) *Copilot {
 	return &Copilot{
 		dataPath: dataPath,
 	}
-}
-
-// Name returns "copilot".
-func (c *Copilot) Name() string {
-	return "copilot"
-}
-
-// Execute runs a task via GitHub Copilot CLI.
-// Implementation note: GitHub Copilot CLI uses 'gh copilot' commands.
-func (c *Copilot) Execute(ctx context.Context, task Task) (Result, error) {
-	// TODO: Implement - spawn gh copilot CLI process
-	// According to GitHub docs, commands are:
-	// - gh copilot explain <code>
-	// - gh copilot suggest <prompt>
-	// For nightshift agent usage, we'd use 'gh copilot suggest' with prompts
-	return Result{}, nil
-}
-
-// Cost returns Copilot's token pricing (cents per 1K tokens).
-// GitHub Copilot uses a request-based model, not token-based.
-// Premium plans have monthly request limits, not per-token billing.
-// We return 0 to indicate no per-token cost.
-func (c *Copilot) Cost() (inputCents, outputCents int64) {
-	return 0, 0
 }
 
 // DataPath returns the configured data path.
