@@ -451,10 +451,15 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 		if planAgent == nil {
 			planAgent = o.implAgent
 		}
+		planWorkDir := ""
+		if ws != nil && len(ws.Repos) > 0 {
+			planWorkDir = ws.Repos[0].Path
+		}
 		planResult, err := planAgent.Execute(ctx, agents.ExecuteOptions{
 			Prompt:       o.buildPlanContent(ticket),
 			PromptPrefix: jiraPlanRolePrefix,
 			PromptSuffix: jiraPlanInstructionsSuffix,
+			WorkDir:      planWorkDir,
 			Timeout:      parseTimeout(planCfg.Timeout, 5*time.Minute),
 			Model:        planCfg.Model,
 			Compression:  o.compression,
@@ -889,6 +894,7 @@ func (o *Orchestrator) buildImplementSuffix(plan string, ws *Workspace) string {
 	b.WriteString("4. Do not commit or push — handled separately\n")
 	b.WriteString("5. On ambiguity, make reasonable assumption and document in comment\n")
 	b.WriteString("6. Do NOT stop early — continue until plan implemented, lint passes, tests pass\n")
+	b.WriteString("7. Never run `git init` under any circumstances\n")
 	if ws != nil && len(ws.Repos) > 0 {
 		b.WriteString("\n## Quality Checks (REQUIRED before finishing)\n")
 		b.WriteString("For each repo above, run commands below and fix ALL failures before stopping:\n\n")
