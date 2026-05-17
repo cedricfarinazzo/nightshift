@@ -279,7 +279,6 @@ func TestCreateJiraAgent_ReasoningEffort(t *testing.T) {
 	}
 }
 
-
 func TestRunJira_MissingConfig(t *testing.T) {
 	// Validate() catches missing required fields.
 	cfg := jira.JiraConfig{}
