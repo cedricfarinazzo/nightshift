@@ -302,6 +302,10 @@ func runScheduledTasks(ctx context.Context, cfg *config.Config, database *db.DB,
 			break
 		}
 
+		// Detect the current branch before any tasks run so it can be
+		// injected into RunMetadata for prompt branch instructions.
+		baseBranch, _ := orchestrator.CurrentBranch(ctx, projectPath)
+
 		orch := orchestrator.New(
 			orchestrator.WithAgent(choice.agent),
 			orchestrator.WithConfig(orchestrator.Config{
@@ -312,8 +316,12 @@ func runScheduledTasks(ctx context.Context, cfg *config.Config, database *db.DB,
 			orchestrator.WithLogger(logging.Component("orchestrator")),
 		)
 
-		// Select tasks
-		selectedTasks := selector.SelectTopN(projectPath, 5)
+		// Select tasks — respect schedule.max_tasks from config (default 5).
+		maxTasks := cfg.Schedule.MaxTasks
+		if maxTasks <= 0 {
+			maxTasks = 5
+		}
+		selectedTasks := selector.SelectTopN(projectPath, maxTasks)
 		if len(selectedTasks) == 0 {
 			if report != nil {
 				report.addTask(reporting.TaskResult{
@@ -360,6 +368,15 @@ func runScheduledTasks(ctx context.Context, cfg *config.Config, database *db.DB,
 
 			// Mark as assigned
 			st.MarkAssigned(taskInstance.ID, projectPath, string(scoredTask.Definition.Type))
+
+			orch.SetRunMetadata(&orchestrator.RunMetadata{
+				Provider:  choice.name,
+				TaskType:  string(scoredTask.Definition.Type),
+				TaskScore: scoredTask.Score,
+				CostTier:  scoredTask.Definition.CostTier.String(),
+				RunStart:  projectStart,
+				Branch:    baseBranch,
+			})
 
 			// Execute via orchestrator
 			result, err := orch.RunTask(ctx, taskInstance, projectPath)

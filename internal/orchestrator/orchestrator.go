@@ -112,12 +112,13 @@ func DefaultConfig() Config {
 
 // Orchestrator manages agent execution using plan-implement-review loop.
 type Orchestrator struct {
-	agent        agents.Agent
-	queue        *tasks.Queue
-	config       Config
-	logger       *logging.Logger
-	eventHandler EventHandler // optional callback for real-time events
-	runMeta      *RunMetadata
+	agent         agents.Agent
+	queue         *tasks.Queue
+	config        Config
+	logger        *logging.Logger
+	eventHandler  EventHandler // optional callback for real-time events
+	runMeta       *RunMetadata
+	gitValidator  func(ctx context.Context, workDir string) error // injectable for tests
 }
 
 // Option configures an Orchestrator.
@@ -158,6 +159,14 @@ func WithEventHandler(h EventHandler) Option {
 	}
 }
 
+// WithGitValidator overrides the git repository validation function.
+// Used in tests to bypass filesystem git checks.
+func WithGitValidator(fn func(ctx context.Context, workDir string) error) Option {
+	return func(o *Orchestrator) {
+		o.gitValidator = fn
+	}
+}
+
 // emit sends an event to the registered handler, if any.
 func (o *Orchestrator) emit(e Event) {
 	if o.eventHandler != nil {
@@ -189,8 +198,9 @@ func (o *Orchestrator) emitCompression(result *TaskResult, phase TaskStatus, s *
 // New creates an orchestrator with the given options.
 func New(opts ...Option) *Orchestrator {
 	o := &Orchestrator{
-		config: DefaultConfig(),
-		logger: logging.Component("orchestrator"),
+		config:       DefaultConfig(),
+		logger:       logging.Component("orchestrator"),
+		gitValidator: validateGitRepo,
 	}
 	for _, opt := range opts {
 		opt(o)
@@ -227,6 +237,35 @@ func (o *Orchestrator) RunTask(ctx context.Context, task *tasks.Task, workDir st
 	// Override workDir from config if provided
 	if workDir == "" && o.config.WorkDir != "" {
 		workDir = o.config.WorkDir
+	}
+
+	// Validate workDir is inside an existing git repository.
+	// Refusing to run in a non-git directory prevents agents from accidentally
+	// running git init in unintended locations (e.g. $HOME).
+	if workDir != "" {
+		if err := o.gitValidator(ctx, workDir); err != nil {
+			result.Status = StatusFailed
+			result.Error = fmt.Sprintf("workDir is not a git repository: %v", err)
+			result.Duration = time.Since(start)
+			o.log(result, "error", "invalid workDir", map[string]any{"workDir": workDir, "error": err.Error()})
+			o.emit(Event{Type: EventTaskEnd, TaskID: task.ID, Status: StatusFailed, Duration: result.Duration, Error: result.Error})
+			return result, fmt.Errorf("workDir is not a git repository: %w", err)
+		}
+	}
+
+	// Save current branch and restore it when the task exits, regardless of outcome.
+	// This prevents stacked branches when multiple tasks run sequentially on the same repo.
+	if workDir != "" {
+		if savedBranch, err := CurrentBranch(ctx, workDir); err == nil && savedBranch != "" && savedBranch != "HEAD" {
+			defer func() {
+				if restoreErr := checkoutBranch(context.Background(), workDir, savedBranch); restoreErr != nil {
+					o.logger.WarnCtx("branch restore failed", map[string]any{
+						"branch": savedBranch,
+						"error":  restoreErr.Error(),
+					})
+				}
+			}()
+		}
 	}
 
 	// Step 1: Plan
@@ -520,7 +559,7 @@ func (o *Orchestrator) implement(ctx context.Context, task *tasks.Task, plan *Pl
 	}
 
 	execResult, err := o.agent.Execute(ctx, agents.ExecuteOptions{
-		Prompt:       o.buildImplementContent(task, plan, iteration),
+		Prompt:       o.buildImplementContent(task, plan, iteration, workDir),
 		PromptPrefix: "You are an implementation agent. Execute the plan for this task.\n\n",
 		PromptSuffix: taskImplementOutputSuffix,
 		WorkDir:      workDir,
@@ -785,11 +824,11 @@ const taskImplementOutputSuffix = `
 }
 `
 
-func (o *Orchestrator) buildImplementPrompt(task *tasks.Task, plan *PlanOutput, iteration int) string {
-	return o.buildImplementContent(task, plan, iteration) + taskImplementOutputSuffix
+func (o *Orchestrator) buildImplementPrompt(task *tasks.Task, plan *PlanOutput, iteration int, workDir string) string {
+	return o.buildImplementContent(task, plan, iteration, workDir) + taskImplementOutputSuffix
 }
 
-func (o *Orchestrator) buildImplementContent(task *tasks.Task, plan *PlanOutput, iteration int) string {
+func (o *Orchestrator) buildImplementContent(task *tasks.Task, plan *PlanOutput, iteration int, workDir string) string {
 	iterationNote := ""
 	if iteration > 1 {
 		iterationNote = fmt.Sprintf("\n\n## Note\nThis is iteration %d. Previous attempts did not pass review. Pay attention to the feedback in the plan description.", iteration)
@@ -798,6 +837,11 @@ func (o *Orchestrator) buildImplementContent(task *tasks.Task, plan *PlanOutput,
 	branchInstruction := ""
 	if o.runMeta != nil && o.runMeta.Branch != "" {
 		branchInstruction = fmt.Sprintf("\n   Checkout `%s` before creating your feature branch.", o.runMeta.Branch)
+	}
+
+	workDirNote := ""
+	if workDir != "" {
+		workDirNote = fmt.Sprintf("\n   Your working directory is `%s`. Do not navigate outside it. Never run `git init`.", workDir)
 	}
 
 	return fmt.Sprintf(`## Task
@@ -812,14 +856,14 @@ Description: %s
 %v
 %s
 ## Instructions
-0. Before creating your branch, record the current branch name. Create and work on a new branch. Never modify or commit directly to the primary branch.%s
+0. Before creating your branch, record the current branch name. Create and work on a new branch. Never modify or commit directly to the primary branch.%s%s
    When finished, open a PR. After the PR is submitted, switch back to the original branch. If you cannot open a PR, leave the branch and explain next steps.
 1. If you create commits, include a concise message with these git trailers:
    Nightshift-Task: %s
    Nightshift-Ref: https://github.com/marcus/nightshift
 2. Implement the plan step by step
 3. Make all necessary code changes
-4. Ensure tests pass`, task.ID, task.Title, task.Description, plan.Description, plan.Steps, iterationNote, branchInstruction, task.Type)
+4. Ensure tests pass`, task.ID, task.Title, task.Description, plan.Description, plan.Steps, iterationNote, branchInstruction, workDirNote, task.Type)
 }
 
 // taskReviewOutputSuffix is the JSON schema for review output — protected from
@@ -976,6 +1020,38 @@ func CurrentBranch(ctx context.Context, workDir string) (string, error) {
 		return "", fmt.Errorf("git rev-parse --abbrev-ref HEAD: %w", err)
 	}
 	return strings.TrimSpace(string(out)), nil
+}
+
+// validateGitRepo verifies that workDir is inside an existing git repository.
+func validateGitRepo(ctx context.Context, workDir string) error {
+	cmd := exec.CommandContext(ctx, "git", "rev-parse", "--show-toplevel")
+	cmd.Dir = workDir
+	out, err := cmd.Output()
+	if err != nil {
+		return fmt.Errorf("not a git repository: %w", err)
+	}
+	repoRoot := strings.TrimSpace(string(out))
+
+	// Ensure the repo root is not $HOME or any parent of it.
+	home, err := os.UserHomeDir()
+	if err == nil {
+		absRoot, _ := filepath.Abs(repoRoot)
+		absHome, _ := filepath.Abs(home)
+		if absRoot == absHome {
+			return fmt.Errorf("git repository root is $HOME (%s): refusing to run agent there", repoRoot)
+		}
+	}
+	return nil
+}
+
+// checkoutBranch runs git checkout to restore a branch in the given directory.
+func checkoutBranch(ctx context.Context, workDir, branch string) error {
+	cmd := exec.CommandContext(ctx, "git", "checkout", branch)
+	cmd.Dir = workDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("git checkout %s: %s: %w", branch, strings.TrimSpace(string(out)), err)
+	}
+	return nil
 }
 
 // truncateStr returns s trimmed to maxLen characters, appending "..." if truncated.
