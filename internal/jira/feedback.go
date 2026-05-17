@@ -172,8 +172,8 @@ func (o *Orchestrator) ProcessFeedback(ctx context.Context, ticket Ticket, ws *W
 			o.emit("🤖 %s running: review-fix  (%s, timeout %s)", rfCfg.Provider, rfCfg.Model, timeout.Round(time.Minute))
 			rfStart := time.Now()
 			agentResult, err := agent.Execute(ctx, agents.ExecuteOptions{
-				Prompt:       buildReworkContent(ticket, reviewState, repo),
-				PromptSuffix: buildReworkSuffix(repo),
+				Prompt:       buildReworkContent(ticket),
+				PromptSuffix: buildReworkSuffix(reviewState, repo),
 				WorkDir:      repo.Path,
 				Timeout:      timeout,
 				Model:        rfCfg.Model,
@@ -266,19 +266,34 @@ func hasActionableComments(rs *PRReviewState) bool {
 
 // buildReworkPrompt constructs the agent prompt from PR review comments.
 // Ticket context prepended so agent can cross-reference original intent.
-// buildReworkContent returns the compressible portion (ticket data + review feedback).
-func buildReworkContent(ticket Ticket, review *PRReviewState, repo RepoWorkspace) string {
+// buildReworkContent returns only the compressible ticket data (description,
+// AC, comments). Review feedback is in buildReworkSuffix — never compressed.
+func buildReworkContent(ticket Ticket) string {
 	var b strings.Builder
-
 	fmt.Fprintf(&b, "## Ticket\nKey: %s\nTitle: %s\n", ticket.Key, ticket.Summary)
 	fmt.Fprintf(&b, "Description:\n%s\n", ticket.Description)
 	if ticket.AcceptanceCriteria != "" {
 		fmt.Fprintf(&b, "\nAcceptance Criteria:\n%s\n", ticket.AcceptanceCriteria)
 	}
 	buildCommentsSection(&b, ticket)
-	b.WriteString("\n---\n\n")
+	return b.String()
+}
 
-	fmt.Fprintf(&b, "## Review Feedback for %s\n\n", ticket.Key)
+// buildReworkSuffix returns review feedback + instructions (never compressed).
+// Reviewer comments, inline comments, CI failures, and operational instructions
+// must arrive verbatim — they contain file paths, line numbers, and code snippets.
+func buildReworkSuffix(review *PRReviewState, repo RepoWorkspace) string {
+	lintCmd := repo.LintCommand
+	if lintCmd == "" {
+		lintCmd = "golangci-lint run ./..."
+	}
+	testCmd := repo.TestCommand
+	if testCmd == "" {
+		testCmd = "go test ./..."
+	}
+	var b strings.Builder
+	b.WriteString("\n---\n\n")
+	fmt.Fprintf(&b, "## Review Feedback for PR\n\n")
 	fmt.Fprintf(&b, "PR: %s\nRepo: %s (branch: %s)\n\n", review.URL, repo.Name, repo.Branch)
 	b.WriteString("### Reviewer Comments\n\n")
 	for _, r := range review.Reviews {
@@ -311,20 +326,6 @@ func buildReworkContent(ticket Ticket, review *PRReviewState, repo RepoWorkspace
 	if review.HasConflict {
 		b.WriteString("### Merge Conflict\nResolve conflicts with base branch before push.\n\n")
 	}
-	return b.String()
-}
-
-// buildReworkSuffix returns the operational instructions (never compressed).
-func buildReworkSuffix(repo RepoWorkspace) string {
-	lintCmd := repo.LintCommand
-	if lintCmd == "" {
-		lintCmd = "golangci-lint run ./..."
-	}
-	testCmd := repo.TestCommand
-	if testCmd == "" {
-		testCmd = "go test ./..."
-	}
-	var b strings.Builder
 	b.WriteString("### Instructions\n")
 	b.WriteString("Address ALL reviewer feedback. For each comment:\n")
 	b.WriteString("1. Make requested change\n")
@@ -340,7 +341,7 @@ func buildReworkSuffix(repo RepoWorkspace) string {
 
 // buildReworkPrompt returns the full prompt (for tests/callers without compression).
 func buildReworkPrompt(ticket Ticket, review *PRReviewState, repo RepoWorkspace) string {
-	return buildReworkContent(ticket, review, repo) + buildReworkSuffix(repo)
+	return buildReworkContent(ticket) + buildReworkSuffix(review, repo)
 }
 
 // filterNewComments returns only comments created after lastSeen.
