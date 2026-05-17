@@ -455,16 +455,15 @@ func (o *Orchestrator) annotatePR(ctx context.Context, prURL string, task *tasks
 
 // plan spawns the plan agent to create an execution plan.
 func (o *Orchestrator) plan(ctx context.Context, task *tasks.Task, workDir string) (*PlanOutput, *agents.CompressStats, error) {
-	prompt := o.buildPlanPrompt(task)
-
 	ctx, cancel := context.WithTimeout(ctx, o.config.AgentTimeout)
 	defer cancel()
 
 	execResult, err := o.agent.Execute(ctx, agents.ExecuteOptions{
-		Prompt:      prompt,
-		WorkDir:     workDir,
-		Timeout:     o.config.AgentTimeout,
-		Compression: o.config.Compression,
+		Prompt:       o.buildPlanContent(task),
+		PromptSuffix: taskPlanOutputSuffix,
+		WorkDir:      workDir,
+		Timeout:      o.config.AgentTimeout,
+		Compression:  o.config.Compression,
 	})
 	if err != nil {
 		if execResult != nil && execResult.Output != "" {
@@ -505,8 +504,6 @@ func (o *Orchestrator) plan(ctx context.Context, task *tasks.Task, workDir strin
 
 // implement spawns the implement agent to execute the plan.
 func (o *Orchestrator) implement(ctx context.Context, task *tasks.Task, plan *PlanOutput, workDir string, iteration int) (*ImplementOutput, *agents.CompressStats, error) {
-	prompt := o.buildImplementPrompt(task, plan, iteration)
-
 	ctx, cancel := context.WithTimeout(ctx, o.config.AgentTimeout)
 	defer cancel()
 
@@ -522,11 +519,12 @@ func (o *Orchestrator) implement(ctx context.Context, task *tasks.Task, plan *Pl
 	}
 
 	execResult, err := o.agent.Execute(ctx, agents.ExecuteOptions{
-		Prompt:      prompt,
-		WorkDir:     workDir,
-		Files:       files,
-		Timeout:     o.config.AgentTimeout,
-		Compression: o.config.Compression,
+		Prompt:       o.buildImplementContent(task, plan, iteration),
+		PromptSuffix: taskImplementOutputSuffix,
+		WorkDir:      workDir,
+		Files:        files,
+		Timeout:      o.config.AgentTimeout,
+		Compression:  o.config.Compression,
 	})
 	if err != nil {
 		if execResult != nil && execResult.Output != "" {
@@ -620,8 +618,6 @@ func filterExistingFiles(files []string, workDir string) ([]string, []string) {
 
 // review spawns the review agent to check the implementation.
 func (o *Orchestrator) review(ctx context.Context, task *tasks.Task, impl *ImplementOutput, workDir string) (*ReviewOutput, *agents.CompressStats, error) {
-	prompt := o.buildReviewPrompt(task, impl)
-
 	ctx, cancel := context.WithTimeout(ctx, o.config.AgentTimeout)
 	defer cancel()
 
@@ -637,11 +633,12 @@ func (o *Orchestrator) review(ctx context.Context, task *tasks.Task, impl *Imple
 	}
 
 	execResult, err := o.agent.Execute(ctx, agents.ExecuteOptions{
-		Prompt:      prompt,
-		WorkDir:     workDir,
-		Files:       files,
-		Timeout:     o.config.AgentTimeout,
-		Compression: o.config.Compression,
+		Prompt:       o.buildReviewContent(task, impl),
+		PromptSuffix: taskReviewOutputSuffix,
+		WorkDir:      workDir,
+		Files:        files,
+		Timeout:      o.config.AgentTimeout,
+		Compression:  o.config.Compression,
 	})
 	if err != nil {
 		if execResult != nil && execResult.Output != "" {
@@ -735,7 +732,23 @@ func (o *Orchestrator) PlanPrompt(task *tasks.Task) string {
 	return o.buildPlanPrompt(task)
 }
 
+// taskPlanOutputSuffix is the JSON schema for plan output — protected from
+// compression via PromptSuffix so the machine-readable spec is never mangled.
+const taskPlanOutputSuffix = `
+7. Output only valid JSON (no markdown, no extra text). The output is read by a machine. Use this schema:
+
+{
+  "steps": ["step1", "step2", ...],
+  "files": ["file1.go", "file2.go", ...],
+  "description": "overall approach"
+}
+`
+
 func (o *Orchestrator) buildPlanPrompt(task *tasks.Task) string {
+	return o.buildPlanContent(task) + taskPlanOutputSuffix
+}
+
+func (o *Orchestrator) buildPlanContent(task *tasks.Task) string {
 	branchInstruction := ""
 	if o.runMeta != nil && o.runMeta.Branch != "" {
 		branchInstruction = fmt.Sprintf("\n   Create your feature branch from `%s`.", o.runMeta.Branch)
@@ -757,18 +770,25 @@ Description: %s
    Nightshift-Ref: https://github.com/marcus/nightshift
 4. Analyze the task requirements
 5. Identify files that need to be modified
-6. Create step-by-step implementation plan
-7. Output only valid JSON (no markdown, no extra text). The output is read by a machine. Use this schema:
+6. Create step-by-step implementation plan`, task.ID, task.Title, task.Description, branchInstruction, task.Type)
+}
+
+// taskImplementOutputSuffix is the JSON schema for implement output — protected
+// from compression via PromptSuffix.
+const taskImplementOutputSuffix = `
+5. Output a summary as JSON:
 
 {
-  "steps": ["step1", "step2", ...],
-  "files": ["file1.go", "file2.go", ...],
-  "description": "overall approach"
+  "files_modified": ["file1.go", ...],
+  "summary": "what was done"
 }
-`, task.ID, task.Title, task.Description, branchInstruction, task.Type)
-}
+`
 
 func (o *Orchestrator) buildImplementPrompt(task *tasks.Task, plan *PlanOutput, iteration int) string {
+	return o.buildImplementContent(task, plan, iteration) + taskImplementOutputSuffix
+}
+
+func (o *Orchestrator) buildImplementContent(task *tasks.Task, plan *PlanOutput, iteration int) string {
 	iterationNote := ""
 	if iteration > 1 {
 		iterationNote = fmt.Sprintf("\n\n## Note\nThis is iteration %d. Previous attempts did not pass review. Pay attention to the feedback in the plan description.", iteration)
@@ -800,17 +820,28 @@ Description: %s
    Nightshift-Ref: https://github.com/marcus/nightshift
 2. Implement the plan step by step
 3. Make all necessary code changes
-4. Ensure tests pass
-5. Output a summary as JSON:
+4. Ensure tests pass`, task.ID, task.Title, task.Description, plan.Description, plan.Steps, iterationNote, branchInstruction, task.Type)
+}
+
+// taskReviewOutputSuffix is the JSON schema for review output — protected from
+// compression via PromptSuffix.
+const taskReviewOutputSuffix = `
+5. Output your review as JSON:
 
 {
-  "files_modified": ["file1.go", ...],
-  "summary": "what was done"
-}
-`, task.ID, task.Title, task.Description, plan.Description, plan.Steps, iterationNote, branchInstruction, task.Type)
+  "passed": true/false,
+  "feedback": "detailed feedback",
+  "issues": ["issue1", "issue2", ...]
 }
 
+Set "passed" to true ONLY if the implementation is correct and complete.
+`
+
 func (o *Orchestrator) buildReviewPrompt(task *tasks.Task, impl *ImplementOutput) string {
+	return o.buildReviewContent(task, impl) + taskReviewOutputSuffix
+}
+
+func (o *Orchestrator) buildReviewContent(task *tasks.Task, impl *ImplementOutput) string {
 	return fmt.Sprintf(`You are a code review agent. Review this implementation.
 
 ## Task
@@ -828,17 +859,7 @@ Description: %s
 1. Confirm work was done on a branch (not primary) and is ready for a PR
 2. Check if implementation meets task requirements
 3. Verify code quality and correctness
-4. Check for bugs or issues
-5. Output your review as JSON:
-
-{
-  "passed": true/false,
-  "feedback": "detailed feedback",
-  "issues": ["issue1", "issue2", ...]
-}
-
-Set "passed" to true ONLY if the implementation is correct and complete.
-`, task.ID, task.Title, task.Description, impl.Summary, impl.FilesModified)
+4. Check for bugs or issues`, task.ID, task.Title, task.Description, impl.Summary, impl.FilesModified)
 }
 
 // prURLPattern matches standard GitHub pull request URLs.
