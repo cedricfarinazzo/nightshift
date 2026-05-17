@@ -21,23 +21,23 @@ type Agent interface {
 
 // ExecuteOptions configures an agent execution.
 type ExecuteOptions struct {
-	Prompt          string        // The prompt/task for the agent
-	WorkDir         string        // Working directory for execution
-	Files           []string      // Optional file paths to include as context
-	Timeout         time.Duration // Execution timeout (0 = default)
-	Model           string        // Model to use (optional, uses agent default if empty)
-	ReasoningEffort string        // Reasoning effort (optional; precedence: this value, then agent default, then CLI default)
-	Compression     *CompressConfig // nil = no compression
+	Prompt          string                 // The prompt/task for the agent
+	WorkDir         string                 // Working directory for execution
+	Files           []string               // Optional file paths to include as context
+	Timeout         time.Duration          // Execution timeout (0 = default)
+	Model           string                 // Model to use (optional, uses agent default if empty)
+	ReasoningEffort string                 // Reasoning effort (optional; precedence: this value, then agent default, then CLI default)
+	Compression     *CompressConfig        // nil = no compression
+	OnCompress      func(*CompressStats)   // called immediately after compression, before agent spawns; nil = no callback
 }
 
 // ExecuteResult holds the outcome of an agent execution.
 type ExecuteResult struct {
-	Output        string        // Agent's text output
-	JSON          []byte        // Structured JSON output if available
-	ExitCode      int           // Process exit code
-	Duration      time.Duration // Execution duration
-	Error         string        // Error message if failed
-	CompressStats *CompressStats // non-nil when prompt was compressed before execution
+	Output   string        // Agent's text output
+	JSON     []byte        // Structured JSON output if available
+	ExitCode int           // Process exit code
+	Duration time.Duration // Execution duration
+	Error    string        // Error message if failed
 }
 
 // IsSuccess returns true if the execution succeeded.

@@ -14,24 +14,25 @@ const validationTimeout = 2 * time.Minute
 
 // ValidationResult holds the outcome of LLM-based ticket quality evaluation.
 type ValidationResult struct {
-	Valid         bool                  `json:"valid"`
-	Score         float64               `json:"score"`
-	Issues        []string              `json:"issues"`
-	Missing       []string              `json:"missing"`
-	Suggestions   []string              `json:"suggestions"`
-	CompressStats *agents.CompressStats `json:"compress_stats,omitempty"`
+	Valid       bool     `json:"valid"`
+	Score       float64  `json:"score"`
+	Issues      []string `json:"issues"`
+	Missing     []string `json:"missing"`
+	Suggestions []string `json:"suggestions"`
 }
 
 // ValidateTicket uses an LLM agent to evaluate whether a ticket has enough
 // information for autonomous implementation. Returns a ValidationResult where
 // Valid is true if the ticket meets the quality threshold (score >= 6).
-func ValidateTicket(ctx context.Context, agent agents.Agent, ticket Ticket, compression *agents.CompressConfig) (*ValidationResult, error) {
+// onCompress is called immediately after compression completes, before the agent spawns; nil = no callback.
+func ValidateTicket(ctx context.Context, agent agents.Agent, ticket Ticket, compression *agents.CompressConfig, onCompress func(*agents.CompressStats)) (*ValidationResult, error) {
 	ctx, cancel := context.WithTimeout(ctx, validationTimeout)
 	defer cancel()
 
 	opts := agents.ExecuteOptions{
 		Prompt:      buildValidationPrompt(ticket),
 		Compression: compression,
+		OnCompress:  onCompress,
 	}
 	result, err := agent.Execute(ctx, opts)
 	if err != nil {
@@ -41,7 +42,6 @@ func ValidateTicket(ctx context.Context, agent agents.Agent, ticket Ticket, comp
 	if err != nil {
 		return nil, fmt.Errorf("jira: parse validation response for %s: %w\nraw output:\n%s", ticket.Key, err, result.Output)
 	}
-	vr.CompressStats = result.CompressStats
 	return vr, nil
 }
 

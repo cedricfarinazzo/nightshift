@@ -108,34 +108,38 @@ func compressViaAgent(ctx context.Context, cfg *CompressConfig, prompt string) (
 }
 
 // writePromptFile writes the (optionally compressed) prompt and any file context
-// to a temp file. Returns the file path, cleanup func, and compression stats (nil = no compression).
-func writePromptFile(ctx context.Context, opts ExecuteOptions) (path string, cleanup func(), stats *CompressStats, err error) {
+// to a temp file. Returns the file path and cleanup func. If compression ran,
+// opts.OnCompress is called before the temp file is written (i.e. before the agent spawns).
+func writePromptFile(ctx context.Context, opts ExecuteOptions) (path string, cleanup func(), err error) {
 	prompt, stats := CompressPrompt(ctx, opts.Compression, opts.Prompt)
+	if stats != nil && opts.OnCompress != nil {
+		opts.OnCompress(stats)
+	}
 
 	f, ferr := os.CreateTemp("", "nightshift-prompt-*.md")
 	if ferr != nil {
-		return "", func() {}, nil, fmt.Errorf("create prompt file: %w", ferr)
+		return "", func() {}, fmt.Errorf("create prompt file: %w", ferr)
 	}
 
 	if _, ferr = f.WriteString(prompt); ferr != nil {
 		_ = f.Close()
 		_ = os.Remove(f.Name())
-		return "", func() {}, nil, fmt.Errorf("write prompt: %w", ferr)
+		return "", func() {}, fmt.Errorf("write prompt: %w", ferr)
 	}
 
 	if len(opts.Files) > 0 {
 		if _, ferr = fmt.Fprintf(f, "\n\n---\n\n%s", buildFileContext(opts.Files)); ferr != nil {
 			_ = f.Close()
 			_ = os.Remove(f.Name())
-			return "", func() {}, nil, fmt.Errorf("write file context: %w", ferr)
+			return "", func() {}, fmt.Errorf("write file context: %w", ferr)
 		}
 	}
 
 	if ferr = f.Close(); ferr != nil {
 		_ = os.Remove(f.Name())
-		return "", func() {}, nil, fmt.Errorf("close prompt file: %w", ferr)
+		return "", func() {}, fmt.Errorf("close prompt file: %w", ferr)
 	}
 
 	name := f.Name()
-	return name, func() { _ = os.Remove(name) }, stats, nil
+	return name, func() { _ = os.Remove(name) }, nil
 }

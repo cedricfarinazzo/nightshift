@@ -236,7 +236,7 @@ func (o *Orchestrator) RunTask(ctx context.Context, task *tasks.Task, workDir st
 	o.emit(Event{Type: EventPhaseStart, Phase: StatusPlanning, TaskID: task.ID})
 	phaseStart := time.Now()
 
-	plan, planStats, err := o.plan(ctx, task, workDir)
+	plan, err := o.plan(ctx, task, result, workDir)
 	if err != nil {
 		result.Status = StatusFailed
 		result.Error = fmt.Sprintf("planning failed: %v", err)
@@ -245,9 +245,6 @@ func (o *Orchestrator) RunTask(ctx context.Context, task *tasks.Task, workDir st
 		o.emit(Event{Type: EventPhaseEnd, Phase: StatusPlanning, TaskID: task.ID, Duration: time.Since(phaseStart), Error: err.Error()})
 		o.emit(Event{Type: EventTaskEnd, TaskID: task.ID, Status: StatusFailed, Duration: result.Duration, Error: result.Error})
 		return result, err
-	}
-	if planStats != nil {
-		o.emitCompression(result, StatusPlanning, planStats)
 	}
 	result.Plan = plan
 	o.log(result, "info", "plan created", map[string]any{"steps": len(plan.Steps)})
@@ -265,7 +262,7 @@ func (o *Orchestrator) RunTask(ctx context.Context, task *tasks.Task, workDir st
 		o.emit(Event{Type: EventPhaseStart, Phase: StatusExecuting, TaskID: task.ID, Iteration: iteration})
 		phaseStart = time.Now()
 
-		impl, implStats, err := o.implement(ctx, task, plan, workDir, iteration)
+		impl, err := o.implement(ctx, task, plan, result, workDir, iteration)
 		if err != nil {
 			result.Status = StatusFailed
 			result.Error = fmt.Sprintf("implement failed (iteration %d): %v", iteration, err)
@@ -274,9 +271,6 @@ func (o *Orchestrator) RunTask(ctx context.Context, task *tasks.Task, workDir st
 			o.emit(Event{Type: EventPhaseEnd, Phase: StatusExecuting, TaskID: task.ID, Duration: time.Since(phaseStart), Error: err.Error()})
 			o.emit(Event{Type: EventTaskEnd, TaskID: task.ID, Status: StatusFailed, Duration: result.Duration, Error: result.Error})
 			return result, err
-		}
-		if implStats != nil {
-			o.emitCompression(result, StatusExecuting, implStats)
 		}
 		result.Output = impl.Summary
 		o.log(result, "info", "implementation complete", map[string]any{"files_modified": len(impl.FilesModified)})
@@ -287,7 +281,7 @@ func (o *Orchestrator) RunTask(ctx context.Context, task *tasks.Task, workDir st
 		o.emit(Event{Type: EventPhaseStart, Phase: StatusReviewing, TaskID: task.ID, Iteration: iteration})
 		phaseStart = time.Now()
 
-		review, reviewStats, err := o.review(ctx, task, impl, workDir)
+		review, err := o.review(ctx, task, impl, result, workDir)
 		if err != nil {
 			result.Status = StatusFailed
 			result.Error = fmt.Sprintf("review failed (iteration %d): %v", iteration, err)
@@ -296,9 +290,6 @@ func (o *Orchestrator) RunTask(ctx context.Context, task *tasks.Task, workDir st
 			o.emit(Event{Type: EventPhaseEnd, Phase: StatusReviewing, TaskID: task.ID, Duration: time.Since(phaseStart), Error: err.Error()})
 			o.emit(Event{Type: EventTaskEnd, TaskID: task.ID, Status: StatusFailed, Duration: result.Duration, Error: result.Error})
 			return result, err
-		}
-		if reviewStats != nil {
-			o.emitCompression(result, StatusReviewing, reviewStats)
 		}
 		o.emit(Event{Type: EventPhaseEnd, Phase: StatusReviewing, TaskID: task.ID, Duration: time.Since(phaseStart), Iteration: iteration})
 
@@ -454,7 +445,7 @@ func (o *Orchestrator) annotatePR(ctx context.Context, prURL string, task *tasks
 }
 
 // plan spawns the plan agent to create an execution plan.
-func (o *Orchestrator) plan(ctx context.Context, task *tasks.Task, workDir string) (*PlanOutput, *agents.CompressStats, error) {
+func (o *Orchestrator) plan(ctx context.Context, task *tasks.Task, result *TaskResult, workDir string) (*PlanOutput, error) {
 	prompt := o.buildPlanPrompt(task)
 
 	ctx, cancel := context.WithTimeout(ctx, o.config.AgentTimeout)
@@ -465,6 +456,7 @@ func (o *Orchestrator) plan(ctx context.Context, task *tasks.Task, workDir strin
 		WorkDir:     workDir,
 		Timeout:     o.config.AgentTimeout,
 		Compression: o.config.Compression,
+		OnCompress:  func(s *agents.CompressStats) { o.emitCompression(result, StatusPlanning, s) },
 	})
 	if err != nil {
 		if execResult != nil && execResult.Output != "" {
@@ -474,7 +466,7 @@ func (o *Orchestrator) plan(ctx context.Context, task *tasks.Task, workDir strin
 				"error":      execResult.Error,
 			})
 		}
-		return nil, nil, fmt.Errorf("agent execution: %w", err)
+		return nil, fmt.Errorf("agent execution: %w", err)
 	}
 
 	if !execResult.IsSuccess() {
@@ -485,7 +477,7 @@ func (o *Orchestrator) plan(ctx context.Context, task *tasks.Task, workDir strin
 				"error":      execResult.Error,
 			})
 		}
-		return nil, nil, fmt.Errorf("agent returned error: %s", execResult.Error)
+		return nil, fmt.Errorf("agent returned error: %s", execResult.Error)
 	}
 
 	plan := &PlanOutput{Raw: execResult.Output}
@@ -500,11 +492,11 @@ func (o *Orchestrator) plan(ctx context.Context, task *tasks.Task, workDir strin
 		plan.Description = execResult.Output
 	}
 
-	return plan, execResult.CompressStats, nil
+	return plan, nil
 }
 
 // implement spawns the implement agent to execute the plan.
-func (o *Orchestrator) implement(ctx context.Context, task *tasks.Task, plan *PlanOutput, workDir string, iteration int) (*ImplementOutput, *agents.CompressStats, error) {
+func (o *Orchestrator) implement(ctx context.Context, task *tasks.Task, plan *PlanOutput, result *TaskResult, workDir string, iteration int) (*ImplementOutput, error) {
 	prompt := o.buildImplementPrompt(task, plan, iteration)
 
 	ctx, cancel := context.WithTimeout(ctx, o.config.AgentTimeout)
@@ -527,6 +519,7 @@ func (o *Orchestrator) implement(ctx context.Context, task *tasks.Task, plan *Pl
 		Files:       files,
 		Timeout:     o.config.AgentTimeout,
 		Compression: o.config.Compression,
+		OnCompress:  func(s *agents.CompressStats) { o.emitCompression(result, StatusExecuting, s) },
 	})
 	if err != nil {
 		if execResult != nil && execResult.Output != "" {
@@ -537,7 +530,7 @@ func (o *Orchestrator) implement(ctx context.Context, task *tasks.Task, plan *Pl
 				"error":      execResult.Error,
 			})
 		}
-		return nil, nil, fmt.Errorf("agent execution: %w", err)
+		return nil, fmt.Errorf("agent execution: %w", err)
 	}
 
 	if !execResult.IsSuccess() {
@@ -549,7 +542,7 @@ func (o *Orchestrator) implement(ctx context.Context, task *tasks.Task, plan *Pl
 				"error":      execResult.Error,
 			})
 		}
-		return nil, nil, fmt.Errorf("agent returned error: %s", execResult.Error)
+		return nil, fmt.Errorf("agent returned error: %s", execResult.Error)
 	}
 
 	impl := &ImplementOutput{Raw: execResult.Output}
@@ -563,7 +556,7 @@ func (o *Orchestrator) implement(ctx context.Context, task *tasks.Task, plan *Pl
 		impl.Summary = execResult.Output
 	}
 
-	return impl, execResult.CompressStats, nil
+	return impl, nil
 }
 
 func filterExistingFiles(files []string, workDir string) ([]string, []string) {
@@ -619,7 +612,7 @@ func filterExistingFiles(files []string, workDir string) ([]string, []string) {
 }
 
 // review spawns the review agent to check the implementation.
-func (o *Orchestrator) review(ctx context.Context, task *tasks.Task, impl *ImplementOutput, workDir string) (*ReviewOutput, *agents.CompressStats, error) {
+func (o *Orchestrator) review(ctx context.Context, task *tasks.Task, impl *ImplementOutput, result *TaskResult, workDir string) (*ReviewOutput, error) {
 	prompt := o.buildReviewPrompt(task, impl)
 
 	ctx, cancel := context.WithTimeout(ctx, o.config.AgentTimeout)
@@ -642,6 +635,7 @@ func (o *Orchestrator) review(ctx context.Context, task *tasks.Task, impl *Imple
 		Files:       files,
 		Timeout:     o.config.AgentTimeout,
 		Compression: o.config.Compression,
+		OnCompress:  func(s *agents.CompressStats) { o.emitCompression(result, StatusReviewing, s) },
 	})
 	if err != nil {
 		if execResult != nil && execResult.Output != "" {
@@ -652,7 +646,7 @@ func (o *Orchestrator) review(ctx context.Context, task *tasks.Task, impl *Imple
 				"error":      execResult.Error,
 			})
 		}
-		return nil, nil, fmt.Errorf("agent execution: %w", err)
+		return nil, fmt.Errorf("agent execution: %w", err)
 	}
 
 	if !execResult.IsSuccess() {
@@ -664,7 +658,7 @@ func (o *Orchestrator) review(ctx context.Context, task *tasks.Task, impl *Imple
 				"error":      execResult.Error,
 			})
 		}
-		return nil, nil, fmt.Errorf("agent returned error: %s", execResult.Error)
+		return nil, fmt.Errorf("agent returned error: %s", execResult.Error)
 	}
 
 	review := &ReviewOutput{Raw: execResult.Output}
@@ -681,7 +675,7 @@ func (o *Orchestrator) review(ctx context.Context, task *tasks.Task, impl *Imple
 		review.Feedback = execResult.Output
 	}
 
-	return review, execResult.CompressStats, nil
+	return review, nil
 }
 
 // commit finalizes successful task completion.
