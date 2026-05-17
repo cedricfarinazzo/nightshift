@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/marcus/nightshift/internal/agents"
+	"github.com/marcus/nightshift/internal/logging"
 )
 
 const validationTimeout = 2 * time.Minute
@@ -30,8 +31,14 @@ func ValidateTicket(ctx context.Context, agent agents.Agent, ticket Ticket, comp
 	defer cancel()
 
 	opts := agents.ExecuteOptions{
-		Prompt:      buildValidationPrompt(ticket),
-		Compression: compression,
+		Prompt:       buildValidationContent(ticket),
+		PromptSuffix: validationFormatInstructions,
+		Compression:  compression,
+		OnCompress: func(s *agents.CompressStats) {
+			// Log compression metrics immediately so they appear while the agent runs.
+			logger := logging.Component("jira.validation")
+			logger.Infof("validation compress %d→%d chars (-%d%%) via %s", s.OriginalLen, s.CompressedLen, s.ReductionPct, s.Provider)
+		},
 	}
 	result, err := agent.Execute(ctx, opts)
 	if err != nil {
@@ -45,9 +52,18 @@ func ValidateTicket(ctx context.Context, agent agents.Agent, ticket Ticket, comp
 	return vr, nil
 }
 
-// buildValidationPrompt constructs the prompt sent to the LLM validator.
-// ~42% word reduction vs original (measured: 72 → 42 words static template).
-func buildValidationPrompt(ticket Ticket) string {
+// validationFormatInstructions is the critical output-format spec appended after
+// compression so the compressor cannot mangle the JSON schema.
+const validationFormatInstructions = `
+Respond in JSON only (no markdown, no code fences):
+{"valid": bool, "score": 1-10, "issues": [...], "missing": [...], "suggestions": [...]}
+
+Valid if score >= 6 and no critical issues.`
+
+// buildValidationContent returns the compressible portion of the validation prompt
+// (ticket data only). validationFormatInstructions is appended separately via
+// ExecuteOptions.PromptSuffix so it is never passed through the compressor.
+func buildValidationContent(ticket Ticket) string {
 	var comments strings.Builder
 	for _, c := range ticket.Comments {
 		fmt.Fprintf(&comments, "- %s: %s\n", c.Author, c.Body)
@@ -61,18 +77,19 @@ Description: %s
 Acceptance Criteria: %s
 Comments:
 %s
-Criteria: CLEAR OBJECTIVE, SUFFICIENT CONTEXT, ACCEPTANCE CRITERIA, SCOPE, NO AMBIGUITY
-
-Respond in JSON only (no markdown, no code fences):
-{"valid": bool, "score": 1-10, "issues": [...], "missing": [...], "suggestions": [...]}
-
-Valid if score >= 6 and no critical issues.`,
+Criteria: CLEAR OBJECTIVE, SUFFICIENT CONTEXT, ACCEPTANCE CRITERIA, SCOPE, NO AMBIGUITY`,
 		ticket.Key,
 		ticket.Summary,
 		ticket.Description,
 		ticket.AcceptanceCriteria,
 		comments.String(),
 	)
+}
+
+// buildValidationPrompt returns the full prompt (content + format instructions).
+// Used by tests and callers that do not use compression.
+func buildValidationPrompt(ticket Ticket) string {
+	return buildValidationContent(ticket) + validationFormatInstructions
 }
 
 // parseValidationResponse parses the LLM output into a ValidationResult.
