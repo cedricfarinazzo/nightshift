@@ -82,12 +82,42 @@ func ensurePidDir() error {
 	return os.MkdirAll(dir, 0755)
 }
 
-// writePidFile writes the current process PID to the PID file.
+// writePidFile atomically creates the PID file using O_EXCL to prevent two
+// daemon instances starting simultaneously. If the file already exists and the
+// recorded PID is still alive, returns an error. Stale files (dead PID) are
+// removed and the write is retried once.
 func writePidFile() error {
 	if err := ensurePidDir(); err != nil {
 		return fmt.Errorf("creating pid dir: %w", err)
 	}
-	return os.WriteFile(pidFilePath(), []byte(strconv.Itoa(os.Getpid())), 0644)
+	path := pidFilePath()
+	pid := []byte(strconv.Itoa(os.Getpid()))
+
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0644)
+	if err == nil {
+		_, werr := f.Write(pid)
+		_ = f.Close()
+		return werr
+	}
+	if !errors.Is(err, os.ErrExist) {
+		return fmt.Errorf("create pid file: %w", err)
+	}
+
+	// File exists — check if the recorded PID is alive.
+	existing, readErr := readPidFile()
+	if readErr == nil && isProcessRunning(existing) {
+		return fmt.Errorf("daemon already running (pid %d)", existing)
+	}
+
+	// Stale file: remove and retry once.
+	_ = os.Remove(path)
+	f, err = os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0644)
+	if err != nil {
+		return fmt.Errorf("create pid file after stale removal: %w", err)
+	}
+	_, werr := f.Write(pid)
+	_ = f.Close()
+	return werr
 }
 
 // readPidFile reads the PID from the PID file.
@@ -203,6 +233,7 @@ func runDaemonLoop(cfg *config.Config) error {
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	defer signal.Stop(sigCh)
 	go func() {
 		sig := <-sigCh
 		log.Infof("received signal %v, shutting down", sig)
