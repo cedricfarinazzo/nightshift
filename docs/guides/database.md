@@ -117,6 +117,27 @@ type Migration struct {
 }
 ```
 
+## Schema Evolution Advisor
+
+Nightshift includes a conservative, read-only Schema Evolution Advisor that compares the live SQLite schema with the migration definitions in `internal/db/migrations.go` and reports:
+
+- missing migrations (definitions that haven't been applied yet),
+- unexpected objects present in the database but not described by migrations (possible drift), and
+- simple column diffs with suggested SQL snippets.
+
+The advisor is advisory only — it does not modify the database. Example usage in Go:
+
+```go
+// db is *db.DB obtained via db.Open(...)
+analysis, err := db.AnalyzeSchema(db.SQL())
+if err != nil {
+    // handle error
+}
+// inspect analysis.MissingMigrations, analysis.UnexpectedObjects, analysis.ColumnDiffs
+```
+
+This tool is intended for diagnostics and pre-flight checks; it deliberately avoids automatic schema changes.
+
 `Migrate(db)` finds the current schema version (stored in a `schema_version` table), runs all migrations with a version number higher than current, and updates the version. It is transactional — a failed migration rolls back.
 
 ### Adding a new migration
