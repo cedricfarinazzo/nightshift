@@ -502,9 +502,9 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 			workDir = ws.Repos[0].Path
 		}
 		implResult, err := o.implAgent.Execute(ctx, agents.ExecuteOptions{
-			Prompt:       o.buildImplementContent(ticket, result.Plan, ws),
+			Prompt:       o.buildImplementContent(ticket),
 			PromptPrefix: jiraImplementRolePrefix,
-			PromptSuffix: o.buildImplementSuffix(ws),
+			PromptSuffix: o.buildImplementSuffix(result.Plan, ws),
 			WorkDir:      workDir,
 			Timeout:      timeout,
 			Model:        implCfg.Model,
@@ -854,8 +854,9 @@ func (o *Orchestrator) buildPlanPrompt(ticket Ticket) string {
 
 const jiraImplementRolePrefix = "Implementation agent. Implement ticket below.\n\n"
 
-// buildImplementContent returns only the compressible ticket data + plan.
-func (o *Orchestrator) buildImplementContent(ticket Ticket, plan string, ws *Workspace) string {
+// buildImplementContent returns only the compressible ticket data (description,
+// comments). Plan and workspace paths are in the suffix — never compressed.
+func (o *Orchestrator) buildImplementContent(ticket Ticket) string {
 	var b strings.Builder
 	buildParentSection(&b, ticket)
 	fmt.Fprintf(&b, "\n## Ticket\nKey: %s\nTitle: %s\n", ticket.Key, ticket.Summary)
@@ -864,6 +865,12 @@ func (o *Orchestrator) buildImplementContent(ticket Ticket, plan string, ws *Wor
 		fmt.Fprintf(&b, "\nAcceptance Criteria:\n%s\n", ticket.AcceptanceCriteria)
 	}
 	buildCommentsSection(&b, ticket)
+	return b.String()
+}
+
+// buildImplementSuffix returns plan + workspace + operational instructions (never compressed).
+func (o *Orchestrator) buildImplementSuffix(plan string, ws *Workspace) string {
+	var b strings.Builder
 	fmt.Fprintf(&b, "\n## Plan\n%s\n", plan)
 	if ws != nil && len(ws.Repos) > 0 {
 		b.WriteString("\n## Workspace\n")
@@ -875,12 +882,6 @@ func (o *Orchestrator) buildImplementContent(ticket Ticket, plan string, ws *Wor
 			b.WriteString("\nMake changes across ALL repos above. Use absolute paths. Don't limit edits to working directory.\n")
 		}
 	}
-	return b.String()
-}
-
-// buildImplementSuffix returns the operational instructions (never compressed).
-func (o *Orchestrator) buildImplementSuffix(ws *Workspace) string {
-	var b strings.Builder
 	b.WriteString("\n## Instructions\n")
 	b.WriteString("1. Implement plan step by step — complete EVERY step before stopping\n")
 	b.WriteString("2. Make all necessary code changes\n")
@@ -911,7 +912,7 @@ func (o *Orchestrator) buildImplementSuffix(ws *Workspace) string {
 
 // buildImplementPrompt constructs the full prompt (for tests/callers without compression).
 func (o *Orchestrator) buildImplementPrompt(ticket Ticket, plan string, ws *Workspace) string {
-	return jiraImplementRolePrefix + o.buildImplementContent(ticket, plan, ws) + o.buildImplementSuffix(ws)
+	return jiraImplementRolePrefix + o.buildImplementContent(ticket) + o.buildImplementSuffix(plan, ws)
 }
 
 // implementation summary so reviewers have full context inline.
