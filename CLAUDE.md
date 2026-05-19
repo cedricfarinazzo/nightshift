@@ -18,7 +18,7 @@ Repo: https://github.com/cedricfarinazzo/nightshift
 - **Logging**: `rs/zerolog`
 - **Config format**: YAML
 - **Build/release**: `Makefile` + `goreleaser`
-- **Docs site**: Docusaurus v3 (`website/`)
+- **Docs**: Plain markdown under `docs/` (no static-site generator)
 - **CI**: GitHub Actions (`.github/workflows/`)
 
 ---
@@ -173,36 +173,34 @@ internal/
     register.go         # RegisterCustomTasksFromConfig(): config → TaskDefinition; rolls back on failure
     selector.go         # Task selection logic (budget-aware, staleness-aware)
 
-docs/                   # Internal developer docs (NOT user-facing)
-  guides/
-    architecture.md            # Full architecture reference (component graph, data flow)
-    run-lifecycle.md           # End-to-end run lifecycle (daemon → scheduler → orchestrator → agent)
-    adding-tasks.md            # How to add a new built-in or custom task type
-    tasks-internals.md         # CostTier, RiskLevel, TaskCategory, selector scoring formula
-    budget-internals.md        # Budget modes, reserve, active tracking, Manager interfaces
-    state-and-snapshots.md     # RunRecord, staleness, Snapshot, snapshot retention
-    scheduling.md              # Cron vs interval config, daemon mode, time windows
-    orchestrator-internals.md  # Task orchestrator state machine, Jira phase lifecycle, ghExec
-    jira-pipeline.md           # Jira autonomous pipeline deep dive
-    workspace-management.md    # Workspace setup/cleanup, SSH URL requirement, branch conventions
-    integrations-dev.md        # Reader interface, how to add a new integration, Hint types
-    reporting.md               # Run reports, JSON results, daily summaries, retention
-    bus-factor-analysis.md     # GitParser, HHI, Gini, risk levels, bus-factor count
-    security.md                # Credentials, audit log, sandbox model
-    database.md                # Schema, migration system, how to add migrations
-    logging.md                 # zerolog setup, component loggers, log levels, jq queries
-    testing.md                 # Test patterns, MockRunner, stubJiraClient, e2e tests
+docs/                   # All documentation (plain markdown, no static-site generator)
+  README.md             # Index pointing at user/operations/dev trees
+  user/                 # End-user guides
+    introduction.md     installation.md     quick-start.md
+    configuration.md    cli-reference.md    tasks.md
+    agents.md           jira-pipeline.md    budget.md
+    scheduling.md       bus-factor.md       troubleshooting.md
+  operations/           # Running Nightshift as a long-lived service
+    daemon.md           systemd-install.md  logs-and-reports.md
+    data-and-backup.md  security.md         release.md
+  dev/                  # Internal / developer guides
+    architecture.md            # Package map, layers, key design constraints
+    run-lifecycle.md           # End-to-end run flow
+    orchestrator.md            # Task plan→implement→review loop
+    agents-internals.md        # CommandRunner, compression, temp-file pattern
+    jira-pipeline.md           # Phase state machine, resume, dependency graph
+    workspace.md               # Clone/branch/push conventions (Jira pipeline)
+    database.md                # Schema, migration system
+    budget-internals.md        # Capacity formula, provider APIs
+    tasks-internals.md         # TaskDefinition, selector scoring
+    state-and-snapshots.md     # RunRecord, staleness, snapshot collector
+    scheduling-internals.md    # Cron wrapper, SkipIfStillRunning
+    reporting.md               # Run reports, summaries, retention
+    logging.md                 # zerolog setup, printf-style API, jq queries
+    bus-factor.md              # HHI, Gini, risk classification
+    testing.md                 # MockRunner, stubJiraClient, e2e patterns
     contributing.md            # Dev setup, git conventions, PR checklist
     debugging.md               # Log locations, common errors + fixes
-    codex-budget-tracking.md   # Codex-specific usage tracking
-    website.md                 # Docusaurus site development
-  implemented/          # Design docs for completed features
-  deprecated/           # Archived docs
-
-website/                # Docusaurus v3 user-facing documentation site
-  docs/                 # User guides: installation, config, cli-reference, budget, scheduling,
-                        # tasks, agents, jira, troubleshooting, etc.
-  package.json          # Node.js deps; deployed to https://nightshift.haplab.com
 
 scripts/
   pre-commit.sh         # Runs gofmt, go vet, go build on staged .go files
@@ -316,7 +314,7 @@ Agents MUST follow these rules:
 - **Add gotchas as soon as discovered**: add them to the `## Gotchas` section below to avoid repeating the same investigation.
 - **On adding a new package, module, or file**: add it to the Project Structure section above with a one-line description.
 - **Before using any package**: search online for the latest stable version and docs; never assume a cached version is current.
-- **When user-facing docs in `website/docs/` become stale**: update them in the same PR as the code change.
+- **When user-facing docs in `docs/user/` become stale**: update them in the same PR as the code change.
 - **Security findings**: add to `SECURITY_AUDIT.md`.
 - **Agents are encouraged to add notes, new sections, or any content they find useful** directly into this file at any time. If it's worth knowing, put it here. This file is meant to grow over time as institutional knowledge accumulates.
 
