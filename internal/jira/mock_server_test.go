@@ -24,6 +24,7 @@ type mockServerConfig struct {
 	transitionsGet   string  // JSON for GET transitions
 	transitionsPost  int     // HTTP status for POST transitions (move)
 	searchPayload    string  // JSON for POST /rest/api/3/search
+	boardsPayload    string  // JSON for GET /rest/agile/1.0/board (board list/discovery)
 	boardPayload     string  // JSON for GET /rest/agile/1.0/board/{id}/issue
 	backlogPayload   string  // JSON for GET /rest/agile/1.0/board/{id}/backlog
 	failTransitions  bool    // force GET transitions to return error
@@ -51,6 +52,7 @@ func defaultMockConfig() mockServerConfig {
 		]}`,
 		transitionsPost: http.StatusNoContent,
 		searchPayload:   `{"total":0,"issues":[]}`,
+		boardsPayload:   `{"maxResults":50,"startAt":0,"total":0,"isLast":true,"values":[]}`,
 		boardPayload:    `{"startAt":0,"maxResults":50,"total":0,"issues":[]}`,
 		backlogPayload:  `{"startAt":0,"maxResults":50,"total":0,"issues":[]}`,
 	}
@@ -134,6 +136,12 @@ func newMockJiraClient(t *testing.T, cfg mockServerConfig) (*Client, *httptest.S
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(cfg.searchPayload))
+	})
+
+	// GET /rest/agile/1.0/board  (discoverBoardID — board list by project)
+	mux.HandleFunc("/rest/agile/1.0/board", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(cfg.boardsPayload))
 	})
 
 	// GET /rest/agile/1.0/board/{id}/issue  (fetchKanbanBoardTickets)
