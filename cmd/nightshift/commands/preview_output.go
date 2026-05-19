@@ -97,6 +97,9 @@ func renderPreviewText(result *previewResult, opts previewTextOptions) string {
 	if result.Compression != "" {
 		fmt.Fprintf(b, "  Compression: %s\n", result.Compression)
 	}
+	if result.WorkspaceMode != "" {
+		fmt.Fprintf(b, "  Workspace mode: %s\n", result.WorkspaceMode)
+	}
 
 	for _, run := range result.Runs {
 		b.WriteString("\n")
