@@ -458,7 +458,7 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 		planResult, err := planAgent.Execute(ctx, agents.ExecuteOptions{
 			Prompt:       o.buildPlanContent(ticket),
 			PromptPrefix: jiraPlanRolePrefix,
-			PromptSuffix: jiraPlanInstructionsSuffix,
+			PromptSuffix: o.buildPlanSuffix(ws),
 			WorkDir:      planWorkDir,
 			Timeout:      parseTimeout(planCfg.Timeout, 5*time.Minute),
 			Model:        planCfg.Model,
@@ -830,16 +830,28 @@ func buildCommentsSection(b *strings.Builder, ticket Ticket) {
 // buildPlanPrompt constructs the prompt for the plan phase.
 const jiraPlanRolePrefix = "Planning agent. Create implementation plan for ticket.\n\n"
 
-const jiraPlanInstructionsSuffix = `
-## Instructions
-1. Break work into ordered steps
-2. Identify files to create or modify
-3. Note dependencies and risks
-4. Output plan as plain text
-`
+// buildPlanSuffix returns plan instructions + workspace restriction (never compressed).
+func (o *Orchestrator) buildPlanSuffix(ws *Workspace) string {
+	var b strings.Builder
+	b.WriteString("\n## Instructions\n")
+	b.WriteString("1. Break work into ordered steps\n")
+	b.WriteString("2. Identify files to create or modify\n")
+	b.WriteString("3. Note dependencies and risks\n")
+	b.WriteString("4. Output plan as plain text\n")
+	b.WriteString("5. Do NOT edit, create, or delete any files — output plan text only\n")
+	if ws != nil && len(ws.Repos) > 0 {
+		b.WriteString("\n## WORKSPACE RESTRICTION (MANDATORY — DO NOT IGNORE)\n")
+		b.WriteString("If you need to read files to understand context, you may ONLY read files within:\n")
+		for _, repo := range ws.Repos {
+			fmt.Fprintf(&b, "  - %s\n", repo.Path)
+		}
+		b.WriteString("Do NOT read or write files outside these paths.\n")
+	}
+	return b.String()
+}
 
 // buildPlanContent returns only the compressible ticket data.
-// jiraPlanRolePrefix and jiraPlanInstructionsSuffix are delivered via
+// jiraPlanRolePrefix and buildPlanSuffix output are delivered via
 // PromptPrefix/PromptSuffix and never pass through the compressor.
 func (o *Orchestrator) buildPlanContent(ticket Ticket) string {
 	var b strings.Builder
@@ -853,8 +865,8 @@ func (o *Orchestrator) buildPlanContent(ticket Ticket) string {
 	return b.String()
 }
 
-func (o *Orchestrator) buildPlanPrompt(ticket Ticket) string {
-	return jiraPlanRolePrefix + o.buildPlanContent(ticket) + jiraPlanInstructionsSuffix
+func (o *Orchestrator) buildPlanPrompt(ticket Ticket, ws *Workspace) string {
+	return jiraPlanRolePrefix + o.buildPlanContent(ticket) + o.buildPlanSuffix(ws)
 }
 
 const jiraImplementRolePrefix = "Implementation agent. Implement ticket below.\n\n"
@@ -873,7 +885,7 @@ func (o *Orchestrator) buildImplementContent(ticket Ticket) string {
 	return b.String()
 }
 
-// buildImplementSuffix returns plan + workspace + operational instructions (never compressed).
+// buildImplementSuffix returns plan + workspace restriction + operational instructions (never compressed).
 func (o *Orchestrator) buildImplementSuffix(plan string, ws *Workspace) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "\n## Plan\n%s\n", plan)
@@ -883,8 +895,15 @@ func (o *Orchestrator) buildImplementSuffix(plan string, ws *Workspace) string {
 			fmt.Fprintf(&b, "- %s: %s (branch: %s, base: %s)\n",
 				repo.Name, repo.Path, repo.Branch, repo.BaseBranch)
 		}
+		b.WriteString("\n## WORKSPACE RESTRICTION (MANDATORY — DO NOT IGNORE)\n")
+		b.WriteString("You MUST ONLY edit files within the workspace directories listed above.\n")
+		b.WriteString("NEVER edit, create, or delete files outside these paths under any circumstances.\n")
+		b.WriteString("Permitted paths:\n")
+		for _, repo := range ws.Repos {
+			fmt.Fprintf(&b, "  - %s\n", repo.Path)
+		}
 		if len(ws.Repos) > 1 {
-			b.WriteString("\nMake changes across ALL repos above. Use absolute paths. Don't limit edits to working directory.\n")
+			b.WriteString("Make changes across ALL repos listed above, but NOWHERE ELSE.\n")
 		}
 	}
 	b.WriteString("\n## Instructions\n")

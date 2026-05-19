@@ -373,11 +373,11 @@ func TestBuildImplementPrompt_MultiRepo_CrossRepoInstruction(t *testing.T) {
 	if !strings.Contains(prompt, "ALL repos") {
 		t.Error("prompt missing cross-repo instruction")
 	}
-	if !strings.Contains(prompt, "absolute paths") {
-		t.Error("prompt missing absolute paths instruction")
+	if !strings.Contains(prompt, "WORKSPACE RESTRICTION") {
+		t.Error("prompt missing workspace restriction section")
 	}
-	if !strings.Contains(prompt, "working directory") {
-		t.Error("prompt missing working-directory scope warning")
+	if !strings.Contains(prompt, "ONLY edit files within") {
+		t.Error("prompt missing workspace restriction enforcement")
 	}
 }
 
@@ -411,7 +411,7 @@ func TestBuildPlanPrompt(t *testing.T) {
 		},
 	}
 
-	prompt := o.buildPlanPrompt(ticket)
+	prompt := o.buildPlanPrompt(ticket, nil)
 
 	for _, want := range []string{ticket.Key, ticket.Summary, ticket.Description, ticket.AcceptanceCriteria, "bob", "redis cluster"} {
 		if !strings.Contains(prompt, want) {
@@ -1036,7 +1036,7 @@ func TestBuildImplementPrompt_AcceptanceCriteria(t *testing.T) {
 func TestBuildPlanPrompt_NoComments(t *testing.T) {
 	o := &Orchestrator{cfg: JiraConfig{}}
 	ticket := Ticket{Key: "X-3", Summary: "bare", Description: "just a description"}
-	prompt := o.buildPlanPrompt(ticket)
+	prompt := o.buildPlanPrompt(ticket, nil)
 	if !strings.Contains(prompt, ticket.Key) {
 		t.Error("prompt missing key")
 	}
@@ -1048,7 +1048,7 @@ func TestBuildPlanPrompt_NoComments(t *testing.T) {
 func TestBuildPlanPrompt_NoAcceptanceCriteria(t *testing.T) {
 	o := &Orchestrator{cfg: JiraConfig{}}
 	ticket := Ticket{Key: "X-4", Summary: "bare", Description: "desc"}
-	prompt := o.buildPlanPrompt(ticket)
+	prompt := o.buildPlanPrompt(ticket, nil)
 	if strings.Contains(prompt, "Acceptance Criteria") {
 		t.Error("prompt should not contain Acceptance Criteria section when empty")
 	}
