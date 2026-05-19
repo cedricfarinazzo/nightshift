@@ -15,9 +15,6 @@ type ProjectConfig struct {
 	Label string       `mapstructure:"label"` // label filter (e.g., "nightshift")
 	Repos []RepoConfig `mapstructure:"repos"`
 
-	// Agile board ID — when set, tickets in the board's backlog are excluded from results.
-	BoardID int `mapstructure:"board_id"`
-
 	// Optional per-project phase overrides; zero-value means inherit global.
 	Validation PhaseConfig `mapstructure:"validation"`
 	Plan       PhaseConfig `mapstructure:"plan"`
