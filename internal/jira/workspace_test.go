@@ -144,6 +144,73 @@ func TestCleanupStaleWorkspaces_NonexistentRoot(t *testing.T) {
 	}
 }
 
+func TestCleanupStaleWorkspaces_ActiveFilePreservesWorkspace(t *testing.T) {
+	dir := t.TempDir()
+	wsDir := filepath.Join(dir, "PROJ-1")
+	if err := os.MkdirAll(wsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Set dir entry mtime to 31 days ago (would appear stale by old logic).
+	old := time.Now().Add(-31 * 24 * time.Hour)
+	if err := os.Chtimes(wsDir, old, old); err != nil {
+		t.Fatalf("Chtimes dir: %v", err)
+	}
+	// Write a file with recent mtime inside the workspace dir.
+	recentFile := filepath.Join(wsDir, "recent.txt")
+	if err := os.WriteFile(recentFile, []byte("active"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// File mtime is "now" by default after WriteFile — no Chtimes needed.
+
+	cfg := JiraConfig{WorkspaceRoot: dir, CleanupAfterDays: 30}
+	n, err := CleanupStaleWorkspaces(cfg)
+	if err != nil {
+		t.Fatalf("CleanupStaleWorkspaces: %v", err)
+	}
+	if n != 0 {
+		t.Errorf("removed %d workspaces, want 0 (recent file inside should prevent deletion)", n)
+	}
+	if _, err := os.Stat(wsDir); err != nil {
+		t.Errorf("workspace unexpectedly removed: %v", err)
+	}
+}
+
+func TestCleanupStaleWorkspaces_AllFilesStale(t *testing.T) {
+	dir := t.TempDir()
+	wsDir := filepath.Join(dir, "PROJ-2")
+	if err := os.MkdirAll(wsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-31 * 24 * time.Hour)
+	if err := os.Chtimes(wsDir, old, old); err != nil {
+		t.Fatalf("Chtimes dir: %v", err)
+	}
+	// Write a file and backdate both the file and the dir (WriteFile updates dir mtime).
+	staleFile := filepath.Join(wsDir, "old.txt")
+	if err := os.WriteFile(staleFile, []byte("stale"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(staleFile, old, old); err != nil {
+		t.Fatalf("Chtimes file: %v", err)
+	}
+	// Re-apply old mtime to dir since WriteFile updated it.
+	if err := os.Chtimes(wsDir, old, old); err != nil {
+		t.Fatalf("Chtimes dir after write: %v", err)
+	}
+
+	cfg := JiraConfig{WorkspaceRoot: dir, CleanupAfterDays: 30}
+	n, err := CleanupStaleWorkspaces(cfg)
+	if err != nil {
+		t.Fatalf("CleanupStaleWorkspaces: %v", err)
+	}
+	if n != 1 {
+		t.Errorf("removed %d workspaces, want 1 (all contents stale)", n)
+	}
+	if _, err := os.Stat(wsDir); !os.IsNotExist(err) {
+		t.Error("stale workspace still exists after cleanup")
+	}
+}
+
 func TestSetupWorkspace_InvalidTicketKey(t *testing.T) {
 	cfg := JiraConfig{
 		WorkspaceRoot:    t.TempDir(),
