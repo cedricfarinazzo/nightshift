@@ -3,6 +3,8 @@ package commands
 import (
 	"bufio"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"os"
@@ -23,6 +25,7 @@ import (
 	"github.com/cedricfarinazzo/nightshift/internal/reporting"
 	"github.com/cedricfarinazzo/nightshift/internal/state"
 	"github.com/cedricfarinazzo/nightshift/internal/tasks"
+	"github.com/cedricfarinazzo/nightshift/internal/workspace"
 	"github.com/mattn/go-isatty"
 	"github.com/muesli/termenv"
 	"github.com/spf13/cobra"
@@ -206,10 +209,13 @@ func runRun(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// Resolve branch: use flag value or detect current branch from first project
-	if branch == "" {
-		if detected, err := orchestrator.CurrentBranch(ctx, projects[0]); err == nil {
-			branch = detected
+	// Resolve branch: use flag value or detect current branch from first project.
+	// For workspace mode, branch will be detected per-repo after clone.
+	if branch == "" && (cfg.Workspace.Root == "" || len(cfg.Workspace.Repos) == 0) {
+		if len(projects) > 0 {
+			if detected, err := orchestrator.CurrentBranch(ctx, projects[0]); err == nil {
+				branch = detected
+			}
 		}
 	}
 
@@ -247,6 +253,10 @@ func runRun(cmd *cobra.Command, args []string) error {
 	}
 	if !dryRun {
 		params.report = newRunReport(time.Now())
+	}
+
+	if cfg.Workspace.Root != "" && len(cfg.Workspace.Repos) > 0 {
+		return workspacedRun(ctx, params)
 	}
 	return executeRun(ctx, params)
 }
@@ -426,11 +436,12 @@ type preflightProject struct {
 
 // preflightPlan collects all planned work before execution.
 type preflightPlan struct {
-	projects     []preflightProject
-	skipReasons  []string // global skip reasons (e.g., no provider)
-	ignoreBudget bool
-	branch       string // base branch for feature branches
-	compression  string // human-readable compression config, empty when disabled
+	projects      []preflightProject
+	skipReasons   []string // global skip reasons (e.g., no provider)
+	ignoreBudget  bool
+	branch        string // base branch for feature branches
+	compression   string // human-readable compression config, empty when disabled
+	workspaceMode string // non-empty when workspace mode is active, e.g. "~/.nightshift/workspaces (2 repos: a, b)"
 }
 
 // buildPreflight performs the planning phase: resolve provider, select tasks
@@ -440,6 +451,16 @@ func buildPreflight(p executeRunParams) (*preflightPlan, error) {
 		ignoreBudget: p.ignoreBudget,
 		branch:       p.branch,
 		compression:  compressionSummary(p.cfg),
+	}
+
+	// Populate workspace mode description when active.
+	if p.cfg.Workspace.Root != "" && len(p.cfg.Workspace.Repos) > 0 {
+		names := make([]string, len(p.cfg.Workspace.Repos))
+		for i, r := range p.cfg.Workspace.Repos {
+			names[i] = r.Name
+		}
+		plan.workspaceMode = fmt.Sprintf("%s (%d repos: %s)",
+			p.cfg.Workspace.Root, len(p.cfg.Workspace.Repos), strings.Join(names, ", "))
 	}
 
 	eligibleCount := 0
@@ -542,6 +563,9 @@ func displayPreflight(w io.Writer, plan *preflightPlan) {
 	if plan.compression != "" {
 		_, _ = fmt.Fprintf(w, "Compression: %s\n", plan.compression)
 	}
+	if plan.workspaceMode != "" {
+		_, _ = fmt.Fprintf(w, "Workspace mode: %s\n", plan.workspaceMode)
+	}
 
 	// Count active projects (those with tasks)
 	active := 0
@@ -587,6 +611,282 @@ func displayPreflight(w io.Writer, plan *preflightPlan) {
 	}
 
 	_, _ = fmt.Fprintln(w)
+}
+
+// newRunID generates an 8-byte hex run identifier.
+func newRunID() string {
+	b := make([]byte, 8)
+	if _, err := rand.Read(b); err != nil {
+		return fmt.Sprintf("%d", time.Now().UnixNano())
+	}
+	return hex.EncodeToString(b)
+}
+
+// workspacedRun clones each configured repo into a fresh workspace and runs
+// tasks there, using the repo Name as the state key for cooldown tracking.
+func workspacedRun(ctx context.Context, p executeRunParams) error {
+	start := time.Now()
+
+	wsCfg := workspaceConfigFromApp(p.cfg)
+
+	// For workspace mode, build a minimal preflight showing workspace repos
+	choice, err := selectProvider(p.cfg, p.budgetMgr, p.log, p.ignoreBudget)
+	if err != nil {
+		return fmt.Errorf("no provider: %w", err)
+	}
+
+	plan := &preflightPlan{
+		branch:   p.branch,
+		projects: make([]preflightProject, 0),
+	}
+	for _, r := range wsCfg.Repos {
+		plan.projects = append(plan.projects, preflightProject{
+			path:     r.Name,
+			provider: choice,
+		})
+	}
+
+	if isInteractive() {
+		displayPreflightColored(plan)
+	} else {
+		displayPreflight(os.Stdout, plan)
+	}
+
+	if p.dryRun {
+		fmt.Println("[dry-run] No tasks executed.")
+		return nil
+	}
+
+	proceed, err := confirmRun(p)
+	if err != nil {
+		return err
+	}
+	if !proceed {
+		fmt.Println("Cancelled.")
+		return nil
+	}
+
+	runID := newRunID()
+
+	// Clone-timeout: give 5 min for workspace setup, separate from agent timeout.
+	cloneCtx, cloneCancel := context.WithTimeout(ctx, 5*time.Minute)
+	defer cloneCancel()
+
+	ws, err := workspace.SetupWorkspace(cloneCtx, wsCfg, runID)
+	if err != nil {
+		return fmt.Errorf("setup workspace: %w", err)
+	}
+	cloneCancel()
+
+	var renderer *liveRenderer
+	if isInteractive() {
+		renderer = newLiveRenderer()
+		defer renderer.cleanup()
+	}
+
+	orchOpts := []orchestrator.Option{
+		orchestrator.WithAgent(choice.agent),
+		orchestrator.WithConfig(orchestrator.Config{
+			MaxIterations: 3,
+			AgentTimeout:  p.agentTimeout,
+			Compression:   compressionConfigFromApp(p.cfg),
+		}),
+		orchestrator.WithLogger(logging.Component("orchestrator")),
+	}
+	if renderer != nil {
+		orchOpts = append(orchOpts, orchestrator.WithEventHandler(renderer.HandleEvent))
+	}
+	orch := orchestrator.New(orchOpts...)
+
+	var tasksRun, tasksCompleted, tasksFailed int
+	projectStart := time.Now()
+
+	for _, rw := range ws.Repos {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
+		// Use repo Name as stable state key (not UUID path) so cooldowns work.
+		stateKey := rw.Name
+		projectTaskTypes := make([]string, 0)
+		projectTokensUsed := 0
+		projectCompleted := 0
+		projectFailed := 0
+
+		// Detect branch from cloned workspace repo (or use flag value from params)
+		repoBranch := p.branch
+		if repoBranch == "" {
+			if detected, err := orchestrator.CurrentBranch(ctx, rw.Path); err == nil {
+				repoBranch = detected
+			}
+		}
+
+		// Select tasks for this workspace repo using its path as the project key.
+		var selectedTasks []tasks.ScoredTask
+		if p.taskFilter != "" {
+			def, err := tasks.GetDefinition(tasks.TaskType(p.taskFilter))
+			if err != nil {
+				return fmt.Errorf("unknown task type: %s", p.taskFilter)
+			}
+			selectedTasks = []tasks.ScoredTask{{
+				Definition: def,
+				Score:      p.selector.ScoreTask(def.Type, stateKey),
+				Project:    stateKey,
+			}}
+		} else if p.randomTask {
+			if picked := p.selector.SelectRandom(stateKey); picked != nil {
+				selectedTasks = []tasks.ScoredTask{*picked}
+			}
+		} else {
+			n := p.maxTasks
+			if n <= 0 {
+				n = 1
+			}
+			selectedTasks = p.selector.SelectTopN(stateKey, n)
+		}
+
+		if len(selectedTasks) == 0 {
+			p.log.Infof("no tasks for workspace repo %s", rw.Name)
+			continue
+		}
+
+		if !isInteractive() {
+			fmt.Printf("\n=== Workspace Repo: %s (%s) ===\n", rw.Name, rw.Path)
+			fmt.Printf("Provider: %s\n", choice.name)
+		}
+
+		orch.SetRunMetadata(&orchestrator.RunMetadata{
+			Provider: choice.name,
+			RunStart: projectStart,
+			Branch:   repoBranch,
+		})
+
+		for _, scoredTask := range selectedTasks {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			default:
+			}
+
+			tasksRun++
+			if !isInteractive() {
+				fmt.Printf("\n--- Running: %s (via %s) ---\n", scoredTask.Definition.Name, choice.name)
+			}
+			projectTaskTypes = append(projectTaskTypes, string(scoredTask.Definition.Type))
+
+			taskInstance := &tasks.Task{
+				ID:          fmt.Sprintf("%s:%s", scoredTask.Definition.Type, stateKey),
+				Title:       scoredTask.Definition.Name,
+				Description: scoredTask.Definition.Description,
+				Priority:    int(scoredTask.Score),
+				Type:        scoredTask.Definition.Type,
+			}
+
+			p.st.MarkAssigned(taskInstance.ID, stateKey, string(scoredTask.Definition.Type))
+			result, runErr := orch.RunTask(ctx, taskInstance, rw.Path)
+			p.st.ClearAssigned(taskInstance.ID)
+
+			if runErr != nil {
+				tasksFailed++
+				projectFailed++
+				p.log.Errorf("task %s failed: %v", taskInstance.ID, runErr)
+				if p.report != nil {
+					p.report.addTask(reporting.TaskResult{
+						Project:  rw.Path,
+						TaskType: string(scoredTask.Definition.Type),
+						Title:    scoredTask.Definition.Name,
+						Status:   "failed",
+						Duration: result.Duration,
+					})
+				}
+				continue
+			}
+
+			switch result.Status {
+			case orchestrator.StatusCompleted:
+				tasksCompleted++
+				projectCompleted++
+				if !isInteractive() {
+					fmt.Printf("  COMPLETED in %d iteration(s) (%s)\n", result.Iterations, result.Duration)
+				}
+				p.st.RecordTaskRun(stateKey, string(scoredTask.Definition.Type))
+				_, maxTok := scoredTask.Definition.EstimatedTokens()
+				projectTokensUsed += maxTok
+				if p.report != nil {
+					p.report.addTask(reporting.TaskResult{
+						Project:    rw.Path,
+						TaskType:   string(scoredTask.Definition.Type),
+						Title:      scoredTask.Definition.Name,
+						Status:     "completed",
+						OutputType: result.OutputType,
+						OutputRef:  result.OutputRef,
+						TokensUsed: maxTok,
+						Duration:   result.Duration,
+						Notes:      compressionNotes(result.Logs),
+					})
+				}
+			default:
+				tasksFailed++
+				projectFailed++
+				if !isInteractive() {
+					fmt.Printf("  FAILED: %s\n", result.Error)
+				}
+				if p.report != nil {
+					p.report.addTask(reporting.TaskResult{
+						Project:    rw.Path,
+						TaskType:   string(scoredTask.Definition.Type),
+						Title:      scoredTask.Definition.Name,
+						Status:     "failed",
+						SkipReason: result.Error,
+						Duration:   result.Duration,
+					})
+				}
+			}
+		}
+
+		p.st.RecordProjectRun(stateKey)
+		projectStatus := "partial"
+		if projectFailed == 0 && projectCompleted > 0 {
+			projectStatus = "success"
+		}
+		if projectCompleted == 0 && projectFailed > 0 {
+			projectStatus = "failed"
+		}
+		p.st.AddRunRecord(state.RunRecord{
+			StartTime:  projectStart,
+			EndTime:    time.Now(),
+			Provider:   choice.name,
+			Project:    rw.Path,
+			Tasks:      projectTaskTypes,
+			TokensUsed: projectTokensUsed,
+			Status:     projectStatus,
+			Branch:     p.branch,
+		})
+	}
+
+	duration := time.Since(start)
+	if isInteractive() {
+		displayRunSummaryColored(duration, tasksRun, tasksCompleted, tasksFailed, nil)
+	} else {
+		fmt.Printf("\n=== Run Complete ===\n")
+		fmt.Printf("Duration: %s\n", duration.Round(time.Second))
+		fmt.Printf("Tasks: %d run, %d completed, %d failed\n", tasksRun, tasksCompleted, tasksFailed)
+	}
+
+	p.log.InfoCtx("workspace run complete", map[string]any{
+		"duration":  duration.String(),
+		"tasks_run": tasksRun,
+		"completed": tasksCompleted,
+		"failed":    tasksFailed,
+		"run_id":    runID,
+	})
+
+	if p.report != nil {
+		p.report.finalize(p.cfg, p.log)
+	}
+	return nil
 }
 
 func executeRun(ctx context.Context, p executeRunParams) error {

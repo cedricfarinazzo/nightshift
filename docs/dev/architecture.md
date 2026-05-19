@@ -11,6 +11,7 @@ graph TD
     CLI --> Tasks["internal/tasks<br/>~60 built-ins + selector"]
     CLI --> Orch["internal/orchestrator<br/>plan→implement→review"]
     CLI --> JiraOrch["internal/jira<br/>phase machine"]
+    CLI --> WS["internal/workspace<br/>clone-based workspaces"]
     CLI --> DB["internal/db<br/>SQLite + migrations"]
     CLI --> Security["internal/security<br/>credentials, audit, sandbox"]
     CLI --> Sched["internal/scheduler<br/>cron + SkipIfStillRunning"]

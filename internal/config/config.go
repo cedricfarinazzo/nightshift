@@ -28,6 +28,20 @@ type Config struct {
 	Reporting         ReportingConfig         `mapstructure:"reporting"`
 	Jira              jira.JiraConfig         `mapstructure:"jira"`
 	PromptCompression PromptCompressionConfig `mapstructure:"prompt_compression"`
+	Workspace         WorkspaceConfig         `mapstructure:"workspace"`
+}
+
+// WorkspaceConfig enables clone-based isolated task execution.
+// When Root is non-empty, each run clones repos into a fresh workspace.
+type WorkspaceConfig struct {
+	Root  string                `mapstructure:"root"`
+	Repos []WorkspaceRepoConfig `mapstructure:"repos"`
+}
+
+// WorkspaceRepoConfig defines one repository to clone per workspace run.
+type WorkspaceRepoConfig struct {
+	URL  string `mapstructure:"url"`
+	Name string `mapstructure:"name"` // optional; defaults to repo basename without .git
 }
 
 // PromptCompressionConfig controls LLM-based prompt compression before agent execution.
@@ -353,7 +367,7 @@ var (
 	ErrCustomTaskInvalidCategory    = errors.New("custom task: invalid category")
 	ErrCustomTaskInvalidCostTier    = errors.New("custom task: invalid cost_tier")
 	ErrCustomTaskInvalidRiskLevel   = errors.New("custom task: invalid risk_level")
-	ErrCustomTaskDuplicateType      = errors.New("custom task: duplicate type")
+	ErrCustomTaskDuplicateType = errors.New("custom task: duplicate type")
 )
 
 var customTaskTypeRe = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
@@ -458,6 +472,24 @@ func Validate(cfg *Config) error {
 		return err
 	}
 
+	// Workspace validation
+	if cfg.Workspace.Root != "" {
+		normalizeWorkspaceConfig(&cfg.Workspace)
+		if len(cfg.Workspace.Repos) == 0 {
+			return fmt.Errorf("workspace.root is set but workspace.repos is empty")
+		}
+		for i, r := range cfg.Workspace.Repos {
+			if !strings.HasPrefix(r.URL, "git@") {
+				return fmt.Errorf("workspace.repos[%d].url %q must be an SSH URL starting with git@", i, r.URL)
+			}
+			if strings.ContainsAny(r.Name, `/\`) || strings.Contains(r.Name, "..") {
+				return fmt.Errorf("workspace.repos[%d].name %q contains path separators or '..'", i, r.Name)
+			}
+		}
+	} else if len(cfg.Workspace.Repos) > 0 {
+		return fmt.Errorf("workspace.repos is set but workspace.root is empty")
+	}
+
 	return nil
 }
 
@@ -524,6 +556,16 @@ func validateCustomTasks(tasks []CustomTaskConfig) error {
 func normalizeBudgetConfig(cfg *Config) {
 	if cfg == nil {
 		return
+	}
+}
+
+// normalizeWorkspaceConfig fills in missing repo Names from URL basenames.
+func normalizeWorkspaceConfig(ws *WorkspaceConfig) {
+	for i, r := range ws.Repos {
+		if r.Name == "" {
+			base := filepath.Base(r.URL)
+			ws.Repos[i].Name = strings.TrimSuffix(base, ".git")
+		}
 	}
 }
 

@@ -9,20 +9,12 @@ func validCfg() JiraConfig {
 		Site:     "mysite",
 		Email:    "user@example.com",
 		TokenEnv: "NIGHTSHIFT_JIRA_TOKEN",
-		Project:  "PROJ",
-		Label:    "nightshift",
-		Repos:    []RepoConfig{{Name: "repo", URL: "https://github.com/org/repo"}},
+		Projects: []ProjectConfig{{Key: "PROJ", Label: "nightshift", Repos: []RepoConfig{{Name: "repo", URL: "https://github.com/org/repo"}}}},
 	}
 }
 
 func TestClientAccessors(t *testing.T) {
-	c := &Client{cfg: JiraConfig{Project: "MYPROJ", Label: "nightshift"}}
-	if got := c.ProjectKey(); got != "MYPROJ" {
-		t.Errorf("ProjectKey() = %q, want MYPROJ", got)
-	}
-	if got := c.Label(); got != "nightshift" {
-		t.Errorf("Label() = %q, want nightshift", got)
-	}
+	c := &Client{cfg: JiraConfig{Projects: []ProjectConfig{{Key: "MYPROJ", Label: "nightshift"}}}}
 	// Raw() returns nil when no underlying client is set — just verify no panic.
 	if raw := c.Raw(); raw != nil {
 		t.Error("Raw() should be nil for uninitialized client")

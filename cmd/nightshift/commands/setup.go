@@ -231,11 +231,13 @@ type setupModel struct {
 	codexEffortIdx   int
 	copilotEffortIdx int
 
-	taskPresetCursor int
-	taskCursor       int
-	taskItems        []taskItem
-	taskErr          string
-	preset           setup.Preset
+	taskPresetCursor   int
+	taskCursor         int
+	taskViewportOffset int
+	taskItems          []taskItem
+	taskErr            string
+	preset             setup.Preset
+	windowHeight int
 
 	scheduleMode      string
 	scheduleCursor    int
@@ -378,6 +380,24 @@ const (
 	pathActionSkip pathAction = iota
 	pathActionAdd
 )
+
+// calculateTaskViewportHeight computes the number of task items to display
+// based on terminal height, reserving space for header/footer/indicators.
+// Returns at least 5 items even on small terminals.
+func (m *setupModel) calculateTaskViewportHeight() int {
+	// Reserve space: ~8 lines for header/footer/indicators
+	// (title, instruction, above/below indicators, error, footer)
+	const headerFooterReserved = 8
+	if m.windowHeight > 0 {
+		h := m.windowHeight - headerFooterReserved
+		if h < 5 {
+			h = 5 // minimum visible items
+		}
+		return h
+	}
+	// Fallback before first WindowSizeMsg — conservative to avoid initial overflow
+	return 10
+}
 
 var (
 	styleHeader = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("69"))
@@ -697,6 +717,8 @@ func (m *setupModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			codexModels = opts
 			m.codexModelIdx = modelIndex(codexModels, m.cfg.Providers.Codex.Model)
 		}
+	case tea.WindowSizeMsg:
+		m.windowHeight = msg.Height
 	}
 
 	return m, cmd
@@ -821,7 +843,17 @@ func (m *setupModel) View() string {
 			b.WriteString(styleWarn.Render("No task definitions found."))
 			b.WriteString("\n")
 		} else {
-			for i, item := range m.taskItems {
+			vh := m.calculateTaskViewportHeight()
+			start := m.taskViewportOffset
+			end := start + vh
+			if end > len(m.taskItems) {
+				end = len(m.taskItems)
+			}
+			if start > 0 {
+				fmt.Fprintf(&b, "  ... (%d more above)\n", start)
+			}
+			for i := start; i < end; i++ {
+				item := m.taskItems[i]
 				cursor := " "
 				if i == m.taskCursor {
 					cursor = ">"
@@ -831,6 +863,9 @@ func (m *setupModel) View() string {
 					check = "x"
 				}
 				fmt.Fprintf(&b, " %s [%s] %-22s %s\n", cursor, check, item.def.Type, item.def.Name)
+			}
+			if end < len(m.taskItems) {
+				fmt.Fprintf(&b, "  ... (%d more below)\n", len(m.taskItems)-end)
 			}
 		}
 		if m.taskErr != "" {
@@ -962,6 +997,8 @@ func (m *setupModel) View() string {
 func (m *setupModel) setStep(step setupStep) tea.Cmd {
 	m.step = step
 	switch step {
+	case stepTaskSelect:
+		m.taskViewportOffset = 0
 	case stepJira:
 		m.jiraSubStep = 0
 		m.jiraErr = ""
@@ -1180,6 +1217,7 @@ func (m *setupModel) handlePresetInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		presets := []setup.Preset{setup.PresetBalanced, setup.PresetSafe, setup.PresetAggressive}
 		m.preset = presets[m.taskPresetCursor]
 		m.taskItems = makeTaskItems(m.cfg, m.projects, m.preset)
+		m.taskViewportOffset = 0
 		return m, m.setStep(stepTaskSelect)
 	}
 	return m, nil
@@ -1238,6 +1276,14 @@ func (m *setupModel) handleTaskInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.applyTasks()
 		m.taskErr = ""
 		return m, m.setStep(stepSchedule)
+	}
+	// Clamp viewport so cursor stays visible.
+	vh := m.calculateTaskViewportHeight()
+	if m.taskCursor < m.taskViewportOffset {
+		m.taskViewportOffset = m.taskCursor
+	}
+	if m.taskCursor >= m.taskViewportOffset+vh {
+		m.taskViewportOffset = m.taskCursor - vh + 1
 	}
 	return m, nil
 }
@@ -2292,10 +2338,15 @@ func scheduleFieldHelp(cursor int, mode string) string {
 
 func makeTaskItems(cfg *config.Config, projects []string, preset setup.Preset) []taskItem {
 	defs := tasks.AllDefinitionsSorted()
-	signals := setup.DetectRepoSignals(projects)
-	selected := setup.PresetTasks(preset, defs, signals)
-	for _, enabled := range cfg.Tasks.Enabled {
-		selected[tasks.TaskType(enabled)] = true
+	var selected map[tasks.TaskType]bool
+	if len(cfg.Tasks.Enabled) > 0 {
+		selected = make(map[tasks.TaskType]bool, len(cfg.Tasks.Enabled))
+		for _, enabled := range cfg.Tasks.Enabled {
+			selected[tasks.TaskType(enabled)] = true
+		}
+	} else {
+		signals := setup.DetectRepoSignals(projects)
+		selected = setup.PresetTasks(preset, defs, signals)
 	}
 
 	items := make([]taskItem, 0, len(defs))

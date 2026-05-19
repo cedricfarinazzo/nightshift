@@ -11,6 +11,7 @@ import (
 	"github.com/cedricfarinazzo/nightshift/internal/config"
 	"github.com/cedricfarinazzo/nightshift/internal/db"
 	"github.com/cedricfarinazzo/nightshift/internal/logging"
+	"github.com/cedricfarinazzo/nightshift/internal/workspace"
 )
 
 // agentByName creates an agent for the given provider name.
@@ -179,4 +180,13 @@ func compressionSummary(cfg *config.Config) string {
 // newBudgetManager builds a budget.Manager from config and an open database.
 func newBudgetManager(cfg *config.Config, _ *db.DB) *budget.Manager {
 	return budget.NewManagerWithTracking(cfg)
+}
+
+// workspaceConfigFromApp converts app config to workspace.Config.
+func workspaceConfigFromApp(cfg *config.Config) workspace.Config {
+	repos := make([]workspace.RepoConfig, len(cfg.Workspace.Repos))
+	for i, r := range cfg.Workspace.Repos {
+		repos[i] = workspace.RepoConfig{URL: r.URL, Name: r.Name}
+	}
+	return workspace.Config{Root: cfg.Workspace.Root, Repos: repos, TTLDays: 7}
 }

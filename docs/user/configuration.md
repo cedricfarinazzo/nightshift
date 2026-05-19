@@ -154,6 +154,36 @@ reporting:
   retention_days: 30         # delete reports older than this
 ```
 
+## Workspace Mode
+
+When `workspace.root` is set, each task run clones repos into a fresh isolated directory instead of executing inside your live project directories. This keeps your working tree clean.
+
+```yaml
+workspace:
+  root: ~/.nightshift/workspaces
+  repos:
+    - url: git@github.com:org/repo-a.git
+      # name defaults to "repo-a" (URL basename without .git)
+    - url: git@github.com:org/repo-b.git
+      name: repo-b-custom         # optional override
+```
+
+- `root`: directory where workspace subdirectories are created. Supports `~`.
+- `repos[].url`: SSH URL only (must start with `git@`). HTTPS URLs are rejected at config load.
+- `repos[].name`: optional human name; defaults to the repo basename without `.git`.
+
+Each run creates `<root>/<name>_<runID>/` per repo, clones fresh, runs tasks there, and leaves the workspace for 7-day automatic cleanup.
+
+Workspace mode activates only when `workspace.root` is non-empty. Existing `projects:` path-based config is unaffected.
+
+Stale workspaces are cleaned up automatically on daemon start, or manually:
+
+```bash
+nightshift workspace clean           # uses config TTL (7 days)
+nightshift workspace clean --days 3  # override TTL
+nightshift workspace clean --root /tmp/ws  # override root
+```
+
 ## Jira
 
 See [Jira Pipeline](jira-pipeline.md) for the full Jira config block.

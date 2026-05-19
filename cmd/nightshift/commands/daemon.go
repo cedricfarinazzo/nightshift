@@ -21,6 +21,7 @@ import (
 	"github.com/cedricfarinazzo/nightshift/internal/scheduler"
 	"github.com/cedricfarinazzo/nightshift/internal/state"
 	"github.com/cedricfarinazzo/nightshift/internal/tasks"
+	"github.com/cedricfarinazzo/nightshift/internal/workspace"
 	"github.com/spf13/cobra"
 )
 
@@ -254,6 +255,20 @@ func runDaemonLoop(cfg *config.Config) error {
 	// Start scheduler
 	if err := sched.Start(ctx); err != nil {
 		return fmt.Errorf("start scheduler: %w", err)
+	}
+
+	// Clean stale workspaces on daemon start if workspace mode is configured.
+	if cfg.Workspace.Root != "" {
+		go func() {
+			n, err := workspace.CleanupStaleWorkspaces(workspaceConfigFromApp(cfg))
+			if err != nil {
+				log.Warnf("workspace cleanup: %v", err)
+				return
+			}
+			if n > 0 {
+				log.Infof("removed %d stale workspace(s)", n)
+			}
+		}()
 	}
 
 	log.InfoCtx("daemon running", map[string]any{

@@ -65,16 +65,11 @@ func TestJiraConfig_Validate(t *testing.T) {
 }
 
 func TestJiraConfig_Defaults(t *testing.T) {
-	cfg := JiraConfig{
-		Repos: []RepoConfig{{Name: "r", URL: "u"}},
-	}
+	cfg := JiraConfig{}
 	cfg.Defaults()
 
 	if cfg.TokenEnv != "JIRA_API_TOKEN" {
 		t.Errorf("TokenEnv = %q, want JIRA_API_TOKEN", cfg.TokenEnv)
-	}
-	if cfg.Label != "nightshift" {
-		t.Errorf("Label = %q, want nightshift", cfg.Label)
 	}
 	if cfg.MaxTickets != 10 {
 		t.Errorf("MaxTickets = %d, want 10", cfg.MaxTickets)
@@ -91,16 +86,12 @@ func TestJiraConfig_Defaults(t *testing.T) {
 	if cfg.ReviewFix.Model != "claude-sonnet-4.5" {
 		t.Errorf("ReviewFix.Model = %q, want claude-sonnet-4.5", cfg.ReviewFix.Model)
 	}
-	if cfg.Repos[0].BaseBranch != "main" {
-		t.Errorf("Repos[0].BaseBranch = %q, want main", cfg.Repos[0].BaseBranch)
-	}
 }
 
 func TestJiraConfig_Defaults_NoOverwrite(t *testing.T) {
 	cfg := JiraConfig{
 		TokenEnv:   "MY_TOKEN",
 		MaxTickets: 5,
-		Repos:      []RepoConfig{{Name: "r", URL: "u", BaseBranch: "develop"}},
 		Validation: PhaseConfig{Model: "my-model"},
 	}
 	cfg.Defaults()
@@ -111,42 +102,8 @@ func TestJiraConfig_Defaults_NoOverwrite(t *testing.T) {
 	if cfg.MaxTickets != 5 {
 		t.Errorf("MaxTickets overwritten, got %d", cfg.MaxTickets)
 	}
-	if cfg.Repos[0].BaseBranch != "develop" {
-		t.Errorf("BaseBranch overwritten, got %q", cfg.Repos[0].BaseBranch)
-	}
 	if cfg.Validation.Model != "my-model" {
 		t.Errorf("Validation.Model overwritten, got %q", cfg.Validation.Model)
-	}
-}
-
-func TestJiraConfig_BackwardCompatPromotion(t *testing.T) {
-	// Old flat config with Project+Label+Repos should be promoted to Projects[0] by Defaults().
-	cfg := JiraConfig{
-		Site:     "x",
-		Email:    "a@b",
-		Project:  "VC",
-		Label:    "nightshift",
-		TokenEnv: "MY_TOKEN",
-		Repos:    []RepoConfig{{Name: "repo", URL: "git@github.com:org/repo.git", BaseBranch: "main"}},
-	}
-	cfg.Defaults()
-
-	if len(cfg.Projects) != 1 {
-		t.Fatalf("expected 1 project after promotion, got %d", len(cfg.Projects))
-	}
-	if cfg.Projects[0].Key != "VC" {
-		t.Errorf("Projects[0].Key = %q, want VC", cfg.Projects[0].Key)
-	}
-	if cfg.Projects[0].Label != "nightshift" {
-		t.Errorf("Projects[0].Label = %q, want nightshift", cfg.Projects[0].Label)
-	}
-	if len(cfg.Projects[0].Repos) != 1 || cfg.Projects[0].Repos[0].Name != "repo" {
-		t.Errorf("Projects[0].Repos not promoted correctly: %+v", cfg.Projects[0].Repos)
-	}
-
-	// Should also validate without error.
-	if err := cfg.Validate(); err != nil {
-		t.Errorf("Validate after backward-compat promotion: %v", err)
 	}
 }
 
