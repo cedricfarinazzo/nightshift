@@ -32,15 +32,8 @@ type JiraConfig struct {
 	Email    string `mapstructure:"email"`     // Jira user email for auth
 	TokenEnv string `mapstructure:"token_env"` // env var name holding API token (default: JIRA_API_TOKEN)
 
-	// Multi-project list (preferred). Each project has its own key, label, repos.
+	// Multi-project list. Each project has its own key, label, repos.
 	Projects []ProjectConfig `mapstructure:"projects"`
-
-	// Deprecated flat single-project fields — kept for backward compatibility.
-	// When Projects is empty and Project is non-empty, Defaults() promotes them
-	// to Projects[0] automatically.
-	Project string       `mapstructure:"project"` // deprecated: use Projects[0].Key
-	Label   string       `mapstructure:"label"`   // deprecated: use Projects[0].Label
-	Repos   []RepoConfig `mapstructure:"repos"`   // deprecated: use Projects[0].Repos
 
 	// Per-phase provider selection (global defaults, overridable per-project).
 	Validation PhaseConfig `mapstructure:"validation"`
@@ -126,8 +119,6 @@ func (c *JiraConfig) EffectiveReviewFix(proj ProjectConfig) PhaseConfig {
 }
 
 // Validate checks that required config fields are set.
-// Defaults() must be called before Validate() so that old flat fields are
-// promoted to Projects when needed.
 func (c *JiraConfig) Validate() error {
 	if c.Site == "" {
 		return fmt.Errorf("jira.site is required")
@@ -162,9 +153,6 @@ func (c *JiraConfig) Defaults() {
 	if c.TokenEnv == "" {
 		c.TokenEnv = "JIRA_API_TOKEN"
 	}
-	if c.Label == "" {
-		c.Label = "nightshift"
-	}
 	if c.WorkspaceRoot == "" {
 		home, err := os.UserHomeDir()
 		if err == nil {
@@ -178,12 +166,6 @@ func (c *JiraConfig) Defaults() {
 	}
 	if c.MaxTickets == 0 {
 		c.MaxTickets = 10
-	}
-	// Apply base-branch defaults to the legacy flat repos list.
-	for i := range c.Repos {
-		if c.Repos[i].BaseBranch == "" {
-			c.Repos[i].BaseBranch = "main"
-		}
 	}
 	// Phase defaults (global)
 	if c.Validation.Provider == "" {
@@ -223,26 +205,10 @@ func (c *JiraConfig) Defaults() {
 		c.ReviewFix.Timeout = "20m"
 	}
 
-	// Backward compat: if no projects are configured but the old flat fields are
-	// present, auto-promote them to Projects[0].
-	if len(c.Projects) == 0 && c.Project != "" {
-		label := c.Label
-		if label == "" {
-			label = "nightshift"
-		}
-		repos := make([]RepoConfig, len(c.Repos))
-		copy(repos, c.Repos)
-		c.Projects = []ProjectConfig{{
-			Key:   c.Project,
-			Label: label,
-			Repos: repos,
-		}}
-	}
-
 	// Apply defaults to each project's repos and label.
 	for i := range c.Projects {
 		if c.Projects[i].Label == "" {
-			c.Projects[i].Label = c.Label
+			c.Projects[i].Label = "nightshift"
 		}
 		for j := range c.Projects[i].Repos {
 			if c.Projects[i].Repos[j].BaseBranch == "" {

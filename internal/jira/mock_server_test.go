@@ -168,8 +168,7 @@ func newMockJiraClient(t *testing.T, cfg mockServerConfig) (*Client, *httptest.S
 		Site:     "test",
 		Email:    "test@test.com",
 		TokenEnv: "NIGHTSHIFT_JIRA_TOKEN",
-		Project:  "VC",
-		Label:    "nightshift",
+		Projects: []ProjectConfig{{Key: "VC", Label: "nightshift"}},
 	}
 	client := &Client{
 		jira:  atlClient,

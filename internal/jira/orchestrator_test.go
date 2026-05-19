@@ -450,9 +450,7 @@ func TestNewOrchestrator_Constructor(t *testing.T) {
 		Site:     "test",
 		Email:    "test@test.com",
 		TokenEnv: "NIGHTSHIFT_JIRA_TOKEN",
-		Project:  "TEST",
-		Label:    "nightshift",
-		Repos:    []RepoConfig{{Name: "r", URL: "u", BaseBranch: "main"}},
+		Projects: []ProjectConfig{{Key: "TEST", Label: "nightshift", Repos: []RepoConfig{{Name: "r", URL: "u", BaseBranch: "main"}}}},
 	}
 	va := &stubAgent{name: "va"}
 	ia := &stubAgent{name: "ia"}
