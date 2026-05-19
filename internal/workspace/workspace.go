@@ -64,7 +64,15 @@ var gitExecFn = func(ctx context.Context, dir string, args ...string) (string, e
 
 // SetupWorkspace creates a fresh isolated workspace for runID.
 // Each repo is cloned into <root>/<name>_<runID>/ and a metadata file is written.
+// If any error occurs mid-setup, already-created directories are cleaned up.
 func SetupWorkspace(ctx context.Context, cfg Config, runID string) (*Workspace, error) {
+	if cfg.Root == "" {
+		return nil, fmt.Errorf("workspace root is empty")
+	}
+	if err := ValidateConfig(cfg); err != nil {
+		return nil, fmt.Errorf("invalid workspace config: %w", err)
+	}
+
 	root, err := expandHome(cfg.Root)
 	if err != nil {
 		return nil, fmt.Errorf("workspace root: %w", err)
@@ -75,20 +83,40 @@ func SetupWorkspace(ctx context.Context, cfg Config, runID string) (*Workspace, 
 
 	now := time.Now()
 	repos := make([]RepoWorkspace, 0, len(cfg.Repos))
+	createdDirs := make([]string, 0)
+
 	for _, r := range cfg.Repos {
-		dirName := r.Name + "_" + runID
+		name := r.Name
+		if name == "" {
+			name = NormalizeName(r.URL)
+		}
+		dirName := name + "_" + runID
 		wsPath := filepath.Join(root, dirName)
 		if err := os.MkdirAll(wsPath, 0o755); err != nil {
+			os.RemoveAll(filepath.Join(root, dirName))
+			for _, d := range createdDirs {
+				os.RemoveAll(d)
+			}
 			return nil, fmt.Errorf("mkdir workspace %s: %w", dirName, err)
 		}
+		createdDirs = append(createdDirs, wsPath)
+
 		if _, err := gitExecFn(ctx, wsPath, "clone", r.URL, "."); err != nil {
-			return nil, fmt.Errorf("clone %s: %w", r.Name, err)
+			for _, d := range createdDirs {
+				os.RemoveAll(d)
+			}
+			return nil, fmt.Errorf("clone %s: %w", name, err)
 		}
+
 		meta := workspaceMeta{CreatedAt: now, RunID: runID, URL: r.URL}
 		if err := writeMeta(wsPath, meta); err != nil {
-			return nil, fmt.Errorf("write metadata for %s: %w", r.Name, err)
+			for _, d := range createdDirs {
+				os.RemoveAll(d)
+			}
+			return nil, fmt.Errorf("write metadata for %s: %w", name, err)
 		}
-		repos = append(repos, RepoWorkspace{Name: r.Name, Path: wsPath, URL: r.URL})
+
+		repos = append(repos, RepoWorkspace{Name: name, Path: wsPath, URL: r.URL})
 	}
 
 	return &Workspace{

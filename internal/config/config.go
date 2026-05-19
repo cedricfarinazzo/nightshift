@@ -363,9 +363,7 @@ var (
 	ErrCustomTaskInvalidCategory    = errors.New("custom task: invalid category")
 	ErrCustomTaskInvalidCostTier    = errors.New("custom task: invalid cost_tier")
 	ErrCustomTaskInvalidRiskLevel   = errors.New("custom task: invalid risk_level")
-	ErrCustomTaskDuplicateType      = errors.New("custom task: duplicate type")
-
-	ErrInvalidWorkspaceURL = errors.New("workspace.repos[*].url must be an SSH URL starting with git@")
+	ErrCustomTaskDuplicateType = errors.New("custom task: duplicate type")
 )
 
 var customTaskTypeRe = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
@@ -453,11 +451,19 @@ func Validate(cfg *Config) error {
 	// Workspace validation
 	if cfg.Workspace.Root != "" {
 		normalizeWorkspaceConfig(&cfg.Workspace)
-		for _, r := range cfg.Workspace.Repos {
+		if len(cfg.Workspace.Repos) == 0 {
+			return fmt.Errorf("workspace.root is set but workspace.repos is empty")
+		}
+		for i, r := range cfg.Workspace.Repos {
 			if !strings.HasPrefix(r.URL, "git@") {
-				return ErrInvalidWorkspaceURL
+				return fmt.Errorf("workspace.repos[%d].url %q must be an SSH URL starting with git@", i, r.URL)
+			}
+			if strings.ContainsAny(r.Name, `/\`) || strings.Contains(r.Name, "..") {
+				return fmt.Errorf("workspace.repos[%d].name %q contains path separators or '..'", i, r.Name)
 			}
 		}
+	} else if len(cfg.Workspace.Repos) > 0 {
+		return fmt.Errorf("workspace.repos is set but workspace.root is empty")
 	}
 
 	return nil

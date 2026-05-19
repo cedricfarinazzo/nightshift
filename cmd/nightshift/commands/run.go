@@ -209,10 +209,13 @@ func runRun(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// Resolve branch: use flag value or detect current branch from first project
-	if branch == "" {
-		if detected, err := orchestrator.CurrentBranch(ctx, projects[0]); err == nil {
-			branch = detected
+	// Resolve branch: use flag value or detect current branch from first project.
+	// For workspace mode, branch will be detected per-repo after clone.
+	if branch == "" && (cfg.Workspace.Root == "" || len(cfg.Workspace.Repos) == 0) {
+		if len(projects) > 0 {
+			if detected, err := orchestrator.CurrentBranch(ctx, projects[0]); err == nil {
+				branch = detected
+			}
 		}
 	}
 
@@ -624,9 +627,23 @@ func newRunID() string {
 func workspacedRun(ctx context.Context, p executeRunParams) error {
 	start := time.Now()
 
-	plan, err := buildPreflight(p)
+	wsCfg := workspaceConfigFromApp(p.cfg)
+
+	// For workspace mode, build a minimal preflight showing workspace repos
+	choice, err := selectProvider(p.cfg, p.budgetMgr, p.log, p.ignoreBudget)
 	if err != nil {
-		return err
+		return fmt.Errorf("no provider: %w", err)
+	}
+
+	plan := &preflightPlan{
+		branch:   p.branch,
+		projects: make([]preflightProject, 0),
+	}
+	for _, r := range wsCfg.Repos {
+		plan.projects = append(plan.projects, preflightProject{
+			path:     r.Name,
+			provider: choice,
+		})
 	}
 
 	if isInteractive() {
@@ -649,7 +666,6 @@ func workspacedRun(ctx context.Context, p executeRunParams) error {
 		return nil
 	}
 
-	wsCfg := workspaceConfigFromApp(p.cfg)
 	runID := newRunID()
 
 	// Clone-timeout: give 5 min for workspace setup, separate from agent timeout.
@@ -661,11 +677,6 @@ func workspacedRun(ctx context.Context, p executeRunParams) error {
 		return fmt.Errorf("setup workspace: %w", err)
 	}
 	cloneCancel()
-
-	choice, err := selectProvider(p.cfg, p.budgetMgr, p.log, p.ignoreBudget)
-	if err != nil {
-		return fmt.Errorf("no provider: %w", err)
-	}
 
 	var renderer *liveRenderer
 	if isInteractive() {
@@ -698,11 +709,19 @@ func workspacedRun(ctx context.Context, p executeRunParams) error {
 		}
 
 		// Use repo Name as stable state key (not UUID path) so cooldowns work.
-		stateKey := rw.Path
+		stateKey := rw.Name
 		projectTaskTypes := make([]string, 0)
 		projectTokensUsed := 0
 		projectCompleted := 0
 		projectFailed := 0
+
+		// Detect branch from cloned workspace repo (or use flag value from params)
+		repoBranch := p.branch
+		if repoBranch == "" {
+			if detected, err := orchestrator.CurrentBranch(ctx, rw.Path); err == nil {
+				repoBranch = detected
+			}
+		}
 
 		// Select tasks for this workspace repo using its path as the project key.
 		var selectedTasks []tasks.ScoredTask
@@ -741,7 +760,7 @@ func workspacedRun(ctx context.Context, p executeRunParams) error {
 		orch.SetRunMetadata(&orchestrator.RunMetadata{
 			Provider: choice.name,
 			RunStart: projectStart,
-			Branch:   p.branch,
+			Branch:   repoBranch,
 		})
 
 		for _, scoredTask := range selectedTasks {
