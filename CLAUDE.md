@@ -303,6 +303,56 @@ Agents MUST follow these Go conventions:
 
 ---
 
+## Documentation Workflow
+
+Documentation lives in `docs/` as plain markdown, in three tracks:
+
+- `docs/user/` — end-user guides (introduction, installation, quick-start, configuration, CLI reference, tasks, agents, jira-pipeline, budget, scheduling, bus-factor, troubleshooting)
+- `docs/operations/` — running Nightshift as a service (daemon, systemd-install, logs-and-reports, data-and-backup, security, release)
+- `docs/dev/` — internals (architecture, run-lifecycle, orchestrator, agents-internals, jira-pipeline, workspace, database, budget-internals, tasks-internals, state-and-snapshots, scheduling-internals, reporting, logging, bus-factor, testing, contributing, debugging)
+
+Index: `docs/README.md`.
+
+### Reading the docs FIRST when exploring
+
+Before grepping or `Read`-ing source to understand a feature, **read the relevant `docs/dev/*.md` page first**. They are kept in sync with code and contain mermaid diagrams that map the package + state-machine layout faster than reading files. Mapping for common questions:
+
+| Question | Start in |
+|---|---|
+| "How is the project structured?" | `docs/dev/architecture.md` |
+| "How does a task run end-to-end?" | `docs/dev/run-lifecycle.md`, then `docs/dev/orchestrator.md` |
+| "How does the Jira pipeline work?" | `docs/dev/jira-pipeline.md`, then `docs/user/jira-pipeline.md` |
+| "How are prompts built / agents invoked?" | `docs/dev/agents-internals.md` |
+| "How is the workspace managed?" | `docs/dev/workspace.md` |
+| "How is budget enforced?" | `docs/dev/budget-internals.md` |
+| "How does the selector pick tasks?" | `docs/dev/tasks-internals.md` |
+| "How does the scheduler avoid overlap?" | `docs/dev/scheduling-internals.md` |
+| "What's in the database?" | `docs/dev/database.md` |
+| "How do I add a test?" | `docs/dev/testing.md` |
+| "Where does this log go?" | `docs/dev/logging.md`, `docs/operations/logs-and-reports.md` |
+
+When the docs disagree with the code, trust the code AND fix the docs in the same PR.
+
+### Keeping docs in sync when changing code
+
+Documentation is part of every code-changing PR. The rule is **same PR**, not "follow-up PR" — drift starts the moment a docs update is deferred.
+
+For each code change, walk this checklist before requesting review:
+
+- **Behaviour-visible to users** (new flag, changed default, removed command, new config field, new error message): update `docs/user/`. Mandatory.
+- **New / renamed / removed CLI command or flag**: update `docs/user/cli-reference.md` and any `docs/user/*` page that demos it.
+- **New / changed config field**: update `docs/user/configuration.md`; if Jira-related, also `docs/user/jira-pipeline.md`.
+- **New / changed task in the catalog**: update `docs/user/tasks.md` if categories/tiers/intervals change; `docs/dev/tasks-internals.md` if the selector or definition shape changes.
+- **Touched `internal/<pkg>/`**: update `docs/dev/<corresponding-page>.md`. If a mermaid diagram in that page no longer matches the code, regenerate it.
+- **Operational change** (new file path on disk, new PID-file behaviour, new env var, new systemd-relevant detail): update `docs/operations/`.
+- **Schema migration**: bump `docs/dev/database.md` and call it out in `CHANGELOG.md`.
+- **New package or major file**: add a one-line entry to the Project Structure section in this file.
+- **New gotcha discovered while debugging**: add to the `## Gotchas` section in this file. Include the *why* so future-you knows when the workaround can be removed.
+
+If your change makes a doc page obsolete, **delete the page** in the same PR and remove links from `docs/README.md` and any sibling pages that reference it.
+
+CI is not currently enforcing this — reviewers must. PRs that change `internal/` or `cmd/` without touching `docs/` should get a comment asking why.
+
 ## Self-Improvement Loop
 
 Agents MUST follow these rules:
