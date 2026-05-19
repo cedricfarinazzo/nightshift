@@ -3,6 +3,7 @@ package jira
 import (
 	"context"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -114,8 +115,23 @@ func CleanupStaleWorkspaces(cfg JiraConfig) (int, error) {
 		if err != nil {
 			continue
 		}
-		if info.ModTime().Before(cutoff) {
-			if err := os.RemoveAll(filepath.Join(root, e.Name())); err != nil {
+		wsPath := filepath.Join(root, e.Name())
+		newestMtime := info.ModTime()
+		_ = filepath.WalkDir(wsPath, func(p string, d fs.DirEntry, err error) error {
+			if err != nil || p == wsPath {
+				return nil
+			}
+			fi, ferr := d.Info()
+			if ferr != nil {
+				return nil
+			}
+			if fi.ModTime().After(newestMtime) {
+				newestMtime = fi.ModTime()
+			}
+			return nil
+		})
+		if newestMtime.Before(cutoff) {
+			if err := os.RemoveAll(wsPath); err != nil {
 				return removed, fmt.Errorf("remove workspace %s: %w", e.Name(), err)
 			}
 			removed++
