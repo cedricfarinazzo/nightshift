@@ -229,6 +229,8 @@ type setupModel struct {
 	taskItems          []taskItem
 	taskErr            string
 	preset             setup.Preset
+	windowWidth        int
+	windowHeight       int
 
 	scheduleMode      string
 	scheduleCursor    int
@@ -364,7 +366,23 @@ const (
 	pathActionAdd
 )
 
-const taskViewportHeight = 15
+// calculateTaskViewportHeight computes the number of task items to display
+// based on terminal height, reserving space for header/footer/indicators.
+// Returns at least 5 items even on small terminals.
+func (m *setupModel) calculateTaskViewportHeight() int {
+	// Reserve space: ~8 lines for header/footer/indicators
+	// (title, instruction, above/below indicators, error, footer)
+	const headerFooterReserved = 8
+	if m.windowHeight > 0 {
+		h := m.windowHeight - headerFooterReserved
+		if h < 5 {
+			h = 5 // minimum visible items
+		}
+		return h
+	}
+	// Fallback to original fixed height if window size not yet known
+	return 15
+}
 
 var (
 	styleHeader = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("69"))
@@ -662,6 +680,9 @@ func (m *setupModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			codexModels = opts
 			m.codexModelIdx = modelIndex(codexModels, m.cfg.Providers.Codex.Model)
 		}
+	case tea.WindowSizeMsg:
+		m.windowWidth = msg.Width
+		m.windowHeight = msg.Height
 	}
 
 	return m, cmd
@@ -786,8 +807,9 @@ func (m *setupModel) View() string {
 			b.WriteString(styleWarn.Render("No task definitions found."))
 			b.WriteString("\n")
 		} else {
+			vh := m.calculateTaskViewportHeight()
 			start := m.taskViewportOffset
-			end := start + taskViewportHeight
+			end := start + vh
 			if end > len(m.taskItems) {
 				end = len(m.taskItems)
 			}
@@ -939,6 +961,8 @@ func (m *setupModel) View() string {
 func (m *setupModel) setStep(step setupStep) tea.Cmd {
 	m.step = step
 	switch step {
+	case stepTaskSelect:
+		m.taskViewportOffset = 0
 	case stepJira:
 		m.jiraSubStep = 0
 		m.jiraErr = ""
@@ -1218,11 +1242,12 @@ func (m *setupModel) handleTaskInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, m.setStep(stepSchedule)
 	}
 	// Clamp viewport so cursor stays visible.
+	vh := m.calculateTaskViewportHeight()
 	if m.taskCursor < m.taskViewportOffset {
 		m.taskViewportOffset = m.taskCursor
 	}
-	if m.taskCursor >= m.taskViewportOffset+taskViewportHeight {
-		m.taskViewportOffset = m.taskCursor - taskViewportHeight + 1
+	if m.taskCursor >= m.taskViewportOffset+vh {
+		m.taskViewportOffset = m.taskCursor - vh + 1
 	}
 	return m, nil
 }
