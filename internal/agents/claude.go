@@ -165,7 +165,7 @@ func (a *ClaudeAgent) Execute(ctx context.Context, opts ExecuteOptions) (*Execut
 	// Pass a short directive as the arg to avoid OS ARG_MAX limits.
 	var compressStats *CompressStats
 	if opts.Prompt != "" {
-		promptPath, cleanup, stats, err := writePromptFile(ctx, opts)
+		promptPath, cleanup, cs, err := writePromptFile(ctx, opts)
 		if err != nil {
 			return &ExecuteResult{
 				Error:    fmt.Sprintf("writing prompt file: %v", err),
@@ -173,7 +173,7 @@ func (a *ClaudeAgent) Execute(ctx context.Context, opts ExecuteOptions) (*Execut
 			}, err
 		}
 		defer cleanup()
-		compressStats = stats
+		compressStats = cs
 		args = append(args, fmt.Sprintf("Read and follow the task instructions in file: %s", promptPath))
 	}
 

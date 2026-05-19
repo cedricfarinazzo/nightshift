@@ -121,7 +121,7 @@ func (a *CopilotAgent) Execute(ctx context.Context, opts ExecuteOptions) (*Execu
 	var promptDirective string
 	var compressStats *CompressStats
 	if opts.Prompt != "" {
-		promptPath, cleanup, stats, err := writePromptFile(ctx, opts)
+		promptPath, cleanup, cs, err := writePromptFile(ctx, opts)
 		if err != nil {
 			return &ExecuteResult{
 				Error:    fmt.Sprintf("writing prompt file: %v", err),
@@ -129,7 +129,7 @@ func (a *CopilotAgent) Execute(ctx context.Context, opts ExecuteOptions) (*Execu
 			}, err
 		}
 		defer cleanup()
-		compressStats = stats
+		compressStats = cs
 		promptDirective = fmt.Sprintf("Read and follow the task instructions in file: %s", promptPath)
 	}
 

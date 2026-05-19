@@ -109,9 +109,9 @@ func compressViaAgent(ctx context.Context, cfg *CompressConfig, prompt string) (
 
 // writePromptFile writes the (optionally compressed) prompt and any file context
 // to a temp file. Returns the file path, cleanup func, and compression stats (nil = no compression).
+// opts.OnCompress is called immediately after compression completes, before the agent spawns.
 func writePromptFile(ctx context.Context, opts ExecuteOptions) (path string, cleanup func(), stats *CompressStats, err error) {
 	prompt, compStats := CompressPrompt(ctx, opts.Compression, opts.Prompt)
-	// Notify caller immediately when compression completes so UIs can react
 	if compStats != nil && opts.OnCompress != nil {
 		opts.OnCompress(compStats)
 	}

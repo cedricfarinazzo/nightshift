@@ -178,18 +178,18 @@ func (o *Orchestrator) ProcessFeedback(ctx context.Context, ticket Ticket, ws *W
 				Timeout:      timeout,
 				Model:        rfCfg.Model,
 				Compression:  o.compression,
+				OnCompress: func(s *agents.CompressStats) {
+					o.log.Infof("ticket %s: review-fix compress %d→%d chars (-%d%%) via %s", ticket.Key, s.OriginalLen, s.CompressedLen, s.ReductionPct, s.Provider)
+					if o.progressf != nil {
+						o.progressf("compress      %d→%d chars (-%d%%)", s.OriginalLen, s.CompressedLen, s.ReductionPct)
+					}
+				},
 			})
 			if err != nil {
 				o.savePhaseLog(ctx, ticket.Key, PhaseReviewFix, rfCfg.Provider, rfCfg.Model, rfStart, false, "", err.Error())
 				return nil, fmt.Errorf("jira: feedback: rework agent %s: %w", repo.Name, err)
 			}
 			o.savePhaseLog(ctx, ticket.Key, PhaseReviewFix, rfCfg.Provider, rfCfg.Model, rfStart, true, agentResult.Output, "")
-			if s := agentResult.CompressStats; s != nil {
-				o.log.Infof("ticket %s: review-fix compress %d→%d chars (-%d%%) via %s", ticket.Key, s.OriginalLen, s.CompressedLen, s.ReductionPct, s.Provider)
-				if o.progressf != nil {
-					o.progressf("compress      %d→%d chars (-%d%%)", s.OriginalLen, s.CompressedLen, s.ReductionPct)
-				}
-			}
 
 			// Only commit and report when the agent produced file changes.
 			changed, err := o.fnHasChanges(ctx, repo.Path)

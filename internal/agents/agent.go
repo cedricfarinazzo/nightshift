@@ -21,33 +21,33 @@ type Agent interface {
 
 // ExecuteOptions configures an agent execution.
 type ExecuteOptions struct {
-	Prompt          string        // The prompt/task for the agent
-	WorkDir         string        // Working directory for execution
-	Files           []string      // Optional file paths to include as context
-	Timeout         time.Duration // Execution timeout (0 = default)
-	Model           string        // Model to use (optional, uses agent default if empty)
-	ReasoningEffort string        // Reasoning effort (optional; precedence: this value, then agent default, then CLI default)
+	Prompt          string          // The prompt/task for the agent
+	WorkDir         string          // Working directory for execution
+	Files           []string        // Optional file paths to include as context
+	Timeout         time.Duration   // Execution timeout (0 = default)
+	Model           string          // Model to use (optional, uses agent default if empty)
+	ReasoningEffort string          // Reasoning effort (optional; precedence: this value, then agent default, then CLI default)
 	Compression     *CompressConfig // nil = no compression
 	// PromptPrefix is prepended to Prompt after compression runs, so role
 	// definitions and task context are never stripped by the compressor.
-	PromptPrefix    string
+	PromptPrefix string
 	// PromptSuffix is appended to Prompt after compression runs, so critical
 	// output-format instructions are never passed through the compressor.
-	PromptSuffix    string
+	PromptSuffix string
 	// OnCompress, if provided, is invoked immediately when prompt compression completes
 	// with the CompressStats before the agent process is spawned. This allows UIs
 	// to show compression metrics while the agent runs.
-	OnCompress      func(*CompressStats)
+	OnCompress func(*CompressStats)
 }
 
 // ExecuteResult holds the outcome of an agent execution.
 type ExecuteResult struct {
-	Output        string        // Agent's text output
-	JSON          []byte        // Structured JSON output if available
-	ExitCode      int           // Process exit code
-	Duration      time.Duration // Execution duration
-	Error         string        // Error message if failed
-	CompressStats *CompressStats // non-nil when prompt was compressed before execution
+	Output        string         // Agent's text output
+	JSON          []byte         // Structured JSON output if available
+	ExitCode      int            // Process exit code
+	Duration      time.Duration  // Execution duration
+	Error         string         // Error message if failed
+	CompressStats *CompressStats // Compression stats, nil if no compression ran
 }
 
 // IsSuccess returns true if the execution succeeded.

@@ -374,7 +374,7 @@ func TestE2E_VC6_ValidateTicket_WithStubAgent(t *testing.T) {
 		output: `{"valid": true, "score": 8, "issues": [], "missing": [], "suggestions": []}`,
 	}
 
-	result, err := ValidateTicket(ctx, agent, ticket, nil)
+	result, err := ValidateTicket(ctx, agent, ticket, nil, nil)
 	if err != nil {
 		t.Fatalf("ValidateTicket: %v", err)
 	}
@@ -404,7 +404,7 @@ func TestE2E_VC6_ValidateTicket_RejectedFlow(t *testing.T) {
 		output: `{"valid": false, "score": 3, "issues": ["synthetic test issue"], "missing": ["synthetic missing field"], "suggestions": ["synthetic suggestion"]}`,
 	}
 
-	result, err := ValidateTicket(ctx, agent, ticket, nil)
+	result, err := ValidateTicket(ctx, agent, ticket, nil, nil)
 	if err != nil {
 		t.Fatalf("ValidateTicket: %v", err)
 	}

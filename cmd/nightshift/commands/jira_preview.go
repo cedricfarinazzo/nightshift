@@ -230,7 +230,7 @@ func runJiraPreview(cmd *cobra.Command, _ []string) error {
 					result.FullOrder = append(result.FullOrder, jiraPreviewOrderEntry{Key: t.Key, Ready: true})
 					pt := buildJiraPreviewTicket(t)
 					if valAgent != nil {
-						vr, vErr := jira.ValidateTicket(ctx, valAgent, t, nil)
+						vr, vErr := jira.ValidateTicket(ctx, valAgent, t, nil, nil)
 						if vErr == nil && vr != nil {
 							score := vr.Score
 							pt.ValidationScore = &score
