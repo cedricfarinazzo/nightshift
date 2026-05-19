@@ -435,7 +435,11 @@ func Validate(cfg *Config) error {
 		{"providers.copilot", cfg.Providers.Copilot.Timeout},
 	} {
 		if pc.timeout != "" {
-			if _, err := time.ParseDuration(pc.timeout); err != nil {
+			d, err := time.ParseDuration(pc.timeout)
+			if err != nil {
+				return fmt.Errorf("%s.timeout: %w", pc.name, ErrInvalidProviderTimeout)
+			}
+			if d <= 0 {
 				return fmt.Errorf("%s.timeout: %w", pc.name, ErrInvalidProviderTimeout)
 			}
 		}
