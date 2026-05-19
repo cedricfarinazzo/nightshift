@@ -2,6 +2,24 @@
 
 `internal/jira/workspace.go` — clone, branch, push for the Jira pipeline.
 
+```mermaid
+flowchart TD
+    Start(["SetupWorkspace(ctx, repo, ticket)"]) --> Exists{"workspace dir<br/>exists?"}
+    Exists -- no --> Clone["git clone ssh-url dir<br/>isNew = true"]
+    Exists -- yes --> Reuse["reuse dir<br/>isNew = false"]
+    Clone --> Branch
+    Reuse --> Branch
+    Branch["setupBranch"] --> Fetch["git fetch origin"]
+    Fetch --> Checkout["git checkout -B feature/&lt;KEY&gt; origin/&lt;base&gt;"]
+    Checkout --> Rebase["git pull --rebase origin feature/&lt;KEY&gt;<br/>(may no-op if branch new)"]
+    Rebase --> Ready(["workspace ready"])
+
+    Ready -. later .-> CP["CommitAndPush"]
+    CP --> HC{"HasChanges?"}
+    HC -- no --> NoOp(["no-op"])
+    HC -- yes --> Add["git add -A → commit → push -u"]
+```
+
 ## Layout
 
 ```

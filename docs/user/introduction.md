@@ -17,6 +17,24 @@ Two flagship workflows:
 - **Multi-project, multi-repo.** Each Jira project can target multiple repos; each repo gets its own workspace.
 - **No CGO, no cloud.** Pure-Go SQLite, all state on disk.
 
+## How It Fits Together
+
+```mermaid
+flowchart LR
+    You["You"] -->|label tickets| Jira[("Jira project")]
+    You -->|config + schedule| Cfg["~/.config/nightshift/config.yaml"]
+    Cron(["cron @ 2am"]) --> NS["nightshift daemon"]
+    Cfg --> NS
+    NS --> JR["nightshift jira run"]
+    NS --> TR["nightshift run<br/>(maintenance tasks)"]
+    JR --> Jira
+    JR --> GH[("GitHub repos<br/>PRs + branches")]
+    TR --> GH
+    JR --> Rep[("~/.local/share/nightshift<br/>reports + logs + SQLite")]
+    TR --> Rep
+    You -->|review PRs<br/>+ merge or close| GH
+```
+
 ## What a Typical Night Looks Like
 
 ```

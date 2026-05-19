@@ -4,20 +4,17 @@
 
 ## Pipeline
 
-```
-GitParser.Parse(repo, since)
-  → []Commit{Author, Files, LinesAdded, LinesRemoved}
-       │
-       ▼
-metrics.Compute(commits)
-  → OwnershipMetrics{HHI, Gini, BusFactor, ContributorShares, Risk}
-       │
-       ▼
-report.Generate(metrics)
-  → Report{Summary, Table, RemediationSuggestions}
-       │
-       ▼
-db.SaveBusFactorResult(report)
+```mermaid
+flowchart LR
+    Repo["git repo"] --> GP["GitParser.Parse(repo, since)<br/>git log --numstat"]
+    GP --> Commits["[]Commit<br/>Author, Files, +/-"]
+    Commits --> Norm["normalise authors<br/>(lowercase, alias collapse)"]
+    Norm --> M["metrics.Compute"]
+    M --> OM["OwnershipMetrics<br/>HHI · Gini · BusFactor<br/>ContributorShares · Risk"]
+    OM --> RG["report.Generate"]
+    RG --> Rep["Report<br/>Summary · Table · Remediation"]
+    Rep --> Save["db.SaveBusFactorResult<br/>bus_factor_results table"]
+    Rep --> Out["CLI output<br/>markdown / JSON / table"]
 ```
 
 ## GitParser

@@ -25,6 +25,19 @@ SQLite at `~/.local/share/nightshift/nightshift.db`. Driver: `modernc.org/sqlite
 
 ## Migrations
 
+```mermaid
+flowchart TD
+    Open(["DB.Open(path)"]) --> Pragma["apply PRAGMAs<br/>WAL, busy_timeout, foreign_keys"]
+    Pragma --> Ver["read schema_version"]
+    Ver --> Loop["for m in migrations<br/>if m.version > current"]
+    Loop --> Tx["BEGIN TRANSACTION"]
+    Tx --> Apply["m.fn(tx)"]
+    Apply --> Bump["UPDATE schema_version = m.version"]
+    Bump --> Commit["COMMIT"]
+    Commit --> Loop
+    Loop -- all applied --> Ready(["DB ready"])
+```
+
 `internal/db/migrations.go` — numbered functions `migration001`, `migration002`, ... `migration009` etc. Schema version stored in `schema_version` table; `Open()` runs each pending migration in order inside a transaction.
 
 Migrations are **forward-only** — no downs. To revert, you write a new forward migration that reverses the change.

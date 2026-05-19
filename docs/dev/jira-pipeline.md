@@ -21,18 +21,24 @@
 
 ## Phase Machine
 
-`ProcessTicket` drives:
+`ProcessTicket` drives the phases below. `phaseOrder` is the `map[Phase]int` consulted by `skip()` so resume can leap to the right phase. Success comments are posted for validate/plan/implement/PR/status; the commit phase posts no success comment. Any failure posts a `🤖 error` comment with the phase name.
 
+```mermaid
+stateDiagram-v2
+    [*] --> validate
+    validate --> plan: score ≥ 6 → 🤖 validation
+    validate --> NeedsInfo: score < 6 → 🤖 rejection + transition
+    plan --> implement: 🤖 plan
+    implement --> commit: 🤖 implement
+    commit --> PR: HasChanges
+    commit --> done_no_changes: !HasChanges
+    PR --> status: 🤖 pr
+    status --> [*]: 🤖 status_change<br/>(Jira → In Review)
+    NeedsInfo --> [*]
+    done_no_changes --> [*]
 ```
-validate ─► plan ─► implement ─► commit ─► PR ─► status
-   │                                  │
-   ▼                                  ▼
-needs-info                          (resume on next run if any phase failed)
-```
 
-`phaseOrder` map drives `skip()` so resume can leap to the right phase.
-
-After each phase a `🤖 <!-- nightshift:type=<phase> -->` comment is posted (`PostComment`).
+After each phase a `🤖 <!-- nightshift:type=<phase> -->` comment is posted via `PostComment` — except `commit`, which is silent.
 
 ## Resume Logic
 
@@ -44,6 +50,18 @@ After each phase a `🤖 <!-- nightshift:type=<phase> -->` comment is posted (`P
 4. Return resume cursor
 
 `ProcessTicket` then skips already-completed phases. To force a restart, move the ticket back to TODO.
+
+```mermaid
+flowchart LR
+    A[next run] --> B[ParseNightshiftComments]
+    B --> C{latest marker}
+    C -->|none| D[startPhase: validate]
+    C -->|validation| E[startPhase: plan]
+    C -->|plan| F[startPhase: implement<br/>recover plan body]
+    C -->|implement| G[startPhase: commit<br/>recover plan]
+    C -->|pr| H[startPhase: status<br/>parsePRURLsFromComment]
+    C -->|status_change| I[alreadyDone: true]
+```
 
 ## Dependency Resolution
 
@@ -89,15 +107,17 @@ SSH URLs required (`git@github.com:...`). HTTPS remotes fail silently in non-int
 
 For tickets in review status:
 
-```
-FetchReviewTickets
-  → for each:
-       FetchPRReviewComments
-       filterNewComments(by lastReworkAt)   // idempotency
-       buildReworkPrompt
-       agent.Execute
-       CommitAndPush
-       PostComment(rework)
+```mermaid
+flowchart LR
+    A[FetchReviewTickets] --> B[for each ticket]
+    B --> C[FetchPRReviewComments]
+    C --> D[filterNewComments<br/>drop comments older than<br/>last CommentRework marker]
+    D --> E{any new?}
+    E -- no --> Skip([skip])
+    E -- yes --> F[buildReworkPrompt]
+    F --> G[agent.Execute<br/>review_fix phase]
+    G --> H[CommitAndPush]
+    H --> I[🤖 rework comment]
 ```
 
 `filterNewComments` drops comments older than the last `CommentRework` marker — prevents re-fixing the same feedback.

@@ -2,6 +2,46 @@
 
 End-to-end trace of `nightshift run`, daemon-triggered or manual.
 
+```mermaid
+sequenceDiagram
+    autonumber
+    participant U as user / cron
+    participant CLI as cmd/nightshift run
+    participant Cfg as internal/config
+    participant DB as internal/db
+    participant B as internal/budget
+    participant Sel as internal/tasks
+    participant O as internal/orchestrator
+    participant A as internal/agents
+    participant R as internal/reporting
+
+    U->>CLI: invoke
+    CLI->>Cfg: Load()
+    CLI->>DB: Open() + migrations
+    CLI->>B: NewManager()
+    CLI->>O: New(cfg, db, ...)
+    CLI->>B: Check(ctx)
+    alt no capacity
+        B-->>CLI: skip
+        CLI-->>U: "budget exhausted"
+    else
+        CLI->>Sel: Select(tasks, project, state, budget)
+        Sel-->>CLI: []TaskDefinition
+        loop project × task
+            CLI->>O: RunTask(ctx, project, task)
+            O->>O: validateGitRepo + save branch
+            O->>A: planAgent.Execute(opts)
+            A-->>O: plan output
+            O->>A: implementAgent.Execute(opts with plan)
+            A-->>O: implement output
+            O->>O: review pass / retry / abandon
+            O->>R: write report
+            O->>O: defer checkoutBranch(orig)
+        end
+        CLI->>R: write daily summary
+    end
+```
+
 ## Top-level
 
 `cmd/nightshift/commands/run.go` is the entry point. It:

@@ -8,6 +8,24 @@ nightshift jira run
 
 That's it. Set a schedule + walk away. By morning the work is in PRs.
 
+```mermaid
+flowchart LR
+    Cron(["cron / interval fire"]) --> Fetch["FetchTodoTickets<br/>label=nightshift"]
+    Fetch --> Graph["BuildDependencyGraph<br/>topo-sort, detect cycles"]
+    Graph --> WS["SetupWorkspace<br/>clone or reuse, fetch + rebase"]
+    WS --> Resume["detectResumeState<br/>read 🤖 comment markers"]
+    Resume --> Phases
+    subgraph Phases [ProcessTicket]
+      direction LR
+      V["validate"] --> P["plan"] --> I["implement"] --> C["commit"] --> PR["PR"] --> S["status"]
+    end
+    Phases --> Report["write run report<br/>+ jira_ticket_results row"]
+    Phases -. on failure .-> Err["🤖 error comment<br/>continue next ticket"]
+    Fetch --> FR["FetchReviewTickets"]
+    FR --> Feedback["ProcessFeedback<br/>filter by lastReworkAt<br/>build rework prompt → push fix"]
+    Feedback --> Report
+```
+
 ---
 
 ## What It Does
@@ -33,6 +51,19 @@ For tickets already in **In Review**, `ProcessFeedback` fetches new PR review co
 ## Resume Logic
 
 The validate, plan, implement, PR, and status phases each post a `🤖 <!-- nightshift:type=<phase> -->` HTML marker. On the next run, `detectResumeState` reads those markers and resumes from the next unfinished phase:
+
+```mermaid
+flowchart TD
+    Start(["next run"]) --> Read["ParseNightshiftComments"]
+    Read --> H{Most recent<br/>marker?}
+    H -->|none| RV["resume: validate"]
+    H -->|validation| RP["resume: plan"]
+    H -->|plan| RI["resume: implement"]
+    H -->|implement| RC["resume: commit"]
+    H -->|pr| RS["resume: status"]
+    H -->|status_change| Done(["alreadyDone: skip ticket"])
+```
+
 
 | Last marker seen | Resume from |
 |------------------|-------------|

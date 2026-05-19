@@ -2,6 +2,24 @@
 
 `internal/budget/budget.go` — capacity calculation + run gating.
 
+```mermaid
+flowchart TD
+    Tick(["Manager.Check(ctx)"]) --> Loop["for provider in preference"]
+    Loop --> Enabled{"enabled?"}
+    Enabled -- no --> Next
+    Enabled -- yes --> Fetch["provider.Usage(ctx)"]
+    Fetch --> Err{"err?"}
+    Err -- yes --> LogWarn["log warn"] --> Next
+    Err -- no --> Windows["for each window<br/>(5h, 7d, monthly)"]
+    Windows --> Calc["computeWindowCapacity<br/>= max_percent − used_pct"]
+    Calc --> Min["capacity = min(windows)"]
+    Min --> Gate{"capacity > 0?"}
+    Gate -- yes --> Pick(["select this provider"])
+    Gate -- no --> Next{"next provider?"}
+    Next -- yes --> Loop
+    Next -- no --> Abort(["all exhausted: skip run"])
+```
+
 ## Interfaces
 
 ```go

@@ -4,11 +4,19 @@
 
 ## Status Machine
 
-```
-pending ─► planning ─► executing ─► reviewing ─► completed
-                          │             │
-                          │             └─► failed (no retries left)
-                          └─► abandoned (validation refusal)
+```mermaid
+stateDiagram-v2
+    [*] --> pending
+    pending --> planning
+    planning --> executing
+    executing --> reviewing
+    reviewing --> completed: review ok
+    reviewing --> executing: retry (iter < 3)
+    reviewing --> failed: iter == 3
+    executing --> abandoned: validator refusal
+    completed --> [*]
+    failed --> [*]
+    abandoned --> [*]
 ```
 
 ## Construction

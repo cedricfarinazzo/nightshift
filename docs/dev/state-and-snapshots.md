@@ -5,6 +5,28 @@ Two persistence layers above the DB:
 - **State** (`internal/state/`) — current + recent run metadata; concurrency-safe
 - **Snapshots** (`internal/snapshots/`) — periodic provider usage capture
 
+```mermaid
+flowchart LR
+    Orch[orchestrator] -->|StartRun| StateW[State.StartRun]
+    Orch -->|FinishRun| StateF[State.FinishRun]
+    StateW --> DBrh[(run_history)]
+    StateF --> DBrh
+    StateF --> DBth[(task_history)]
+    Sel[task selector] -->|LastRunForTask| StateR[State.LastRunForTask]
+    StateR --> DBth
+
+    SC[snapshots.Collector<br/>tick every 30m] --> P1[providers.Claude.Usage]
+    SC --> P2[providers.Codex.Usage]
+    SC --> P3[providers.Copilot.Usage]
+    P1 --> DBs[(snapshots)]
+    P2 --> DBs
+    P3 --> DBs
+
+    BH[nightshift budget history] --> DBs
+    Stats[nightshift stats] --> DBrh
+    Stats --> DBs
+```
+
 ## State
 
 `State` struct wraps the DB with a `sync.RWMutex` for in-process coordination.

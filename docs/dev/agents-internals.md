@@ -47,6 +47,27 @@ All three:
 4. Shared `handleExecuteResult()` in `util.go`
 5. `defer cleanup()` to delete the temp file
 
+```mermaid
+sequenceDiagram
+    participant Orch as orchestrator
+    participant Agent as agents.Claude/Codex/Copilot
+    participant FS as os.CreateTemp
+    participant Runner as CommandRunner
+    participant CLI as external CLI
+
+    Orch->>Agent: Execute(ctx, ExecuteOptions)
+    Agent->>Agent: CompressPrompt (if enabled + over threshold)
+    Agent->>FS: writePromptFile(full prompt)
+    FS-->>Agent: /tmp/nightshift-prompt-XXX.md
+    Agent->>Runner: Run("claude", ["--print", "...", "<directive>"])
+    Runner->>CLI: exec
+    CLI-->>Runner: stdout + exit code
+    Runner-->>Agent: stdout, stderr, code, err
+    Agent->>Agent: handleExecuteResult(util.go)<br/>map exit, detect timeout,<br/>extract JSON, propagate stats
+    Agent->>FS: defer cleanup(tmpfile)
+    Agent-->>Orch: ExecuteResult
+```
+
 ## `CommandRunner`
 
 ```go
@@ -69,6 +90,26 @@ func handleExecuteResult(out, errOut string, exitCode int, err error, compressSt
 - Propagates `CompressStats` so token savings show in reports
 
 Use this helper for any new agent — never duplicate exit/timeout/JSON logic.
+
+## Prompt Assembly
+
+```mermaid
+flowchart LR
+    Builder["task PromptBuilder<br/>or jira phase prompt"] --> Prefix["PromptPrefix<br/>(protected, small)"]
+    Builder --> Body["Prompt<br/>(compressible, large)"]
+    Builder --> Suffix["PromptSuffix<br/>(protected, small)<br/>schema + rules"]
+    Body --> Gate{"compression<br/>enabled?<br/>len(Body) > threshold?"}
+    Gate -- yes --> Comp["compressViaAgent<br/>(same CLI path)"]
+    Gate -- no --> PassThrough["pass through"]
+    Comp --> Concat
+    PassThrough --> Concat
+    Prefix --> Concat["concat:<br/>Prefix + Body' + Suffix"]
+    Suffix --> Concat
+    Concat --> TempFile["writePromptFile<br/>→ os.CreateTemp"]
+    TempFile --> CLI["agent CLI"]
+```
+
+Only `Prompt` (body) is fed through compression — `PromptPrefix` and `PromptSuffix` are concatenated verbatim. Put instructions/schemas in `PromptSuffix`.
 
 ## Compression
 

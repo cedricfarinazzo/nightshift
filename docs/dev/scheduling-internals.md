@@ -2,6 +2,31 @@
 
 `internal/scheduler/scheduler.go` — wraps `robfig/cron/v3` with safety middleware.
 
+```mermaid
+sequenceDiagram
+    participant Cron as robfig/cron
+    participant Mw as SkipIfStillRunning
+    participant Fn as runFunc closure
+    participant Bud as budget.Manager
+    participant O as orchestrator
+
+    Cron->>Mw: tick @ scheduled time
+    alt previous run still active
+        Mw-->>Cron: silently dropped
+    else idle
+        Mw->>Fn: invoke
+        Fn->>Fn: re-load config
+        Fn->>Bud: Check(ctx)
+        alt no capacity
+            Bud-->>Fn: skip
+        else
+            Fn->>O: RunAll(ctx)
+            O-->>Fn: result
+            Fn->>Fn: write report + update state
+        end
+    end
+```
+
 ## Construction
 
 ```go

@@ -49,6 +49,20 @@ Rolls back on any failure — either all custom tasks register or none do.
 
 ## Selector
 
+```mermaid
+flowchart TD
+    All["all registered tasks<br/>(built-ins + custom)"] --> F1{"enabled in<br/>config?"}
+    F1 -- no --> Drop1[drop]
+    F1 -- yes --> F2{"within<br/>cooldown?<br/>(staleness check)"}
+    F2 -- yes --> Drop2[drop]
+    F2 -- no --> F3{"cost fits<br/>remaining budget?"}
+    F3 -- no --> Drop3[drop]
+    F3 -- yes --> Score["score =<br/>priority + staleness_bonus + cost_fit"]
+    Score --> Sort["sort desc"]
+    Sort --> TopN["take top --max-tasks"]
+    TopN --> Pick(["selected tasks"])
+```
+
 `internal/tasks/selector.go`:
 
 ```go
