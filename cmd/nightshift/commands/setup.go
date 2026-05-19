@@ -223,11 +223,12 @@ type setupModel struct {
 	codexEffortIdx   int
 	copilotEffortIdx int
 
-	taskPresetCursor int
-	taskCursor       int
-	taskItems        []taskItem
-	taskErr          string
-	preset           setup.Preset
+	taskPresetCursor   int
+	taskCursor         int
+	taskViewportOffset int
+	taskItems          []taskItem
+	taskErr            string
+	preset             setup.Preset
 
 	scheduleMode      string
 	scheduleCursor    int
@@ -362,6 +363,8 @@ const (
 	pathActionSkip pathAction = iota
 	pathActionAdd
 )
+
+const taskViewportHeight = 15
 
 var (
 	styleHeader = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("69"))
@@ -783,7 +786,16 @@ func (m *setupModel) View() string {
 			b.WriteString(styleWarn.Render("No task definitions found."))
 			b.WriteString("\n")
 		} else {
-			for i, item := range m.taskItems {
+			start := m.taskViewportOffset
+			end := start + taskViewportHeight
+			if end > len(m.taskItems) {
+				end = len(m.taskItems)
+			}
+			if start > 0 {
+				fmt.Fprintf(&b, "  ... (%d more above)\n", start)
+			}
+			for i := start; i < end; i++ {
+				item := m.taskItems[i]
 				cursor := " "
 				if i == m.taskCursor {
 					cursor = ">"
@@ -793,6 +805,9 @@ func (m *setupModel) View() string {
 					check = "x"
 				}
 				fmt.Fprintf(&b, " %s [%s] %-22s %s\n", cursor, check, item.def.Type, item.def.Name)
+			}
+			if end < len(m.taskItems) {
+				fmt.Fprintf(&b, "  ... (%d more below)\n", len(m.taskItems)-end)
 			}
 		}
 		if m.taskErr != "" {
@@ -1142,6 +1157,7 @@ func (m *setupModel) handlePresetInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		presets := []setup.Preset{setup.PresetBalanced, setup.PresetSafe, setup.PresetAggressive}
 		m.preset = presets[m.taskPresetCursor]
 		m.taskItems = makeTaskItems(m.cfg, m.projects, m.preset)
+		m.taskViewportOffset = 0
 		return m, m.setStep(stepTaskSelect)
 	}
 	return m, nil
@@ -1200,6 +1216,13 @@ func (m *setupModel) handleTaskInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.applyTasks()
 		m.taskErr = ""
 		return m, m.setStep(stepSchedule)
+	}
+	// Clamp viewport so cursor stays visible.
+	if m.taskCursor < m.taskViewportOffset {
+		m.taskViewportOffset = m.taskCursor
+	}
+	if m.taskCursor >= m.taskViewportOffset+taskViewportHeight {
+		m.taskViewportOffset = m.taskCursor - taskViewportHeight + 1
 	}
 	return m, nil
 }
@@ -2199,10 +2222,15 @@ func scheduleFieldHelp(cursor int, mode string) string {
 
 func makeTaskItems(cfg *config.Config, projects []string, preset setup.Preset) []taskItem {
 	defs := tasks.AllDefinitionsSorted()
-	signals := setup.DetectRepoSignals(projects)
-	selected := setup.PresetTasks(preset, defs, signals)
-	for _, enabled := range cfg.Tasks.Enabled {
-		selected[tasks.TaskType(enabled)] = true
+	var selected map[tasks.TaskType]bool
+	if len(cfg.Tasks.Enabled) > 0 {
+		selected = make(map[tasks.TaskType]bool, len(cfg.Tasks.Enabled))
+		for _, enabled := range cfg.Tasks.Enabled {
+			selected[tasks.TaskType(enabled)] = true
+		}
+	} else {
+		signals := setup.DetectRepoSignals(projects)
+		selected = setup.PresetTasks(preset, defs, signals)
 	}
 
 	items := make([]taskItem, 0, len(defs))
