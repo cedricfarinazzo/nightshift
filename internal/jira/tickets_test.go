@@ -426,8 +426,8 @@ func TestIssueLinkToLink_BothKeys(t *testing.T) {
 func TestBuildTodoJQL_Basic(t *testing.T) {
 	proj := ProjectConfig{Key: "PROJ", Label: "auto"}
 	jql := buildTodoJQL(proj, "")
-	if !strings.Contains(jql, "sprint not in futureSprints()") {
-		t.Errorf("JQL must always exclude future sprints, got: %s", jql)
+	if !strings.Contains(jql, "sprint not in futureSprints() OR sprint is EMPTY") {
+		t.Errorf("JQL must exclude future sprints and include sprintless tickets, got: %s", jql)
 	}
 	if !strings.Contains(jql, `project = "PROJ"`) {
 		t.Errorf("JQL missing project clause, got: %s", jql)
@@ -504,8 +504,8 @@ func TestFetchTodoTickets_NoBoardDiscovered_NoBacklogFilter(t *testing.T) {
 func TestBuildTodoJQL_AlwaysExcludesFutureSprints(t *testing.T) {
 	proj := ProjectConfig{Key: "PROJ", Label: "auto"}
 	jql := buildTodoJQL(proj, "")
-	if !strings.Contains(jql, "sprint not in futureSprints()") {
-		t.Errorf("JQL must always contain future-sprint exclusion, got: %s", jql)
+	if !strings.Contains(jql, "sprint not in futureSprints() OR sprint is EMPTY") {
+		t.Errorf("JQL must always contain future-sprint exclusion with sprintless fallback, got: %s", jql)
 	}
 	if !strings.HasSuffix(strings.TrimSpace(jql), "ORDER BY created ASC") {
 		t.Errorf("JQL should end with ORDER BY created ASC, got: %s", jql)

@@ -131,7 +131,7 @@ The VC project uses: "À faire", "En cours", "Revue en cours", "Terminé". `isRe
 
 Both filters are **always active** — no config required.
 
-**Future-sprint exclusion** — `buildTodoJQL` always appends `AND sprint not in futureSprints()`. Requires Jira Software license; Work Management projects get a JQL error at runtime.
+**Future-sprint exclusion** — `buildTodoJQL` always appends `AND (sprint not in futureSprints() OR sprint is EMPTY)`. The `OR sprint is EMPTY` arm is required for Kanban tickets: Jira's `sprint not in futureSprints()` excludes issues with no sprint field (NULL), which silently drops all Kanban board tickets. Requires Jira Software license; Work Management projects get a JQL error at runtime.
 
 **Backlog exclusion** — `FetchTodoTickets` calls `discoverBoardID(ctx, proj.Key)`:
 

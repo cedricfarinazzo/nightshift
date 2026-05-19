@@ -148,7 +148,7 @@ Nightshift automatically excludes backlog and future-sprint tickets — no confi
 
 **Automatic (always on):**
 - **Backlog exclusion** — the agile board for each project is auto-discovered via the Jira API. Tickets in the board's backlog are always excluded. If a project has no agile board (e.g. Jira Work Management), backlog filtering is skipped gracefully.
-- **Future-sprint exclusion** — `AND sprint not in futureSprints()` is always appended to the todo JQL. Requires Jira Software license; Work Management projects will receive a JQL error if this function is unavailable.
+- **Future-sprint exclusion** — `AND (sprint not in futureSprints() OR sprint is EMPTY)` is always appended to the todo JQL. The `OR sprint is EMPTY` arm is required for Kanban boards — Jira's `sprint not in futureSprints()` silently excludes tickets with no sprint. Requires Jira Software license; Work Management projects will receive a JQL error if this function is unavailable.
 
 **Optional (via config):**
 
