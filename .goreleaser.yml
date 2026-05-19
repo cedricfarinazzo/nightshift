@@ -36,4 +36,5 @@ changelog:
       - "^chore:"
 
 # Note: Homebrew formula is manually maintained in marcus/homebrew-tap
-# to build from source (avoids Gatekeeper warnings on macOS)
+# to build from source (avoids macOS Gatekeeper warnings on unsigned binaries).
+# Tap repo: https://github.com/marcus/homebrew-tap
