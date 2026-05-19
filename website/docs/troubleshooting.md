@@ -92,4 +92,4 @@ nightshift --help
 nightshift <command> --help
 ```
 
-Report issues: https://github.com/marcus/nightshift/issues
+Report issues: https://github.com/cedricfarinazzo/nightshift/issues

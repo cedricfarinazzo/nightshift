@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/marcus/nightshift/internal/jira"
+	"github.com/cedricfarinazzo/nightshift/internal/jira"
 	"github.com/spf13/viper"
 )
 

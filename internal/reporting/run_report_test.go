@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/marcus/nightshift/internal/usage"
+	"github.com/cedricfarinazzo/nightshift/internal/usage"
 )
 
 func makeResults(tasks []TaskResult) *RunResults {

@@ -32,7 +32,7 @@ Binary downloads are available on the GitHub releases page.
 Manual install:
 
 ```bash
-go install github.com/marcus/nightshift/cmd/nightshift@latest
+go install github.com/cedricfarinazzo/nightshift/cmd/nightshift@latest
 ```
 
 ## Getting Started

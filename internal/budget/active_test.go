@@ -8,8 +8,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/marcus/nightshift/internal/config"
-	"github.com/marcus/nightshift/internal/usage"
+	"github.com/cedricfarinazzo/nightshift/internal/config"
+	"github.com/cedricfarinazzo/nightshift/internal/usage"
 )
 
 // --- helpers ---

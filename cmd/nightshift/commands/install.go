@@ -9,7 +9,7 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/marcus/nightshift/internal/config"
+	"github.com/cedricfarinazzo/nightshift/internal/config"
 	"github.com/spf13/cobra"
 )
 
@@ -268,7 +268,7 @@ func installSystemd(binaryPath string, cfg *config.Config) error {
 func generateSystemdService(binaryPath string) string {
 	return fmt.Sprintf(`[Unit]
 Description=Nightshift AI-powered code maintenance
-Documentation=https://github.com/marcus/nightshift
+Documentation=https://github.com/cedricfarinazzo/nightshift
 
 [Service]
 Type=simple

@@ -62,7 +62,7 @@ package integrations
 
 import (
     "context"
-    "github.com/marcus/nightshift/internal/config"
+    "github.com/cedricfarinazzo/nightshift/internal/config"
 )
 
 // MyReader reads tasks from MyService.

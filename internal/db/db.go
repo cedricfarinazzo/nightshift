@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/marcus/nightshift/internal/usage"
+	"github.com/cedricfarinazzo/nightshift/internal/usage"
 	_ "modernc.org/sqlite"
 )
 

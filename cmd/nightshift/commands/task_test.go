@@ -3,7 +3,7 @@ package commands
 import (
 	"testing"
 
-	"github.com/marcus/nightshift/internal/tasks"
+	"github.com/cedricfarinazzo/nightshift/internal/tasks"
 )
 
 func TestParseCategoryFilter(t *testing.T) {

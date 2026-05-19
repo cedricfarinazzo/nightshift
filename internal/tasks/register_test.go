@@ -3,7 +3,7 @@ package tasks
 import (
 	"testing"
 
-	"github.com/marcus/nightshift/internal/config"
+	"github.com/cedricfarinazzo/nightshift/internal/config"
 )
 
 func TestRegisterCustomTasksFromConfig_Valid(t *testing.T) {

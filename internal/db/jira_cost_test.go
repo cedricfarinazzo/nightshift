@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/marcus/nightshift/internal/usage"
+	"github.com/cedricfarinazzo/nightshift/internal/usage"
 )
 
 func openTestDB(t *testing.T) *DB {

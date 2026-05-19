@@ -15,9 +15,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/marcus/nightshift/internal/config"
-	"github.com/marcus/nightshift/internal/logging"
-	"github.com/marcus/nightshift/internal/usage"
+	"github.com/cedricfarinazzo/nightshift/internal/config"
+	"github.com/cedricfarinazzo/nightshift/internal/logging"
+	"github.com/cedricfarinazzo/nightshift/internal/usage"
 )
 
 // TaskResult represents a completed or skipped task in the run.

@@ -213,7 +213,7 @@ scripts/
 .goreleaser.yml         # Builds darwin/linux amd64+arm64; archives as tar.gz; auto-changelog
 Makefile                # Targets: build, test, test-verbose, test-race, coverage, lint, clean,
                         # deps, check, install, install-hooks
-go.mod                  # module github.com/marcus/nightshift; Go 1.24
+go.mod                  # module github.com/cedricfarinazzo/nightshift; Go 1.24
 CHANGELOG.md            # Version history
 SECURITY_AUDIT.md       # Security findings
 ```

@@ -14,7 +14,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/fsnotify/fsnotify"
-	"github.com/marcus/nightshift/internal/config"
+	"github.com/cedricfarinazzo/nightshift/internal/config"
 	"github.com/muesli/termenv"
 	"github.com/spf13/cobra"
 )

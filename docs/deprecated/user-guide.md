@@ -27,7 +27,7 @@ Nightshift is a Go CLI tool that runs AI-powered maintenance tasks on your codeb
 ### Build from Source
 
 ```bash
-git clone https://github.com/marcus/nightshift.git
+git clone https://github.com/cedricfarinazzo/nightshift.git
 cd nightshift
 go build -o nightshift ./cmd/nightshift
 ```
@@ -675,4 +675,4 @@ nightshift --help
 nightshift <command> --help
 ```
 
-Report issues: https://github.com/marcus/nightshift/issues
+Report issues: https://github.com/cedricfarinazzo/nightshift/issues

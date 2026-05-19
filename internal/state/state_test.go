@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/marcus/nightshift/internal/db"
+	"github.com/cedricfarinazzo/nightshift/internal/db"
 )
 
 func TestNewNilDB(t *testing.T) {

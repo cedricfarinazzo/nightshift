@@ -7,7 +7,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/marcus/nightshift/internal/jira"
+	"github.com/cedricfarinazzo/nightshift/internal/jira"
 )
 
 // e2eJiraClient returns a real Jira client configured for the sedinfra/VC project.

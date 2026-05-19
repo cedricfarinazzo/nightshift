@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/marcus/nightshift/internal/budget"
+	"github.com/cedricfarinazzo/nightshift/internal/budget"
 )
 
 type previewTextOptions struct {

@@ -11,10 +11,10 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"github.com/marcus/nightshift/internal/logging"
-	"github.com/marcus/nightshift/internal/orchestrator"
-	"github.com/marcus/nightshift/internal/security"
-	"github.com/marcus/nightshift/internal/tasks"
+	"github.com/cedricfarinazzo/nightshift/internal/logging"
+	"github.com/cedricfarinazzo/nightshift/internal/orchestrator"
+	"github.com/cedricfarinazzo/nightshift/internal/security"
+	"github.com/cedricfarinazzo/nightshift/internal/tasks"
 	"github.com/spf13/cobra"
 )
 

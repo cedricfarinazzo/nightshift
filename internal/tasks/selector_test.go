@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/marcus/nightshift/internal/config"
-	"github.com/marcus/nightshift/internal/db"
-	"github.com/marcus/nightshift/internal/state"
+	"github.com/cedricfarinazzo/nightshift/internal/config"
+	"github.com/cedricfarinazzo/nightshift/internal/db"
+	"github.com/cedricfarinazzo/nightshift/internal/state"
 )
 
 func setupTestSelector(t *testing.T) (*Selector, *state.State) {

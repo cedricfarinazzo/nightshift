@@ -42,7 +42,7 @@ A new file is created for each calendar day. Files older than `retention_days` a
 ### Getting a logger
 
 ```go
-import "github.com/marcus/nightshift/internal/logging"
+import "github.com/cedricfarinazzo/nightshift/internal/logging"
 
 log := logging.Get()                          // global logger
 log := logging.Get().With().Str("component", "jira.orchestrator").Logger()
