@@ -653,3 +653,50 @@ func TestValidate_JiraSystemd_disabled(t *testing.T) {
 		t.Errorf("jira systemd disabled should pass validation, got %v", err)
 	}
 }
+
+func TestValidate_ProviderTimeout(t *testing.T) {
+	tests := []struct {
+		name     string
+		timeout  string
+		provider string // "claude", "codex", or "copilot"
+		wantErr  bool
+	}{
+		{name: "empty is ok", timeout: "", provider: "claude", wantErr: false},
+		{name: "valid 30m", timeout: "30m", provider: "claude", wantErr: false},
+		{name: "valid 1h", timeout: "1h", provider: "claude", wantErr: false},
+		{name: "valid 90m", timeout: "90m", provider: "codex", wantErr: false},
+		{name: "valid 45m copilot", timeout: "45m", provider: "copilot", wantErr: false},
+		{name: "invalid string", timeout: "not-a-duration", provider: "claude", wantErr: true},
+		{name: "zero", timeout: "0", provider: "claude", wantErr: true},
+		{name: "negative", timeout: "-1m", provider: "claude", wantErr: true},
+		{name: "invalid codex", timeout: "abc", provider: "codex", wantErr: true},
+		{name: "invalid copilot", timeout: "xyz", provider: "copilot", wantErr: true},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := &Config{}
+			switch tc.provider {
+			case "claude":
+				cfg.Providers.Claude.Timeout = tc.timeout
+			case "codex":
+				cfg.Providers.Codex.Timeout = tc.timeout
+			case "copilot":
+				cfg.Providers.Copilot.Timeout = tc.timeout
+			}
+			err := Validate(cfg)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("expected error for timeout %q, got nil", tc.timeout)
+				}
+				if !errors.Is(err, ErrInvalidProviderTimeout) {
+					t.Errorf("expected ErrInvalidProviderTimeout, got %v", err)
+				}
+			} else {
+				if err != nil {
+					t.Errorf("unexpected error for timeout %q: %v", tc.timeout, err)
+				}
+			}
+		})
+	}
+}
