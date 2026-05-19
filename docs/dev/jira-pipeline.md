@@ -6,7 +6,7 @@
 
 | File | Purpose |
 |------|---------|
-| `client.go` | `Client` wraps `go-atlassian/v2`; auth, `Ping`, `AddComment` |
+| `client.go` | `Client` wraps `go-atlassian/v2`; auth, `Ping`, `AddComment`, `discoverBoardID` (cached) |
 | `config.go` | `JiraConfig`, `RepoConfig`, `PhaseConfig`; `Validate()`, `Defaults()` |
 | `status.go` | `StatusMap`; `DiscoverStatuses`; `TransitionTo{InProgress,Review,Done,NeedsInfo}` |
 | `tickets.go` | `Ticket`, `Comment`, `IssueLink`; `FetchTodoTickets`, `FetchReviewTickets` |
@@ -42,14 +42,13 @@ After each phase a `🤖 <!-- nightshift:type=<phase> -->` comment is posted via
 
 ## Resume Logic
 
-`detectResumeState(ctx, ticket)`:
+`detectResumeState(ticket)`:
 
-1. Fetch ticket comments
-2. `ParseNightshiftComments` filters for `🤖 <!-- nightshift:type=... -->` markers
-3. Determine furthest completed phase
-4. Return resume cursor
+1. `ParseNightshiftComments` filters ticket comments for `🤖 <!-- nightshift:type=... -->` markers
+2. Determine furthest completed phase via marker presence
+3. Return resume cursor (`startPhase` + any recovered data)
 
-`ProcessTicket` then skips already-completed phases. To force a restart, move the ticket back to TODO.
+`ProcessTicket` then skips already-completed phases via `skip(phase)` which compares `phaseOrder` ints.
 
 ```mermaid
 flowchart LR
@@ -62,6 +61,8 @@ flowchart LR
     C -->|pr| H[startPhase: status<br/>parsePRURLsFromComment]
     C -->|status_change| I[alreadyDone: true]
 ```
+
+> **Known bug (VC-84):** When a ticket has been reworked, `detectResumeState` checks `hasImpl` (CommentImplement present) before checking `hasRework`. Because the original implement comment from the first run is still present after a rework, the switch always routes to `PhaseCommit`, skipping rework re-implementation if interrupted. Fix: compare timestamps of `CommentRework` vs `CommentImplement` — if rework is newer, resume from `PhaseImplement`.
 
 ## Dependency Resolution
 
@@ -128,14 +129,54 @@ The VC project uses: "À faire", "En cours", "Revue en cours", "Terminé". `isRe
 
 ## Sprint / Backlog Filtering
 
+Both filters are **always active** — no config required.
+
+**Future-sprint exclusion** — `buildTodoJQL` always appends `AND (sprint not in futureSprints() OR sprint is EMPTY)`. The `OR sprint is EMPTY` arm is required for Kanban tickets: Jira's `sprint not in futureSprints()` excludes issues with no sprint field (NULL), which silently drops all Kanban board tickets. Requires Jira Software license; Work Management projects get a JQL error at runtime.
+
+**Backlog exclusion** — `FetchTodoTickets` calls `discoverBoardID(ctx, proj.Key)`:
+
+1. `GET /rest/agile/1.0/board?projectKeyOrId=<KEY>` — picks first result, caches on `Client.boardCache`
+2. If board found (`id > 0`): calls `fetchBoardBacklogKeys` → `GET /rest/agile/1.0/board/{id}/backlog` (paginates)
+3. Subtracts backlog keys from JQL results
+4. If no board found (Work Management / non-software): backlog filtering skipped gracefully; no error
+
+Note: `GET /rest/agile/1.0/board/{id}/issue` returns ALL issues including backlog. `fetchBoardBacklogKeys` uses the `/backlog` endpoint specifically to get only the backlog subset.
+
+**Optional:**
+
 ```yaml
-require_active_sprint: true   # injects AND sprint in openSprints()
-board_type: kanban
-board_id: 42                  # needed for kanban
+projects:
+  - key: VC
+    require_active_sprint: true  # AND sprint in openSprints() — Jira Software only
 ```
 
-- `openSprints()` requires Jira Software (not Work Management).
-- Kanban: `/rest/agile/1.0/board/<id>/issue` includes backlog items. `fetchKanbanBoardTickets` also calls `/board/<id>/backlog` and subtracts.
+`openSprints()` requires Jira Software (not Work Management). Applied only to the TODO fetch — in-flight and review tickets are never filtered.
+
+## Workspace Restriction in Prompts
+
+All agent prompts include a **non-compressible** workspace restriction block in `PromptSuffix`. This prevents agents from writing outside the ticket workspace directory.
+
+**Plan phase** (`buildPlanSuffix(ws)`):
+```
+## WORKSPACE RESTRICTION (MANDATORY — DO NOT IGNORE)
+If you need to read files to understand context, you may ONLY read files within:
+  - /path/to/workspace/repo
+Do NOT read or write files outside these paths.
+```
+Also instructs: "Do NOT edit, create, or delete any files — output plan text only."
+
+**Implement phase** (`buildImplementSuffix(plan, ws)`):
+```
+## WORKSPACE RESTRICTION (MANDATORY — DO NOT IGNORE)
+You MUST ONLY edit files within the workspace directories listed above.
+NEVER edit, create, or delete files outside these paths under any circumstances.
+Permitted paths:
+  - /path/to/workspace/repo
+```
+
+Both functions live in `orchestrator.go`. The restriction is in `PromptSuffix` — never compressed. `PromptPrefix`/`PromptSuffix` bypass compression entirely; see [agents-internals](agents-internals.md).
+
+> **Why this matters**: `claude --dangerously-skip-permissions` has unrestricted filesystem access even when `WorkDir` is set. Setting `cmd.Dir` only changes the working directory — it does not sandbox writes. Without an explicit prompt restriction, the agent can and will write to the live repo (`$HOME/...`) instead of the workspace clone.
 
 ## Testability
 

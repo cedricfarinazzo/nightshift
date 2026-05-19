@@ -426,8 +426,8 @@ func TestIssueLinkToLink_BothKeys(t *testing.T) {
 func TestBuildTodoJQL_Basic(t *testing.T) {
 	proj := ProjectConfig{Key: "PROJ", Label: "auto"}
 	jql := buildTodoJQL(proj, "")
-	if strings.Contains(jql, "sprint") {
-		t.Errorf("JQL should not contain sprint filter, got: %s", jql)
+	if !strings.Contains(jql, "sprint not in futureSprints() OR sprint is EMPTY") {
+		t.Errorf("JQL must exclude future sprints and include sprintless tickets, got: %s", jql)
 	}
 	if !strings.Contains(jql, `project = "PROJ"`) {
 		t.Errorf("JQL missing project clause, got: %s", jql)
@@ -448,8 +448,12 @@ func TestBuildTodoJQL_WithIssueType(t *testing.T) {
 	}
 }
 
-func TestFetchTodoTickets_BoardIDFiltersBacklog(t *testing.T) {
+func TestFetchTodoTickets_AutoDiscoversBoardForBacklogFilter(t *testing.T) {
 	cfg := defaultMockConfig()
+	// Board discovery returns board ID 42 for project VC
+	cfg.boardsPayload = `{"maxResults":50,"startAt":0,"total":1,"isLast":true,"values":[
+		{"id":42,"name":"VC board","type":"simple"}
+	]}`
 	// JQL search returns both VC-59 (on board) and VC-31 (in backlog)
 	cfg.searchPayload = `{"total":2,"issues":[
 		{"key":"VC-59","fields":{"summary":"Board ticket","labels":["auto"],"status":{"id":"10001","name":"To Do","statusCategory":{"key":"new"}},"comment":{"comments":[]},"issuelinks":[]}},
@@ -463,7 +467,6 @@ func TestFetchTodoTickets_BoardIDFiltersBacklog(t *testing.T) {
 	defer srv.Close()
 
 	proj := mockProject()
-	proj.BoardID = 42
 	proj.Label = "auto"
 
 	tickets, err := client.FetchTodoTickets(testCtx(t), proj, "")
@@ -475,18 +478,36 @@ func TestFetchTodoTickets_BoardIDFiltersBacklog(t *testing.T) {
 	}
 }
 
-func TestFetchTodoTickets_NoBoardID_NoBacklogFilter(t *testing.T) {
-	var capturedJQL string
+func TestFetchTodoTickets_NoBoardDiscovered_NoBacklogFilter(t *testing.T) {
 	cfg := defaultMockConfig()
-	cfg.capturedJQL = &capturedJQL
+	// Board discovery returns empty — no board for this project
+	cfg.boardsPayload = `{"maxResults":50,"startAt":0,"total":0,"isLast":true,"values":[]}`
+	cfg.searchPayload = `{"total":2,"issues":[
+		{"key":"VC-59","fields":{"summary":"Ticket A","labels":["nightshift"],"status":{"id":"10001","name":"To Do","statusCategory":{"key":"new"}},"comment":{"comments":[]},"issuelinks":[]}},
+		{"key":"VC-31","fields":{"summary":"Ticket B","labels":["nightshift"],"status":{"id":"10001","name":"To Do","statusCategory":{"key":"new"}},"comment":{"comments":[]},"issuelinks":[]}}
+	]}`
 	client, srv := newMockJiraClient(t, cfg)
 	defer srv.Close()
 
-	_, err := client.FetchTodoTickets(testCtx(t), mockProject(), "")
+	tickets, err := client.FetchTodoTickets(testCtx(t), mockProject(), "")
 	if err != nil {
 		t.Fatalf("FetchTodoTickets() error = %v", err)
 	}
-	if strings.Contains(capturedJQL, "sprint") {
-		t.Errorf("expected no sprint filter in wire JQL, got: %q", capturedJQL)
+	// No backlog filtering — both tickets returned
+	if len(tickets) != 2 {
+		t.Errorf("expected 2 tickets (no backlog filter), got %d", len(tickets))
+	}
+}
+
+// ── buildTodoJQL always excludes future sprints ───────────────────────────────
+
+func TestBuildTodoJQL_AlwaysExcludesFutureSprints(t *testing.T) {
+	proj := ProjectConfig{Key: "PROJ", Label: "auto"}
+	jql := buildTodoJQL(proj, "")
+	if !strings.Contains(jql, "sprint not in futureSprints() OR sprint is EMPTY") {
+		t.Errorf("JQL must always contain future-sprint exclusion with sprintless fallback, got: %s", jql)
+	}
+	if !strings.HasSuffix(strings.TrimSpace(jql), "ORDER BY created ASC") {
+		t.Errorf("JQL should end with ORDER BY created ASC, got: %s", jql)
 	}
 }

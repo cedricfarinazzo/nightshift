@@ -144,17 +144,26 @@ jira:
 
 ### Sprint / Backlog Filtering
 
+Nightshift automatically excludes backlog and future-sprint tickets — no config needed.
+
+**Automatic (always on):**
+- **Backlog exclusion** — the agile board for each project is auto-discovered via the Jira API. Tickets in the board's backlog are always excluded. If a project has no agile board (e.g. Jira Work Management), backlog filtering is skipped gracefully.
+- **Future-sprint exclusion** — `AND (sprint not in futureSprints() OR sprint is EMPTY)` is always appended to the todo JQL. The `OR sprint is EMPTY` arm is required for Kanban boards — Jira's `sprint not in futureSprints()` silently excludes tickets with no sprint. Requires Jira Software license; Work Management projects will receive a JQL error if this function is unavailable.
+
+**Optional (via config):**
+
 ```yaml
 jira:
   projects:
     - key: VC
-      require_active_sprint: true       # add: AND sprint in openSprints()
-      board_type: kanban
-      board_id: 42                      # required for kanban-board (not backlog) filtering
+      require_active_sprint: true  # add: AND sprint in openSprints() — Jira Software only
 ```
 
+| Flag | Effect | Requires |
+|---|---|---|
+| `require_active_sprint: true` | Append `AND sprint in openSprints()` to todo JQL | Jira Software |
+
 - `require_active_sprint: true` adds `AND sprint in openSprints()` to the todo JQL. Applied only to the todo fetch — in-flight and review tickets are unaffected. Requires Jira Software (not Work Management).
-- Kanban boards: `board/<id>/issue` includes backlog items. `fetchKanbanBoardTickets` calls `board/<id>/issue` and subtracts `board/<id>/backlog` to get on-board items only. Needs both `board_type: kanban` and `board_id: <N>`.
 
 ### Localised status names
 

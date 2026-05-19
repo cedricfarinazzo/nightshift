@@ -749,13 +749,14 @@ func TestE2E_VC62_ProcessFeedback_ChecksInPrompt(t *testing.T) {
 	}
 
 	// Agent must have been called — failing checks alone trigger rework.
-	if ra.capturedOpts.Prompt == "" {
+	if ra.capturedOpts.Prompt == "" && ra.capturedOpts.PromptSuffix == "" {
 		t.Error("expected rework agent to be called for failing CI checks, but prompt was empty")
 	}
-	if !strings.Contains(ra.capturedOpts.Prompt, "go-test") {
+	fullPrompt := ra.capturedOpts.Prompt + ra.capturedOpts.PromptSuffix
+	if !strings.Contains(fullPrompt, "go-test") {
 		t.Error("rework prompt missing failing check name 'go-test'")
 	}
-	if !strings.Contains(ra.capturedOpts.Prompt, "failure") {
+	if !strings.Contains(fullPrompt, "failure") {
 		t.Error("rework prompt missing failing check conclusion 'failure'")
 	}
 }
