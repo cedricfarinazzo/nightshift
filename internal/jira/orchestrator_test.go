@@ -1099,12 +1099,16 @@ func (a *callCountAgent) Execute(_ context.Context, _ agents.ExecuteOptions) (*a
 // ── detectResumeState ─────────────────────────────────────────────────────────
 
 func nightshiftComment(ct CommentType, body string) Comment {
-	ts := time.Now().Format("2006-01-02 15:04")
-	raw := "🤖 Nightshift — " + ct.Title() + " (" + ts + ")\n" +
+	return nightshiftCommentAt(ct, body, time.Now())
+}
+
+func nightshiftCommentAt(ct CommentType, body string, ts time.Time) Comment {
+	formatted := ts.Format("2006-01-02 15:04")
+	raw := "🤖 Nightshift — " + ct.Title() + " (" + formatted + ")\n" +
 		"Provider: claude | Model: claude-sonnet-4-6 | Duration: 1s\n\n" +
 		body + "\n\n" +
 		"<!-- nightshift:type=" + string(ct) + " provider=claude model=claude-sonnet-4-6 duration=1s -->\n"
-	return Comment{Body: raw, Created: time.Now()}
+	return Comment{Body: raw, Created: ts}
 }
 
 func TestDetectResumeState_NoComments(t *testing.T) {
@@ -1165,6 +1169,63 @@ func TestDetectResumeState_AfterPR(t *testing.T) {
 	}
 	if len(rs.recoveredPRURLs) != 2 {
 		t.Errorf("recoveredPRURLs len = %d, want 2: %v", len(rs.recoveredPRURLs), rs.recoveredPRURLs)
+	}
+}
+
+// TestDetectResumeState_ReworkNewerThanImpl verifies that when a CommentRework is
+// posted after CommentImplement, detectResumeState routes to PhaseImplement so
+// the rework's re-implementation runs rather than jumping straight to PhaseCommit.
+func TestDetectResumeState_ReworkNewerThanImpl(t *testing.T) {
+	base := time.Now()
+	ticket := Ticket{Comments: []Comment{
+		nightshiftCommentAt(CommentValidation, "ok", base.Add(-4*time.Hour)),
+		nightshiftCommentAt(CommentPlan, "the plan", base.Add(-3*time.Hour)),
+		nightshiftCommentAt(CommentImplement, "first impl done", base.Add(-2*time.Hour)),
+		nightshiftCommentAt(CommentRework, "reviewer asked for changes", base.Add(-1*time.Hour)),
+	}}
+	rs := detectResumeState(ticket)
+	if rs.startPhase != PhaseImplement {
+		t.Errorf("want PhaseImplement (rework newer than impl), got %s", rs.startPhase)
+	}
+	if rs.recoveredPlan != "the plan" {
+		t.Errorf("recoveredPlan = %q, want %q", rs.recoveredPlan, "the plan")
+	}
+}
+
+// TestDetectResumeState_ImplNewerThanRework verifies that when CommentImplement is
+// posted after CommentRework, the rework already re-implemented — resume from PhaseCommit.
+func TestDetectResumeState_ImplNewerThanRework(t *testing.T) {
+	base := time.Now()
+	ticket := Ticket{Comments: []Comment{
+		nightshiftCommentAt(CommentValidation, "ok", base.Add(-4*time.Hour)),
+		nightshiftCommentAt(CommentPlan, "the plan", base.Add(-3*time.Hour)),
+		nightshiftCommentAt(CommentRework, "reviewer asked for changes", base.Add(-2*time.Hour)),
+		nightshiftCommentAt(CommentImplement, "rework impl done", base.Add(-1*time.Hour)),
+	}}
+	rs := detectResumeState(ticket)
+	if rs.startPhase != PhaseCommit {
+		t.Errorf("want PhaseCommit (impl newer than rework), got %s", rs.startPhase)
+	}
+	if rs.recoveredPlan != "the plan" {
+		t.Errorf("recoveredPlan = %q, want %q", rs.recoveredPlan, "the plan")
+	}
+}
+
+// TestDetectResumeState_ReworkNoImpl verifies that when a CommentRework exists but
+// no CommentImplement does, the existing hasPlan case routes to PhaseImplement.
+func TestDetectResumeState_ReworkNoImpl(t *testing.T) {
+	base := time.Now()
+	ticket := Ticket{Comments: []Comment{
+		nightshiftCommentAt(CommentValidation, "ok", base.Add(-3*time.Hour)),
+		nightshiftCommentAt(CommentPlan, "the plan", base.Add(-2*time.Hour)),
+		nightshiftCommentAt(CommentRework, "reviewer asked for changes", base.Add(-1*time.Hour)),
+	}}
+	rs := detectResumeState(ticket)
+	if rs.startPhase != PhaseImplement {
+		t.Errorf("want PhaseImplement (rework present, no impl), got %s", rs.startPhase)
+	}
+	if rs.recoveredPlan != "the plan" {
+		t.Errorf("recoveredPlan = %q, want %q", rs.recoveredPlan, "the plan")
 	}
 }
 
