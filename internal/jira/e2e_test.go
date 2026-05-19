@@ -22,8 +22,7 @@ func e2eClient(t *testing.T) *Client {
 		Site:     "sedinfra",
 		Email:    "cedric.farinazzo@gmail.com",
 		TokenEnv: "NIGHTSHIFT_JIRA_TOKEN",
-		Project:  "VC",
-		Label:    "nightshift",
+		Projects: []ProjectConfig{{Key: "VC", Label: "nightshift"}},
 	}
 	client, err := NewClient(cfg)
 	if err != nil {
@@ -186,12 +185,6 @@ func TestE2E_DependencyGraph(t *testing.T) {
 
 func TestE2E_VC3_ClientAccessors(t *testing.T) {
 	client := e2eClient(t)
-	if got := client.ProjectKey(); got != "VC" {
-		t.Errorf("ProjectKey() = %q, want %q", got, "VC")
-	}
-	if got := client.Label(); got != "nightshift" {
-		t.Errorf("Label() = %q, want %q", got, "nightshift")
-	}
 	if client.Raw() == nil {
 		t.Error("Raw() returned nil; expected underlying go-atlassian client")
 	}
@@ -208,8 +201,7 @@ func TestE2E_VC3_NewClient_BadCredentials(t *testing.T) {
 		Site:     "sedinfra",
 		Email:    "cedric.farinazzo@gmail.com",
 		TokenEnv: "BAD_TOKEN_ENV",
-		Project:  "VC",
-		Label:    "nightshift",
+		Projects: []ProjectConfig{{Key: "VC", Label: "nightshift"}},
 	}
 	client, err := NewClient(cfg)
 	if err != nil {
@@ -452,15 +444,14 @@ func TestE2E_VC7_SetupWorkspace_InvalidKey(t *testing.T) {
 	if os.Getenv("NIGHTSHIFT_JIRA_TOKEN") == "" {
 		t.Skip("NIGHTSHIFT_JIRA_TOKEN not set; skipping e2e test")
 	}
-	cfg := JiraConfig{
-		WorkspaceRoot:    t.TempDir(),
-		CleanupAfterDays: 30,
-		Repos:            []RepoConfig{{Name: "repo", URL: "git@github.com:org/repo.git", BaseBranch: "main"}},
-	}
 	proj := ProjectConfig{
 		Key:   "VC",
 		Label: "nightshift",
-		Repos: cfg.Repos,
+		Repos: []RepoConfig{{Name: "repo", URL: "git@github.com:org/repo.git", BaseBranch: "main"}},
+	}
+	cfg := JiraConfig{
+		WorkspaceRoot:    t.TempDir(),
+		CleanupAfterDays: 30,
 	}
 	_, err := SetupWorkspace(context.Background(), cfg, proj, "invalid-key")
 	if err == nil {
@@ -758,13 +749,14 @@ func TestE2E_VC62_ProcessFeedback_ChecksInPrompt(t *testing.T) {
 	}
 
 	// Agent must have been called — failing checks alone trigger rework.
-	if ra.capturedOpts.Prompt == "" {
+	if ra.capturedOpts.Prompt == "" && ra.capturedOpts.PromptSuffix == "" {
 		t.Error("expected rework agent to be called for failing CI checks, but prompt was empty")
 	}
-	if !strings.Contains(ra.capturedOpts.Prompt, "go-test") {
+	fullPrompt := ra.capturedOpts.Prompt + ra.capturedOpts.PromptSuffix
+	if !strings.Contains(fullPrompt, "go-test") {
 		t.Error("rework prompt missing failing check name 'go-test'")
 	}
-	if !strings.Contains(ra.capturedOpts.Prompt, "failure") {
+	if !strings.Contains(fullPrompt, "failure") {
 		t.Error("rework prompt missing failing check conclusion 'failure'")
 	}
 }

@@ -67,6 +67,10 @@ ALTER TABLE snapshots ADD COLUMN source TEXT NOT NULL DEFAULT 'file';
 `
 
 const migration009SQL = `
+DELETE FROM jira_ticket_results
+WHERE id NOT IN (
+    SELECT MIN(id) FROM jira_ticket_results GROUP BY run_id, ticket_key
+);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_jira_ticket_results_run_key
     ON jira_ticket_results(run_id, ticket_key);
 `

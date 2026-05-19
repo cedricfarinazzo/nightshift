@@ -111,6 +111,14 @@ func effortValue(s string) string {
 	return s
 }
 
+// orDefaultStr returns s if non-empty, otherwise def.
+func orDefaultStr(s, def string) string {
+	if s != "" {
+		return s
+	}
+	return def
+}
+
 // jiraProviders lists providers selectable for Jira phase configuration.
 var jiraProviders = []string{"claude", "codex", "copilot"}
 
@@ -223,11 +231,13 @@ type setupModel struct {
 	codexEffortIdx   int
 	copilotEffortIdx int
 
-	taskPresetCursor int
-	taskCursor       int
-	taskItems        []taskItem
-	taskErr          string
-	preset           setup.Preset
+	taskPresetCursor   int
+	taskCursor         int
+	taskViewportOffset int
+	taskItems          []taskItem
+	taskErr            string
+	preset             setup.Preset
+	windowHeight int
 
 	scheduleMode      string
 	scheduleCursor    int
@@ -273,10 +283,13 @@ type setupModel struct {
 	jiraRepoEditing   bool
 	jiraRepoField     int
 	jiraRepoEditURL   string
-	jiraPhaseCursor    int
-	jiraPhaseModelIdx  [4]int
-	jiraPhaseProvider  [4]string // provider per phase: claude, codex, or copilot
-	jiraPhaseEffortIdx [4]int    // effort index per phase, into provider-specific effort slice
+	jiraPhaseCursor       int
+	jiraPhaseModelIdx     [4]int
+	jiraPhaseProvider     [4]string // provider per phase: claude, codex, or copilot
+	jiraPhaseEffortIdx    [4]int    // effort index per phase, into provider-specific effort slice
+	jiraPhaseTimeout      [4]string // timeout per phase (duration string, e.g. "30m")
+	jiraPhaseTimeoutInput textinput.Model
+	jiraPhaseTimeoutEdit  bool // true when editing the timeout for the focused phase
 	jiraPinging       bool
 	jiraPingOK        bool
 	jiraPingErr       string
@@ -291,6 +304,11 @@ type setupModel struct {
 	jiraEditProjectLabel            string
 	jiraEditProjectBoardID          int
 	jiraEditProjectExcludeFutureSprints bool
+
+	// Agent timeout (shown in providers/model step, applied to all providers)
+	agentTimeout      string          // duration string, e.g. "30m"
+	agentTimeoutInput textinput.Model // used when editing timeout (modelCursor==3)
+	agentTimeoutEdit  bool            // true while editing timeout
 
 	// Prompt compression step state
 	compressionCursor    int    // 0=enable toggle, 1=provider, 2=model, 3=effort
@@ -367,6 +385,24 @@ const (
 	pathActionAdd
 )
 
+// calculateTaskViewportHeight computes the number of task items to display
+// based on terminal height, reserving space for header/footer/indicators.
+// Returns at least 5 items even on small terminals.
+func (m *setupModel) calculateTaskViewportHeight() int {
+	// Reserve space: ~8 lines for header/footer/indicators
+	// (title, instruction, above/below indicators, error, footer)
+	const headerFooterReserved = 8
+	if m.windowHeight > 0 {
+		h := m.windowHeight - headerFooterReserved
+		if h < 5 {
+			h = 5 // minimum visible items
+		}
+		return h
+	}
+	// Fallback before first WindowSizeMsg — conservative to avoid initial overflow
+	return 10
+}
+
 var (
 	styleHeader = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("69"))
 	styleDim    = lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
@@ -402,6 +438,14 @@ func newSetupModel() (*setupModel, error) {
 
 	jiraInput := textinput.New()
 	jiraInput.Prompt = "> "
+
+	jiraPhaseTimeoutInput := textinput.New()
+	jiraPhaseTimeoutInput.Prompt = "> "
+	jiraPhaseTimeoutInput.Placeholder = "30m"
+
+	agentTimeoutInput := textinput.New()
+	agentTimeoutInput.Prompt = "> "
+	agentTimeoutInput.Placeholder = "30m"
 
 	systemdInput := textinput.New()
 	systemdInput.Prompt = "> "
@@ -468,9 +512,12 @@ func newSetupModel() (*setupModel, error) {
 		}(),
 		compressionModelIdx:  0,
 		compressionEffortIdx: 0,
-		jiraInput:         jiraInput,
-		jiraTokenEnv:      "JIRA_API_TOKEN",
-		systemdInput:      systemdInput,
+		jiraInput:             jiraInput,
+		jiraPhaseTimeoutInput: jiraPhaseTimeoutInput,
+		jiraTokenEnv:          "JIRA_API_TOKEN",
+		agentTimeout:          orDefaultStr(cfg.Providers.Claude.Timeout, "30m"),
+		agentTimeoutInput:     agentTimeoutInput,
+		systemdInput:          systemdInput,
 		systemdOnCalendar: func() string {
 			if cfg.Jira.SystemdOnCalendar != "" {
 				return cfg.Jira.SystemdOnCalendar
@@ -480,6 +527,7 @@ func newSetupModel() (*setupModel, error) {
 		jiraMaxTickets:    10,
 		jiraPhaseProvider: defaultJiraPhaseProviders(cfg.Providers.Preference),
 		jiraPhaseModelIdx: defaultJiraPhaseModelIdxs(cfg.Providers.Preference),
+		jiraPhaseTimeout:  [4]string{"2m", "5m", "30m", "20m"},
 	}
 
 	// Pre-populate compression fields from existing config.
@@ -543,6 +591,16 @@ func newSetupModel() (*setupModel, error) {
 			model.jiraPhaseProvider[i] = p
 			model.jiraPhaseModelIdx[i] = jiraModelIndexForProvider(p, phase.Model)
 			model.jiraPhaseEffortIdx[i] = effortIndex(jiraPhaseEffortsForProvider(p), phase.ReasoningEffort)
+		}
+		defaults := [4]string{"2m", "5m", "30m", "20m"}
+		phases := []string{
+			cfg.Jira.Validation.Timeout,
+			cfg.Jira.Plan.Timeout,
+			cfg.Jira.Implement.Timeout,
+			cfg.Jira.ReviewFix.Timeout,
+		}
+		for i, t := range phases {
+			model.jiraPhaseTimeout[i] = orDefaultStr(t, defaults[i])
 		}
 	}
 
@@ -663,6 +721,8 @@ func (m *setupModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			codexModels = opts
 			m.codexModelIdx = modelIndex(codexModels, m.cfg.Providers.Codex.Model)
 		}
+	case tea.WindowSizeMsg:
+		m.windowHeight = msg.Height
 	}
 
 	return m, cmd
@@ -787,7 +847,17 @@ func (m *setupModel) View() string {
 			b.WriteString(styleWarn.Render("No task definitions found."))
 			b.WriteString("\n")
 		} else {
-			for i, item := range m.taskItems {
+			vh := m.calculateTaskViewportHeight()
+			start := m.taskViewportOffset
+			end := start + vh
+			if end > len(m.taskItems) {
+				end = len(m.taskItems)
+			}
+			if start > 0 {
+				fmt.Fprintf(&b, "  ... (%d more above)\n", start)
+			}
+			for i := start; i < end; i++ {
+				item := m.taskItems[i]
 				cursor := " "
 				if i == m.taskCursor {
 					cursor = ">"
@@ -797,6 +867,9 @@ func (m *setupModel) View() string {
 					check = "x"
 				}
 				fmt.Fprintf(&b, " %s [%s] %-22s %s\n", cursor, check, item.def.Type, item.def.Name)
+			}
+			if end < len(m.taskItems) {
+				fmt.Fprintf(&b, "  ... (%d more below)\n", len(m.taskItems)-end)
 			}
 		}
 		if m.taskErr != "" {
@@ -928,6 +1001,8 @@ func (m *setupModel) View() string {
 func (m *setupModel) setStep(step setupStep) tea.Cmd {
 	m.step = step
 	switch step {
+	case stepTaskSelect:
+		m.taskViewportOffset = 0
 	case stepJira:
 		m.jiraSubStep = 0
 		m.jiraErr = ""
@@ -1146,6 +1221,7 @@ func (m *setupModel) handlePresetInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		presets := []setup.Preset{setup.PresetBalanced, setup.PresetSafe, setup.PresetAggressive}
 		m.preset = presets[m.taskPresetCursor]
 		m.taskItems = makeTaskItems(m.cfg, m.projects, m.preset)
+		m.taskViewportOffset = 0
 		return m, m.setStep(stepTaskSelect)
 	}
 	return m, nil
@@ -1204,6 +1280,14 @@ func (m *setupModel) handleTaskInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.applyTasks()
 		m.taskErr = ""
 		return m, m.setStep(stepSchedule)
+	}
+	// Clamp viewport so cursor stays visible.
+	vh := m.calculateTaskViewportHeight()
+	if m.taskCursor < m.taskViewportOffset {
+		m.taskViewportOffset = m.taskCursor
+	}
+	if m.taskCursor >= m.taskViewportOffset+vh {
+		m.taskViewportOffset = m.taskCursor - vh + 1
 	}
 	return m, nil
 }
@@ -1908,7 +1992,21 @@ func renderModelFields(b *strings.Builder, m *setupModel) {
 			avail,
 		)
 	}
-	b.WriteString(styleNote.Render("Tip: ←/→ model  [e] cycle effort  'default' = CLI built-in."))
+	// Timeout row (cursor index 3)
+	cursor := " "
+	if m.modelCursor == 3 {
+		cursor = ">"
+	}
+	timeout := m.agentTimeout
+	if timeout == "" {
+		timeout = "30m"
+	}
+	if m.agentTimeoutEdit {
+		fmt.Fprintf(b, " %s Timeout  [%s]\n", cursor, m.agentTimeoutInput.View())
+	} else {
+		fmt.Fprintf(b, " %s Timeout  %s  (press [t] to edit)\n", cursor, timeout)
+	}
+	b.WriteString(styleNote.Render("Tip: ←/→ model  [e] cycle effort  [t] set timeout  'default' = CLI built-in."))
 	b.WriteString("\n")
 	if m.modelsLoading > 0 {
 		b.WriteString(styleDim.Render(m.spinner.View() + " Fetching live model list…"))
@@ -1917,13 +2015,39 @@ func renderModelFields(b *strings.Builder, m *setupModel) {
 }
 
 func (m *setupModel) handleModelInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// Handle timeout editing sub-state when cursor is on row 3.
+	if m.agentTimeoutEdit {
+		switch msg.String() {
+		case "enter":
+			val := strings.TrimSpace(m.agentTimeoutInput.Value())
+			if val != "" {
+				if _, err := time.ParseDuration(val); err != nil {
+					// Leave edit open; user must correct value or press esc.
+					return m, nil
+				}
+				m.agentTimeout = val
+			}
+			m.agentTimeoutEdit = false
+			m.agentTimeoutInput.Blur()
+		case "esc":
+			m.agentTimeoutEdit = false
+			m.agentTimeoutInput.Blur()
+		default:
+			var cmd tea.Cmd
+			m.agentTimeoutInput, cmd = m.agentTimeoutInput.Update(msg)
+			return m, cmd
+		}
+		return m, nil
+	}
+
 	switch msg.String() {
 	case "up", "k":
 		if m.modelCursor > 0 {
 			m.modelCursor--
 		}
 	case "down", "j":
-		if m.modelCursor < len(modelProviderLists)-1 {
+		// 3 provider rows (0-2) + 1 timeout row (3)
+		if m.modelCursor < len(modelProviderLists) {
 			m.modelCursor++
 		}
 	case "left", "h":
@@ -1966,6 +2090,13 @@ func (m *setupModel) handleModelInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case 2:
 			m.copilotEffortIdx = (m.copilotEffortIdx + 1) % len(copilotEfforts)
 		}
+	case "t":
+		// Open timeout editor when on the timeout row (cursor 3).
+		if m.modelCursor == 3 {
+			m.agentTimeoutEdit = true
+			m.agentTimeoutInput.SetValue(m.agentTimeout)
+			m.agentTimeoutInput.Focus()
+		}
 	case "enter":
 		m.cfg.Providers.Claude.Model = claudeModels[m.claudeModelIdx].value
 		m.cfg.Providers.Codex.Model = codexModels[m.codexModelIdx].value
@@ -1973,6 +2104,14 @@ func (m *setupModel) handleModelInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.cfg.Providers.Claude.ReasoningEffort = effortValue(claudeEfforts[m.claudeEffortIdx])
 		m.cfg.Providers.Codex.ReasoningEffort = effortValue(codexEfforts[m.codexEffortIdx])
 		m.cfg.Providers.Copilot.ReasoningEffort = effortValue(copilotEfforts[m.copilotEffortIdx])
+		// Apply global agent timeout to all providers.
+		t := m.agentTimeout
+		if t == "30m" {
+			t = "" // 30m is the default; no need to write it explicitly
+		}
+		m.cfg.Providers.Claude.Timeout = t
+		m.cfg.Providers.Codex.Timeout = t
+		m.cfg.Providers.Copilot.Timeout = t
 		return m, m.setStep(stepTaskPreset)
 	}
 	return m, nil
@@ -2203,10 +2342,15 @@ func scheduleFieldHelp(cursor int, mode string) string {
 
 func makeTaskItems(cfg *config.Config, projects []string, preset setup.Preset) []taskItem {
 	defs := tasks.AllDefinitionsSorted()
-	signals := setup.DetectRepoSignals(projects)
-	selected := setup.PresetTasks(preset, defs, signals)
-	for _, enabled := range cfg.Tasks.Enabled {
-		selected[tasks.TaskType(enabled)] = true
+	var selected map[tasks.TaskType]bool
+	if len(cfg.Tasks.Enabled) > 0 {
+		selected = make(map[tasks.TaskType]bool, len(cfg.Tasks.Enabled))
+		for _, enabled := range cfg.Tasks.Enabled {
+			selected[tasks.TaskType(enabled)] = true
+		}
+	} else {
+		signals := setup.DetectRepoSignals(projects)
+		selected = setup.PresetTasks(preset, defs, signals)
 	}
 
 	items := make([]taskItem, 0, len(defs))
@@ -2430,18 +2574,21 @@ func writeGlobalConfigToPath(cfg *config.Config, configPath string) error {
 	v.Set("providers.claude.data_path", cfg.Providers.Claude.DataPath)
 	v.Set("providers.claude.model", cfg.Providers.Claude.Model)
 	v.Set("providers.claude.reasoning_effort", cfg.Providers.Claude.ReasoningEffort)
+	v.Set("providers.claude.timeout", cfg.Providers.Claude.Timeout)
 	v.Set("providers.claude.dangerously_skip_permissions", cfg.Providers.Claude.DangerouslySkipPermissions)
 	v.Set("providers.claude.dangerously_bypass_approvals_and_sandbox", cfg.Providers.Claude.DangerouslyBypassApprovalsAndSandbox)
 	v.Set("providers.codex.enabled", cfg.Providers.Codex.Enabled)
 	v.Set("providers.codex.data_path", cfg.Providers.Codex.DataPath)
 	v.Set("providers.codex.model", cfg.Providers.Codex.Model)
 	v.Set("providers.codex.reasoning_effort", cfg.Providers.Codex.ReasoningEffort)
+	v.Set("providers.codex.timeout", cfg.Providers.Codex.Timeout)
 	v.Set("providers.codex.dangerously_skip_permissions", cfg.Providers.Codex.DangerouslySkipPermissions)
 	v.Set("providers.codex.dangerously_bypass_approvals_and_sandbox", cfg.Providers.Codex.DangerouslyBypassApprovalsAndSandbox)
 	v.Set("providers.copilot.enabled", cfg.Providers.Copilot.Enabled)
 	v.Set("providers.copilot.data_path", cfg.Providers.Copilot.DataPath)
 	v.Set("providers.copilot.model", cfg.Providers.Copilot.Model)
 	v.Set("providers.copilot.reasoning_effort", cfg.Providers.Copilot.ReasoningEffort)
+	v.Set("providers.copilot.timeout", cfg.Providers.Copilot.Timeout)
 	v.Set("providers.copilot.dangerously_skip_permissions", cfg.Providers.Copilot.DangerouslySkipPermissions)
 	v.Set("providers.copilot.dangerously_bypass_approvals_and_sandbox", cfg.Providers.Copilot.DangerouslyBypassApprovalsAndSandbox)
 	v.Set("providers.preference", cfg.Providers.Preference)
@@ -3090,6 +3237,32 @@ func (m *setupModel) handleJiraProjectEditInput(msg tea.KeyMsg) (tea.Model, tea.
 }
 
 func (m *setupModel) handleJiraPhaseInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.jiraPhaseTimeoutEdit {
+		switch msg.String() {
+		case "enter":
+			val := strings.TrimSpace(m.jiraPhaseTimeoutInput.Value())
+			if val != "" {
+				if _, err := time.ParseDuration(val); err != nil {
+					m.jiraErr = fmt.Sprintf("invalid timeout %q: must be a duration like 30m or 1h", val)
+					return m, nil
+				}
+				m.jiraPhaseTimeout[m.jiraPhaseCursor] = val
+			}
+			m.jiraPhaseTimeoutEdit = false
+			m.jiraErr = ""
+			m.jiraPhaseTimeoutInput.Blur()
+		case "esc":
+			m.jiraPhaseTimeoutEdit = false
+			m.jiraErr = ""
+			m.jiraPhaseTimeoutInput.Blur()
+		default:
+			var cmd tea.Cmd
+			m.jiraPhaseTimeoutInput, cmd = m.jiraPhaseTimeoutInput.Update(msg)
+			return m, cmd
+		}
+		return m, nil
+	}
+
 	switch msg.String() {
 	case "up", "k":
 		if m.jiraPhaseCursor > 0 {
@@ -3113,6 +3286,11 @@ func (m *setupModel) handleJiraPhaseInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// Cycle effort forward for the focused phase (wraps around).
 		efforts := jiraPhaseEffortsForProvider(m.jiraPhaseProvider[m.jiraPhaseCursor])
 		m.jiraPhaseEffortIdx[m.jiraPhaseCursor] = (m.jiraPhaseEffortIdx[m.jiraPhaseCursor] + 1) % len(efforts)
+	case "t":
+		// Open inline timeout editor for the focused phase.
+		m.jiraPhaseTimeoutEdit = true
+		m.jiraPhaseTimeoutInput.SetValue(m.jiraPhaseTimeout[m.jiraPhaseCursor])
+		m.jiraPhaseTimeoutInput.Focus()
 	case "tab":
 		// Cycle provider for the selected phase; reset model index to avoid out-of-bounds.
 		// Clamp effort index to new provider's effort slice length.
@@ -3321,11 +3499,14 @@ func (m *setupModel) applyJiraConfig() {
 		if m.jiraPhaseEffortIdx[i] < len(efforts) {
 			effort = effortValue(efforts[m.jiraPhaseEffortIdx[i]])
 		}
-		timeouts := [4]string{"2m", "5m", "30m", "20m"}
+		timeout := m.jiraPhaseTimeout[i]
+		if timeout == "" {
+			timeout = [4]string{"2m", "5m", "30m", "20m"}[i]
+		}
 		phases[i] = jiraconfig.PhaseConfig{
 			Provider:        provider,
 			Model:           model,
-			Timeout:         timeouts[i],
+			Timeout:         timeout,
 			ReasoningEffort: effort,
 		}
 	}
@@ -3616,7 +3797,7 @@ func renderJiraReposStep(b *strings.Builder, m *setupModel) {
 
 func renderJiraPhasesStep(b *strings.Builder, m *setupModel) {
 	b.WriteString("Phase models\n")
-	b.WriteString("Use ↑/↓ to select phase, ←/→ to change model, Tab to change provider, [e] to cycle effort.\n\n")
+	b.WriteString("Use ↑/↓ to select phase, ←/→ to change model, Tab to change provider, [e] to cycle effort, [t] to edit timeout.\n\n")
 
 	phaseLabels := [4]string{"Validation ", "Plan       ", "Implement  ", "Review-fix "}
 	for i, label := range phaseLabels {
@@ -3638,7 +3819,16 @@ func renderJiraPhasesStep(b *strings.Builder, m *setupModel) {
 		if m.jiraPhaseEffortIdx[i] < len(efforts) {
 			effortName = efforts[m.jiraPhaseEffortIdx[i]]
 		}
-		fmt.Fprintf(b, " %s %-11s  %-8s  ← %s →  ← %s →\n", cursor, label, provider, modelName, effortName)
+		timeout := m.jiraPhaseTimeout[i]
+		if timeout == "" {
+			timeout = [4]string{"2m", "5m", "30m", "20m"}[i]
+		}
+		fmt.Fprintf(b, " %s %-11s  %-8s  ← %s →  ← %s →  timeout=%s\n", cursor, label, provider, modelName, effortName, timeout)
+	}
+	if m.jiraPhaseTimeoutEdit {
+		b.WriteString("\nTimeout for focused phase: ")
+		b.WriteString(m.jiraPhaseTimeoutInput.View())
+		b.WriteString("\n")
 	}
 	b.WriteString("\n")
 	b.WriteString(styleNote.Render("Tip: haiku is cheaper/faster for validation; sonnet for implementation."))

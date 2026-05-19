@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -75,6 +76,55 @@ func TestHandleTaskInput_NoTasksDoesNotPanic(t *testing.T) {
 	m := &setupModel{}
 	if _, _ = m.handleTaskInput(tea.KeyMsg{Type: tea.KeySpace}); m.taskErr != "" {
 		t.Fatalf("taskErr = %q, want empty for non-enter input", m.taskErr)
+	}
+}
+
+func TestHandleTaskInput_ViewportOffsetClamps(t *testing.T) {
+	// Create a model with many tasks and simulate cursor navigation
+	// to verify viewport offset advances and clamps correctly.
+	m := &setupModel{
+		windowHeight: 30, // terminal height
+		taskItems:    make([]taskItem, 0, 50),
+	}
+
+	// Create 50 dummy tasks
+	for i := 0; i < 50; i++ {
+		m.taskItems = append(m.taskItems, taskItem{
+			def:      tasks.TaskDefinition{Type: tasks.TaskType("task-" + fmt.Sprintf("%02d", i))},
+			selected: false,
+		})
+	}
+
+	// calculateTaskViewportHeight should return ~22 (30 - 8 reserved)
+	vh := m.calculateTaskViewportHeight()
+	if vh < 5 {
+		t.Fatalf("calculateTaskViewportHeight = %d, want >= 5", vh)
+	}
+
+	// Initial state: cursor at 0, viewport starts at 0
+	if m.taskViewportOffset != 0 {
+		t.Fatalf("initial taskViewportOffset = %d, want 0", m.taskViewportOffset)
+	}
+
+	// Move down past the viewport: cursor goes beyond offset+vh
+	for i := 0; i < vh+5; i++ {
+		m.handleTaskInput(tea.KeyMsg{Type: tea.KeyDown})
+	}
+
+	// After moving past viewport, offset should advance to keep cursor visible
+	expectedOffset := m.taskCursor - vh + 1
+	if m.taskViewportOffset != expectedOffset {
+		t.Fatalf("after moving down past viewport, offset = %d, want %d", m.taskViewportOffset, expectedOffset)
+	}
+
+	// Move back up to position 5: offset should clamp down when cursor reaches viewport start
+	for i := 0; i < vh; i++ { // Move back to position vh+5-vh = 5
+		m.handleTaskInput(tea.KeyMsg{Type: tea.KeyUp})
+	}
+
+	// At cursor position 5, offset should clamp to 5 (since 5 < offset)
+	if m.taskViewportOffset != m.taskCursor {
+		t.Fatalf("after moving up to top of view, offset = %d, want %d (cursor position)", m.taskViewportOffset, m.taskCursor)
 	}
 }
 
@@ -154,6 +204,34 @@ func TestMakeTaskItems_PreservesExplicitEnabledTasks(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("expected bug-finder task to exist in setup list")
+	}
+}
+
+func TestMakeTaskItems_ExcludesPresetWhenEnabledNonEmpty(t *testing.T) {
+	// When cfg.Tasks.Enabled is non-empty, preset selections must be ignored.
+	// Only the explicitly enabled tasks should be selected.
+	cfg := &config.Config{
+		Tasks: config.TasksConfig{
+			// Enable only TaskBugFinder, which may not be in the preset
+			Enabled: []string{string(tasks.TaskBugFinder)},
+		},
+	}
+
+	items := makeTaskItems(cfg, nil, setup.PresetBalanced)
+
+	// Verify only the explicitly enabled task is selected
+	selectedCount := 0
+	for _, item := range items {
+		if item.selected {
+			selectedCount++
+			if item.def.Type != tasks.TaskBugFinder {
+				t.Fatalf("expected only TaskBugFinder to be selected, but %s is also selected", item.def.Type)
+			}
+		}
+	}
+
+	if selectedCount != 1 {
+		t.Fatalf("expected exactly 1 selected task, got %d", selectedCount)
 	}
 }
 
@@ -357,6 +435,72 @@ func TestWriteGlobalConfig_ReasoningEffortKeys(t *testing.T) {
 	}
 	if !containsStr(content, "high") {
 		t.Errorf("expected effort value 'high' in config output, got:\n%s", content)
+	}
+}
+
+func TestOrDefaultStr(t *testing.T) {
+	if got := orDefaultStr("45m", "30m"); got != "45m" {
+		t.Errorf("non-empty: got %q, want %q", got, "45m")
+	}
+	if got := orDefaultStr("", "30m"); got != "30m" {
+		t.Errorf("empty: got %q, want %q", got, "30m")
+	}
+}
+
+func TestWriteGlobalConfig_ProviderTimeout(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yaml")
+
+	if err := os.WriteFile(cfgPath, []byte("# nightshift config\n"), 0o644); err != nil {
+		t.Fatalf("seed config: %v", err)
+	}
+
+	cfg := &config.Config{}
+	cfg.Providers.Claude.Timeout = "45m"
+	cfg.Providers.Codex.Timeout = "1h"
+	cfg.Providers.Copilot.Timeout = "20m"
+
+	if err := writeGlobalConfigToPath(cfg, cfgPath); err != nil {
+		t.Fatalf("writeGlobalConfigToPath: %v", err)
+	}
+
+	raw, err := os.ReadFile(cfgPath)
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	content := string(raw)
+
+	for _, want := range []string{"45m", "1h", "20m", "timeout"} {
+		if !containsStr(content, want) {
+			t.Errorf("expected %q in config output, got:\n%s", want, content)
+		}
+	}
+}
+
+func TestWriteGlobalConfig_EmptyTimeoutNotWrittenAsZero(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yaml")
+
+	if err := os.WriteFile(cfgPath, []byte("# nightshift config\n"), 0o644); err != nil {
+		t.Fatalf("seed config: %v", err)
+	}
+
+	cfg := &config.Config{}
+	// Timeouts intentionally left empty (default behaviour).
+	if err := writeGlobalConfigToPath(cfg, cfgPath); err != nil {
+		t.Fatalf("writeGlobalConfigToPath: %v", err)
+	}
+
+	raw, err := os.ReadFile(cfgPath)
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	// Empty timeout must not produce a non-empty duration value in the output.
+	content := string(raw)
+	for _, bad := range []string{"45m", "1h", "90m"} {
+		if containsStr(content, bad) {
+			t.Errorf("unexpected timeout value %q in config when Timeout is empty:\n%s", bad, content)
+		}
 	}
 }
 

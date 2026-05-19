@@ -173,6 +173,12 @@ internal/
     register.go         # RegisterCustomTasksFromConfig(): config → TaskDefinition; rolls back on failure
     selector.go         # Task selection logic (budget-aware, staleness-aware)
 
+  workspace/            # Clone-based isolated task workspaces (opt-in via workspace.root config)
+    workspace.go        # Config/RepoConfig/Workspace/RepoWorkspace types; SetupWorkspace() clones
+                        # repos into <root>/<name>_<runID>/, writes .nightshift-workspace.json;
+                        # CleanupStaleWorkspaces() removes dirs older than TTLDays (default 7);
+                        # ValidateConfig() enforces SSH URLs; gitExecFn var injectable for tests
+
 docs/                   # All documentation (plain markdown, no static-site generator)
   README.md             # Index pointing at user/operations/dev trees
   user/                 # End-user guides
@@ -377,7 +383,7 @@ Agents MUST follow these rules:
 - `internal/jira.Orchestrator` stores `jiraClient` as an interface (not `*Client`) for testability. `*Client` satisfies the interface implicitly. The `log` field is lazily initialized inside `ProcessTicket` when nil — safe to omit in tests.
 - `NIGHTSHIFT_JIRA_TOKEN` must be set for all e2e tests in `internal/jira/e2e_test.go`. Tests skip automatically when it is absent.
 - **Jira resume logic** — `detectResumeState` reads `<!-- nightshift:type=... -->` HTML markers from ticket comments to determine the furthest completed phase. `ParseNightshiftComments` requires the `🤖` prefix on the comment body. If comments are missing or malformed, processing restarts from phase 1 (safe but wasteful).
-- **Jira repo URL must use SSH** (`git@github.com:...`). HTTPS remotes fail silently in non-interactive contexts (`fatal: could not read Username`). Set `url: git@github.com:org/repo.git` in `jira.repos`.
+- **Jira repo URL must use SSH** (`git@github.com:...`). HTTPS remotes fail silently in non-interactive contexts (`fatal: could not read Username`). Set `url: git@github.com:org/repo.git` in `jira.projects[].repos`.
 - **Claude agent permissions** — for autonomous file writes, set `dangerously_bypass_approvals_and_sandbox: true` and `dangerously_skip_permissions: true` on the claude provider. Without these, the agent asks for approval mid-run and the implementation phase produces no changes.
 - **`nightshift jira preview` invocation** — use `go run ./cmd/nightshift jira preview --plain` (arguments after the package path are passed to the program by `go run`). The `--` form (`go run ./cmd/nightshift -- jira preview`) is also valid.
 - **Jira French status names** — the VC project uses "À faire" (todo), "En cours" (in-progress), "Revue en cours" (review), "Terminé" (done). `isReviewStatus` checks for "revue" keyword so it correctly classifies "Revue en cours". `TransitionToReview` is called in `PhaseStatus` after PR creation; if the pipeline fails at commit, `PhaseStatus` is never reached and the ticket stays "En cours".
@@ -402,3 +408,6 @@ Agents MUST follow these rules:
 - **`handleExecuteResult` in util.go** — all three agents (claude, codex, copilot) share `handleExecuteResult()` for post-run logic. When adding a new agent, use this helper instead of duplicating exit-code/timeout/JSON-extraction logic.
 - **`exclude_future_sprints`** — appends `AND sprint not in futureSprints()` to todo JQL. `futureSprints()` requires Jira Software license; it is NOT available on Jira Work Management. Users on Work Management who enable this flag will get a JQL error at runtime (no config-time guard). Default `false`.
 - **`board_id` required for backlog exclusion** — `FetchTodoTickets` only calls `fetchBoardBacklogKeys` when `proj.BoardID > 0`. Without it, all "To Do" labeled tickets are fetched including backlog. The setup wizard now prompts for board_id in the project wizard flow (substep 3 of project edit, after repos).
+- **Workspace import cycle** — `internal/workspace` must NOT import `internal/config` or `internal/jira`. The bridge is `workspaceConfigFromApp()` in `cmd/nightshift/commands/helpers.go`. Do not try to merge `workspace.Config` with `config.WorkspaceConfig`.
+- **Workspace state key** — in workspace mode, the repo clone path (not the configured repo name) is used as the state key for cooldown/staleness tracking. This means each fresh clone appears "new" to the staleness tracker, which is intentional: workspace runs always pick the highest-priority tasks.
+- **Workspace clone uses `.` as target** — `git clone <url> .` clones into the already-created `<root>/<name>_<runID>/` directory. The directory must exist and be empty before the clone.
