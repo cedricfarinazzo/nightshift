@@ -82,6 +82,8 @@ type ProviderConfig struct {
 	// Copilot: low, medium, high, xhigh
 	// Codex: none, minimal, low, medium, high, xhigh
 	ReasoningEffort string `mapstructure:"reasoning_effort"`
+	// Timeout is the agent execution timeout as a duration string (e.g. "45m"). Empty = DefaultTimeout (30m).
+	Timeout string `mapstructure:"timeout"`
 	// DangerouslySkipPermissions tells the CLI to skip interactive permission prompts.
 	DangerouslySkipPermissions bool `mapstructure:"dangerously_skip_permissions"`
 	// DangerouslyBypassApprovalsAndSandbox tells the CLI to bypass approvals and sandboxing.
@@ -342,6 +344,8 @@ var (
 
 	ErrInvalidCompressionProvider = errors.New("prompt_compression.provider must be \"claude\", \"codex\", or \"copilot\"")
 
+	ErrInvalidProviderTimeout = errors.New("provider timeout must be a valid duration string (e.g. \"30m\", \"1h\")")
+
 	ErrCustomTaskMissingType        = errors.New("custom task: type is required")
 	ErrCustomTaskMissingName        = errors.New("custom task: name is required")
 	ErrCustomTaskMissingDescription = errors.New("custom task: description is required")
@@ -419,6 +423,22 @@ func Validate(cfg *Config) error {
 	codexEfforts := []string{"none", "minimal", "low", "medium", "high", "xhigh"}
 	if e := cfg.Providers.Codex.ReasoningEffort; e != "" && !slices.Contains(codexEfforts, e) {
 		return ErrInvalidCodexReasoningEffort
+	}
+
+	// Provider timeout validation
+	for _, pc := range []struct {
+		name    string
+		timeout string
+	}{
+		{"providers.claude", cfg.Providers.Claude.Timeout},
+		{"providers.codex", cfg.Providers.Codex.Timeout},
+		{"providers.copilot", cfg.Providers.Copilot.Timeout},
+	} {
+		if pc.timeout != "" {
+			if _, err := time.ParseDuration(pc.timeout); err != nil {
+				return fmt.Errorf("%s.timeout: %w", pc.name, ErrInvalidProviderTimeout)
+			}
+		}
 	}
 
 	// Prompt compression validation

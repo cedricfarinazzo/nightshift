@@ -55,19 +55,36 @@ providers:
   claude:
     enabled: true
     data_path: "~/.claude"
+    model: "claude-sonnet-4-6"        # optional: override default model
+    reasoning_effort: "medium"        # optional: low/medium/high/xhigh/max
+    timeout: "45m"                    # optional: agent execution timeout (default: 30m)
     dangerously_skip_permissions: true
     dangerously_bypass_approvals_and_sandbox: true
   codex:
     enabled: true
     data_path: "~/.codex"
+    timeout: "45m"                    # optional: agent execution timeout (default: 30m)
     dangerously_bypass_approvals_and_sandbox: true
   copilot:
     enabled: true
-    binary_path: "copilot"   # optional: standalone copilot binary
+    binary_path: "copilot"           # optional: standalone copilot binary
+    timeout: "45m"                   # optional: agent execution timeout (default: 30m)
     dangerously_skip_permissions: true
 ```
 
 Providers are tried in `preference` order; first one with budget wins.
+
+### `timeout` field
+
+Duration string (e.g. `"30m"`, `"1h"`, `"90m"`). Sets the maximum time the agent CLI process is allowed to run per task. When omitted, the built-in default of 30 minutes applies. Useful for:
+
+- **Longer tasks** (large refactors, multi-file reviews): set `"60m"` or `"90m"`.
+- **Budget conservation**: set `"15m"` to kill stalled agents early and save tokens.
+- **Per-provider tuning**: different timeouts per provider (Claude vs Codex run differently).
+
+The effective timeout shown in `nightshift preview` output reflects this config value.
+
+Per-phase timeouts for `nightshift jira run` are configured separately under `jira.validation.timeout`, `jira.plan.timeout`, `jira.implement.timeout`, and `jira.review_fix.timeout`.
 
 ## Projects
 

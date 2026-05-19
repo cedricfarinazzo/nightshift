@@ -9,6 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/cedricfarinazzo/nightshift/internal/agents"
 	"github.com/cedricfarinazzo/nightshift/internal/budget"
 	"github.com/cedricfarinazzo/nightshift/internal/config"
 	"github.com/cedricfarinazzo/nightshift/internal/db"
@@ -147,6 +148,7 @@ type previewResult struct {
 	ConfigSources *previewConfigSources
 	Note          string
 	Compression   string
+	Timeout       string // effective agent timeout (from config or default)
 }
 
 type previewRun struct {
@@ -276,6 +278,7 @@ func buildPreviewResult(cfg *config.Config, database *db.DB, projects []string, 
 		ConfigSources: sources,
 		Note:          "Only the plan prompt is deterministic. Implement/review prompts are generated after plan output.",
 		Compression:   compressionSummary(cfg),
+		Timeout:       effectiveProviderTimeout(cfg, provider),
 	}
 
 	for i, runAt := range nextRuns {
@@ -535,6 +538,24 @@ func computePreviewDiagnostics(cfg *config.Config, selector *tasks.Selector, pro
 	}
 
 	return diagnostics
+}
+
+// effectiveProviderTimeout returns the configured timeout for the given provider,
+// falling back to agents.DefaultTimeout when no override is set.
+func effectiveProviderTimeout(cfg *config.Config, provider string) string {
+	var raw string
+	switch provider {
+	case "claude":
+		raw = cfg.Providers.Claude.Timeout
+	case "codex":
+		raw = cfg.Providers.Codex.Timeout
+	case "copilot":
+		raw = cfg.Providers.Copilot.Timeout
+	}
+	if raw != "" {
+		return raw
+	}
+	return agents.DefaultTimeout.String()
 }
 
 func previewProvider(cfg *config.Config) (string, error) {
