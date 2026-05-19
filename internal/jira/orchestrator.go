@@ -219,7 +219,7 @@ func detectResumeState(ticket Ticket) resumeState {
 	// Walk the phase sequence from latest to earliest to find the furthest
 	// completed phase.
 	hasPR := GetLastCommentOfType(comments, CommentPR) != nil
-	hasImpl := GetLastCommentOfType(comments, CommentImplement) != nil
+	lastImpl := GetLastCommentOfType(comments, CommentImplement)
 	hasPlan := GetLastCommentOfType(comments, CommentPlan) != nil
 	hasValidation := GetLastCommentOfType(comments, CommentValidation) != nil
 	hasStatus := GetLastCommentOfType(comments, CommentStatusChange) != nil
@@ -239,12 +239,17 @@ func detectResumeState(ticket Ticket) resumeState {
 			recoveredPRURLs: parsePRURLsFromComment(prComment.Body),
 		}
 
-	case hasImpl:
+	case lastImpl != nil:
 		// Implementation done; resume from commit.
 		// Also recover the plan in case it is needed for context.
 		plan := ""
 		if c := GetLastCommentOfType(comments, CommentPlan); c != nil {
 			plan = c.Body
+		}
+		// If a rework comment exists and is newer than the implement comment,
+		// the rework did not finish — re-run implement.
+		if lastRework := GetLastCommentOfType(comments, CommentRework); lastRework != nil && lastRework.Timestamp.After(lastImpl.Timestamp) {
+			return resumeState{startPhase: PhaseImplement, recoveredPlan: plan}
 		}
 		return resumeState{startPhase: PhaseCommit, recoveredPlan: plan}
 
