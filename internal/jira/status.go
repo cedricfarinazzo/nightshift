@@ -91,15 +91,11 @@ func (c *Client) DiscoverStatuses(ctx context.Context) (*StatusMap, error) {
 		return c.statusMap, nil
 	}
 
-	// Collect all project keys: prefer Projects list, fall back to deprecated flat field.
-	keys := make([]string, 0, len(c.cfg.Projects)+1)
+	keys := make([]string, 0, len(c.cfg.Projects))
 	for _, p := range c.cfg.Projects {
 		if p.Key != "" {
 			keys = append(keys, p.Key)
 		}
-	}
-	if len(keys) == 0 && c.cfg.Project != "" {
-		keys = append(keys, c.cfg.Project)
 	}
 	if len(keys) == 0 {
 		return nil, fmt.Errorf("jira: no project id or key set")
@@ -179,7 +175,7 @@ func (c *Client) TransitionToInProgress(ctx context.Context, issueKey string) er
 		return err
 	}
 	if len(sm.InProgressStatuses) == 0 {
-		return fmt.Errorf("jira: no in-progress status found in project %s", c.cfg.Project)
+		return fmt.Errorf("jira: no in-progress status found in configured projects")
 	}
 	byStatusID, err := c.getTransitions(ctx, issueKey)
 	if err != nil {
@@ -203,7 +199,7 @@ func (c *Client) TransitionToReview(ctx context.Context, issueKey string) error 
 		return err
 	}
 	if len(sm.ReviewStatuses) == 0 {
-		return fmt.Errorf("jira: no review status found in project %s", c.cfg.Project)
+		return fmt.Errorf("jira: no review status found in configured projects")
 	}
 	byStatusID, err := c.getTransitions(ctx, issueKey)
 	if err != nil {

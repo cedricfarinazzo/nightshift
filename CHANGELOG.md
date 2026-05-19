@@ -2,6 +2,22 @@
 
 All notable changes to nightshift are documented in this file.
 
+## [Unreleased]
+
+### Breaking Changes
+
+- **Removed deprecated flat Jira config fields** — `jira.project`, `jira.label`, and `jira.repos`
+  top-level fields are removed. Migrate to `jira.projects` list before upgrading:
+  ```yaml
+  jira:
+    projects:
+      - key: VC
+        label: nightshift
+        repos:
+          - name: myrepo
+            url: git@github.com:org/repo.git
+  ```
+
 ## [v0.3.3] - 2026-02-19
 
 ### Features

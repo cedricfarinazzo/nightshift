@@ -78,12 +78,6 @@ func (c *Client) Ping(ctx context.Context) error {
 // Raw returns the underlying go-atlassian client for direct API access.
 func (c *Client) Raw() *atlassianjira.Client { return c.jira }
 
-// ProjectKey returns the configured Jira project key.
-func (c *Client) ProjectKey() string { return c.cfg.Project }
-
-// Label returns the configured ticket filter label.
-func (c *Client) Label() string { return c.cfg.Label }
-
 // AddComment posts a comment on the given Jira issue using ADF format.
 // The body is split on blank lines into paragraphs; newlines within a paragraph
 // become ADF hardBreak nodes so the text renders correctly in Jira.
