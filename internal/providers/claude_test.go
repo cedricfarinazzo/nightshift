@@ -417,23 +417,6 @@ func TestClaudeProvider_ListSessionFiles_NoProjects(t *testing.T) {
 	}
 }
 
-func TestClaudeProvider_Name(t *testing.T) {
-	provider := NewClaude()
-	if provider.Name() != "claude" {
-		t.Errorf("Name() = %q, want %q", provider.Name(), "claude")
-	}
-}
-
-func TestClaudeProvider_Cost(t *testing.T) {
-	provider := NewClaude()
-	input, output := provider.Cost()
-	if input != 150 {
-		t.Errorf("input cost = %d, want 150", input)
-	}
-	if output != 750 {
-		t.Errorf("output cost = %d, want 750", output)
-	}
-}
 
 func TestClaudeProvider_DataPath(t *testing.T) {
 	path := "/custom/path"

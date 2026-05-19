@@ -42,6 +42,29 @@ const (
 
 `DefaultMaxIterations = 3`. Each full plan→implement→review cycle is one iteration. If the review agent fails 3 times, the task is `abandoned` (not `failed` — abandoned means the agent tried but couldn't succeed, failed means infrastructure error).
 
+### workDir validation
+
+Before executing any task, `RunTask()` calls `validateGitRepo(ctx, workDir)`:
+
+- Runs `git rev-parse --show-toplevel` in `workDir`
+- Fails if `workDir` is not inside a git repository
+- Fails if the git repo root is `$HOME` (prevents accidental `git init` in home directory)
+
+The validator is injectable for tests via `WithGitValidator(fn)` so unit tests can pass fake paths.
+
+### Branch save/restore
+
+`RunTask()` saves the current branch via `CurrentBranch()` before execution and restores it with `defer checkoutBranch()` on exit (regardless of success or failure). This prevents stacked branches when multiple tasks run sequentially on the same repo. If `CurrentBranch` fails or returns "HEAD" (detached HEAD), no restore is attempted.
+
+### Prompt split: compressible vs protected
+
+Prompts are structured as three parts in `ExecuteOptions`:
+- `Prompt` — compressible payload (task data, plan content, review output). The compression agent may shorten this.
+- `PromptPrefix` — never compressed; prepended before prompt.
+- `PromptSuffix` — never compressed; appended after prompt. **All critical instructions, output format requirements, and JSON schemas MUST go here.**
+
+The split prevents the compression agent from stripping behavioral instructions.
+
 ### The plan→implement→review loop
 
 ```

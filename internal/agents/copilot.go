@@ -157,36 +157,7 @@ func (a *CopilotAgent) Execute(ctx context.Context, opts ExecuteOptions) (*Execu
 
 	// Run command
 	stdout, stderr, exitCode, err := a.runner.Run(ctx, a.binaryPath, args, opts.WorkDir, "")
-
-	result := &ExecuteResult{
-		Output:        stdout,
-		CompressStats: compressStats,
-		ExitCode:      exitCode,
-		Duration:      time.Since(start),
-	}
-
-	// Check for context timeout
-	if ctx.Err() == context.DeadlineExceeded {
-		result.Error = fmt.Sprintf("timeout after %v", timeout)
-		result.ExitCode = -1
-		return result, ctx.Err()
-	}
-
-	// Check for other errors
-	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			result.ExitCode = exitErr.ExitCode()
-			result.Error = stderr
-		} else {
-			result.Error = err.Error()
-		}
-		return result, err
-	}
-
-	// Try to parse JSON output
-	result.JSON = a.extractJSON([]byte(stdout))
-
-	return result, nil
+	return handleExecuteResult(ctx, stdout, stderr, exitCode, err, timeout, start, compressStats, a.extractJSON)
 }
 
 // ExecuteWithFiles runs gh copilot with file context included.

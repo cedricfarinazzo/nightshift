@@ -51,7 +51,7 @@ stateDiagram-v2
 
 ### Cron mode
 
-`cron.New()` is configured with the 5-field standard parser (`Minute | Hour | Dom | Month | Dow`). The scheduler registers a single `AddFunc` entry. `Stop()` calls `cron.Stop()` and waits for `doneCh` (max 30s timeout).
+`cron.New()` is configured with the 5-field standard parser (`Minute | Hour | Dom | Month | Dow`) and the `SkipIfStillRunning(cron.DiscardLogger)` chain middleware. If a scheduled job is still executing when the next tick fires, the tick is silently skipped — preventing unbounded goroutine accumulation on slow runs. The scheduler registers a single `AddFunc` entry. `Stop()` calls `cron.Stop()` and waits for `doneCh` (max 30s timeout).
 
 ### Interval mode
 

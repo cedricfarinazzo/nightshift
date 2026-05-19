@@ -55,10 +55,20 @@ var migrations = []Migration{
 		Description: "add source column to snapshots",
 		SQL:         migration008SQL,
 	},
+	{
+		Version:     9,
+		Description: "add unique constraint on jira_ticket_results(run_id, ticket_key)",
+		SQL:         migration009SQL,
+	},
 }
 
 const migration008SQL = `
 ALTER TABLE snapshots ADD COLUMN source TEXT NOT NULL DEFAULT 'file';
+`
+
+const migration009SQL = `
+CREATE UNIQUE INDEX IF NOT EXISTS idx_jira_ticket_results_run_key
+    ON jira_ticket_results(run_id, ticket_key);
 `
 
 const migration002SQL = `

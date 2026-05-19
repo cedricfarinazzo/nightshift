@@ -218,49 +218,16 @@ func (g *Generator) renderCostSection(buf *bytes.Buffer, snapshots []usage.CostS
 	buf.WriteString("|----------|------|-----------|--------|\n")
 
 	for _, s := range snapshots {
-		usedStr := "-"
-		remStr := "-"
-		budgetStr := "-"
-
-		switch s.Provider {
-		case "anthropic":
-			if s.Used != nil {
-				usedStr = fmt.Sprintf("$%.2f", *s.Used)
-			}
-			if s.Remaining != nil {
-				remStr = fmt.Sprintf("$%.2f", *s.Remaining)
-			}
-			if s.TotalBudget != nil {
-				budgetStr = fmt.Sprintf("$%.2f/mo", *s.TotalBudget)
-			}
-			// fetch yesterday delta when history provider available
-			if g.costHistory != nil && s.Used != nil {
-				if prev, err := g.costHistory.GetYesterdayCostSnapshot(context.Background(), s.Provider); err == nil && prev != nil && prev.Used != nil {
-					delta := *s.Used - *prev.Used
-					if delta >= 0 {
-						usedStr = fmt.Sprintf("$%.2f (+$%.2f today)", *s.Used, delta)
-					}
+		usedStr, remStr, budgetStr := costRowStrings(s)
+		// Augment anthropic used with yesterday delta when history is available.
+		if s.Provider == "anthropic" && g.costHistory != nil && s.Used != nil {
+			if prev, err := g.costHistory.GetYesterdayCostSnapshot(context.Background(), s.Provider); err == nil && prev != nil && prev.Used != nil {
+				delta := *s.Used - *prev.Used
+				if delta >= 0 {
+					usedStr = fmt.Sprintf("$%.2f (+$%.2f today)", *s.Used, delta)
 				}
 			}
-		case "codex":
-			if s.Remaining != nil {
-				remStr = fmt.Sprintf("$%.2f", *s.Remaining)
-			}
-			budgetStr = "credits"
-		case "copilot":
-			if s.OverageCount > 0 {
-				usedStr = fmt.Sprintf("%d overage", s.OverageCount)
-			} else {
-				usedStr = "0 overage"
-			}
-			if s.Remaining != nil {
-				remStr = fmt.Sprintf("%.0f left", *s.Remaining)
-			}
-			if s.TotalBudget != nil {
-				budgetStr = fmt.Sprintf("%.0f/mo", *s.TotalBudget)
-			}
 		}
-
 		fmt.Fprintf(buf, "| %s | %s | %s | %s |\n", s.Provider, usedStr, remStr, budgetStr)
 	}
 	buf.WriteString("\n")

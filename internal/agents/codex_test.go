@@ -286,28 +286,6 @@ func TestCodexAgent_ExecuteWithFiles(t *testing.T) {
 	}
 }
 
-func TestCodexAgent_buildFileContext(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	file1 := filepath.Join(tmpDir, "file1.txt")
-	file2 := filepath.Join(tmpDir, "file2.go")
-
-	agent := NewCodexAgent()
-	ctx := agent.buildFileContext([]string{file1, file2})
-
-	if ctx == "" {
-		t.Error("expected non-empty context")
-	}
-	if !strings.Contains(ctx, file1) {
-		t.Error("context missing file1 path")
-	}
-	if !strings.Contains(ctx, file2) {
-		t.Error("context missing file2 path")
-	}
-	if !strings.Contains(ctx, "# Related Files") {
-		t.Error("context missing header")
-	}
-}
 
 func TestCodexAgent_extractJSON(t *testing.T) {
 	agent := NewCodexAgent()

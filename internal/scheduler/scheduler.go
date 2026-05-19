@@ -203,8 +203,12 @@ func (s *Scheduler) Start(ctx context.Context) error {
 	s.doneCh = make(chan struct{})
 
 	if s.cronExpr != "" {
-		// Cron-based scheduling
-		s.cron = cron.New(cron.WithLocation(s.location))
+		// Cron-based scheduling — SkipIfStillRunning prevents concurrent runs
+		// when a job takes longer than the cron interval.
+		s.cron = cron.New(
+			cron.WithLocation(s.location),
+			cron.WithChain(cron.SkipIfStillRunning(cron.DiscardLogger)),
+		)
 		entryID, err := s.cron.AddFunc(s.cronExpr, func() {
 			s.runJobs(ctx)
 		})

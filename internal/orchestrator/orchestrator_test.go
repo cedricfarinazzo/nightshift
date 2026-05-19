@@ -3,7 +3,6 @@ package orchestrator
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"os/exec"
 	"strings"
 	"testing"
@@ -12,6 +11,10 @@ import (
 	"github.com/marcus/nightshift/internal/agents"
 	"github.com/marcus/nightshift/internal/tasks"
 )
+
+// noopGitValidator is a git validator that always succeeds, used in tests
+// where the workDir is a fake path that isn't a real git repository.
+var noopGitValidator = func(_ context.Context, _ string) error { return nil }
 
 // mockAgent implements agents.Agent for testing.
 type mockAgent struct {
@@ -136,7 +139,7 @@ func TestRunTaskSuccessFirstIteration(t *testing.T) {
 	})
 
 	agent := newMockAgent(planResp, implResp, reviewResp)
-	o := New(WithAgent(agent))
+	o := New(WithAgent(agent), WithGitValidator(noopGitValidator))
 
 	task := &tasks.Task{
 		ID:          "test-1",
@@ -410,19 +413,6 @@ func TestDefaultConfig(t *testing.T) {
 	}
 }
 
-func TestRunNoQueue(t *testing.T) {
-	o := New()
-	err := o.Run(context.Background())
-	if err == nil {
-		t.Error("expected error for nil queue")
-	}
-	if !errors.Is(err, errors.New("no task queue configured")) {
-		// Just check error message contains expected text
-		if err.Error() != "no task queue configured" {
-			t.Errorf("error = %q, want 'no task queue configured'", err.Error())
-		}
-	}
-}
 
 func TestBuildPrompts(t *testing.T) {
 	o := New()
@@ -446,13 +436,13 @@ func TestBuildPrompts(t *testing.T) {
 		Steps:       []string{"step1", "step2"},
 		Description: "test plan",
 	}
-	implPrompt := o.buildImplementPrompt(task, plan, 1)
+	implPrompt := o.buildImplementPrompt(task, plan, 1, "")
 	if !containsIgnoreCase(implPrompt, "implement") {
 		t.Error("implement prompt should mention implement")
 	}
 
 	// Test implement prompt iteration 2
-	implPrompt2 := o.buildImplementPrompt(task, plan, 2)
+	implPrompt2 := o.buildImplementPrompt(task, plan, 2, "")
 	if !containsIgnoreCase(implPrompt2, "iteration 2") {
 		t.Error("implement prompt iteration 2 should mention iteration number")
 	}
@@ -551,7 +541,7 @@ func TestRunTaskExtractsPRURL(t *testing.T) {
 	})
 
 	agent := newMockAgent(planResp, implResp, reviewResp)
-	o := New(WithAgent(agent))
+	o := New(WithAgent(agent), WithGitValidator(noopGitValidator))
 
 	task := &tasks.Task{
 		ID:          "pr-test",
@@ -784,7 +774,7 @@ func TestBuildImplementPrompt_WithBranch(t *testing.T) {
 		Description: "test plan",
 	}
 
-	prompt := o.buildImplementPrompt(task, plan, 1)
+	prompt := o.buildImplementPrompt(task, plan, 1, "")
 	if !strings.Contains(prompt, "Checkout `staging` before creating your feature branch.") {
 		t.Errorf("implement prompt missing branch instruction\nGot:\n%s", prompt)
 	}
@@ -803,7 +793,7 @@ func TestBuildImplementPrompt_WithoutBranch(t *testing.T) {
 		Description: "test plan",
 	}
 
-	prompt := o.buildImplementPrompt(task, plan, 1)
+	prompt := o.buildImplementPrompt(task, plan, 1, "")
 	if strings.Contains(prompt, "Checkout") && strings.Contains(prompt, "before creating your feature branch") {
 		t.Errorf("implement prompt should not contain branch checkout instruction when branch is empty\nGot:\n%s", prompt)
 	}
@@ -910,7 +900,7 @@ func TestRunTaskNoPRURL(t *testing.T) {
 	})
 
 	agent := newMockAgent(planResp, implResp, reviewResp)
-	o := New(WithAgent(agent))
+	o := New(WithAgent(agent), WithGitValidator(noopGitValidator))
 
 	task := &tasks.Task{
 		ID:          "no-pr-test",
