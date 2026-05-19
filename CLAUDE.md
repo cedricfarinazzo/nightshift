@@ -173,6 +173,12 @@ internal/
     register.go         # RegisterCustomTasksFromConfig(): config → TaskDefinition; rolls back on failure
     selector.go         # Task selection logic (budget-aware, staleness-aware)
 
+  workspace/            # Clone-based isolated task workspaces (opt-in via workspace.root config)
+    workspace.go        # Config/RepoConfig/Workspace/RepoWorkspace types; SetupWorkspace() clones
+                        # repos into <root>/<name>_<runID>/, writes .nightshift-workspace.json;
+                        # CleanupStaleWorkspaces() removes dirs older than TTLDays (default 7);
+                        # ValidateConfig() enforces SSH URLs; gitExecFn var injectable for tests
+
 docs/                   # All documentation (plain markdown, no static-site generator)
   README.md             # Index pointing at user/operations/dev trees
   user/                 # End-user guides
@@ -400,3 +406,6 @@ Agents MUST follow these rules:
 - **SkipIfStillRunning on cron** — `scheduler.go` wraps the cron instance with `cron.SkipIfStillRunning(cron.DiscardLogger)`. If a scheduled run exceeds its interval, the next fire is silently skipped rather than overlapping. This prevents unbounded goroutine growth on slow runs.
 - **`internal/providers` has no Execute/Name/Cost** — the `Provider` interface and its stubs were removed. `providers/` only tracks quota/usage (token counts, request counts). Do not add `Execute()` back; agent invocation belongs in `internal/agents/`.
 - **`handleExecuteResult` in util.go** — all three agents (claude, codex, copilot) share `handleExecuteResult()` for post-run logic. When adding a new agent, use this helper instead of duplicating exit-code/timeout/JSON-extraction logic.
+- **Workspace import cycle** — `internal/workspace` must NOT import `internal/config` or `internal/jira`. The bridge is `workspaceConfigFromApp()` in `cmd/nightshift/commands/helpers.go`. Do not try to merge `workspace.Config` with `config.WorkspaceConfig`.
+- **Workspace state key** — in workspace mode, the repo clone path (not the configured repo name) is used as the state key for cooldown/staleness tracking. This means each fresh clone appears "new" to the staleness tracker, which is intentional: workspace runs always pick the highest-priority tasks.
+- **Workspace clone uses `.` as target** — `git clone <url> .` clones into the already-created `<root>/<name>_<runID>/` directory. The directory must exist and be empty before the clone.
