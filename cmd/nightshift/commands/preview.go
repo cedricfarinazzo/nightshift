@@ -147,6 +147,7 @@ type previewResult struct {
 	ConfigSources *previewConfigSources
 	Note          string
 	Compression   string
+	WorkspaceMode string // non-empty when workspace.root is configured
 }
 
 type previewRun struct {
@@ -265,6 +266,15 @@ func buildPreviewResult(cfg *config.Config, database *db.DB, projects []string, 
 	if maxPercent <= 0 {
 		maxPercent = config.DefaultMaxPercent
 	}
+	wsMode := ""
+	if cfg.Workspace.Root != "" && len(cfg.Workspace.Repos) > 0 {
+		names := make([]string, len(cfg.Workspace.Repos))
+		for i, r := range cfg.Workspace.Repos {
+			names[i] = r.Name
+		}
+		wsMode = fmt.Sprintf("%s (%d repos: %s)", cfg.Workspace.Root, len(cfg.Workspace.Repos), strings.Join(names, ", "))
+	}
+
 	result := &previewResult{
 		GeneratedAt:   time.Now(),
 		Provider:      provider,
@@ -276,6 +286,7 @@ func buildPreviewResult(cfg *config.Config, database *db.DB, projects []string, 
 		ConfigSources: sources,
 		Note:          "Only the plan prompt is deterministic. Implement/review prompts are generated after plan output.",
 		Compression:   compressionSummary(cfg),
+		WorkspaceMode: wsMode,
 	}
 
 	for i, runAt := range nextRuns {
