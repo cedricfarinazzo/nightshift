@@ -438,6 +438,72 @@ func TestWriteGlobalConfig_ReasoningEffortKeys(t *testing.T) {
 	}
 }
 
+func TestOrDefaultStr(t *testing.T) {
+	if got := orDefaultStr("45m", "30m"); got != "45m" {
+		t.Errorf("non-empty: got %q, want %q", got, "45m")
+	}
+	if got := orDefaultStr("", "30m"); got != "30m" {
+		t.Errorf("empty: got %q, want %q", got, "30m")
+	}
+}
+
+func TestWriteGlobalConfig_ProviderTimeout(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yaml")
+
+	if err := os.WriteFile(cfgPath, []byte("# nightshift config\n"), 0o644); err != nil {
+		t.Fatalf("seed config: %v", err)
+	}
+
+	cfg := &config.Config{}
+	cfg.Providers.Claude.Timeout = "45m"
+	cfg.Providers.Codex.Timeout = "1h"
+	cfg.Providers.Copilot.Timeout = "20m"
+
+	if err := writeGlobalConfigToPath(cfg, cfgPath); err != nil {
+		t.Fatalf("writeGlobalConfigToPath: %v", err)
+	}
+
+	raw, err := os.ReadFile(cfgPath)
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	content := string(raw)
+
+	for _, want := range []string{"45m", "1h", "20m", "timeout"} {
+		if !containsStr(content, want) {
+			t.Errorf("expected %q in config output, got:\n%s", want, content)
+		}
+	}
+}
+
+func TestWriteGlobalConfig_EmptyTimeoutNotWrittenAsZero(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yaml")
+
+	if err := os.WriteFile(cfgPath, []byte("# nightshift config\n"), 0o644); err != nil {
+		t.Fatalf("seed config: %v", err)
+	}
+
+	cfg := &config.Config{}
+	// Timeouts intentionally left empty (default behaviour).
+	if err := writeGlobalConfigToPath(cfg, cfgPath); err != nil {
+		t.Fatalf("writeGlobalConfigToPath: %v", err)
+	}
+
+	raw, err := os.ReadFile(cfgPath)
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	// Empty timeout must not produce a non-empty duration value in the output.
+	content := string(raw)
+	for _, bad := range []string{"45m", "1h", "90m"} {
+		if containsStr(content, bad) {
+			t.Errorf("unexpected timeout value %q in config when Timeout is empty:\n%s", bad, content)
+		}
+	}
+}
+
 func containsStr(s, substr string) bool {
 	return len(s) >= len(substr) && (s == substr || len(s) > 0 && stringContains(s, substr))
 }

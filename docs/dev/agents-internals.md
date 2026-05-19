@@ -155,4 +155,9 @@ Bridge: `compressionConfigFromApp()` in `cmd/nightshift/commands/helpers.go`. Do
 
 ## Default timeout
 
-`DefaultTimeout = 30 * time.Minute`. Override via `ExecuteOptions.Timeout`.
+`DefaultTimeout = 30 * time.Minute`. Override via two mechanisms:
+
+1. **Per-call**: set `ExecuteOptions.Timeout` (takes precedence over agent default).
+2. **Config**: set `providers.<name>.timeout` in `nightshift.yaml` (e.g. `"45m"`). The three factory functions in `cmd/nightshift/commands/helpers.go` (`newClaudeAgentFromConfig`, `newCodexAgentFromConfig`, `newCopilotAgentFromConfig`) read this field and call `WithDefaultTimeout`/`WithCodexDefaultTimeout`/`WithCopilotDefaultTimeout` accordingly.
+
+`nightshift setup` exposes this as a global "Agent timeout" row in the providers step (Tab to row 3, press `t` to edit). Jira phase timeouts are configured separately per-phase in the Jira step (press `t` on focused phase row).

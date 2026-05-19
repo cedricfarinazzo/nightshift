@@ -4,11 +4,13 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/cedricfarinazzo/nightshift/internal/agents"
 	"github.com/cedricfarinazzo/nightshift/internal/budget"
 	"github.com/cedricfarinazzo/nightshift/internal/config"
 	"github.com/cedricfarinazzo/nightshift/internal/db"
+	"github.com/cedricfarinazzo/nightshift/internal/logging"
 	"github.com/cedricfarinazzo/nightshift/internal/workspace"
 )
 
@@ -52,6 +54,13 @@ func newClaudeAgentFromConfig(cfg *config.Config, extra ...agents.ClaudeOption) 
 	if cfg.Providers.Claude.ReasoningEffort != "" {
 		opts = append(opts, agents.WithEffort(cfg.Providers.Claude.ReasoningEffort))
 	}
+	if cfg.Providers.Claude.Timeout != "" {
+		if d, err := time.ParseDuration(cfg.Providers.Claude.Timeout); err == nil {
+			opts = append(opts, agents.WithDefaultTimeout(d))
+		} else {
+			logging.Get().Warnf("invalid claude timeout %q, using default: %v", cfg.Providers.Claude.Timeout, err)
+		}
+	}
 	opts = append(opts, extra...)
 	return agents.NewClaudeAgent(opts...)
 }
@@ -81,6 +90,13 @@ func newCodexAgentFromConfig(cfg *config.Config, extra ...agents.CodexOption) *a
 	}
 	if cfg.Providers.Codex.ReasoningEffort != "" {
 		opts = append(opts, agents.WithCodexEffort(cfg.Providers.Codex.ReasoningEffort))
+	}
+	if cfg.Providers.Codex.Timeout != "" {
+		if d, err := time.ParseDuration(cfg.Providers.Codex.Timeout); err == nil {
+			opts = append(opts, agents.WithCodexDefaultTimeout(d))
+		} else {
+			logging.Get().Warnf("invalid codex timeout %q, using default: %v", cfg.Providers.Codex.Timeout, err)
+		}
 	}
 	opts = append(opts, extra...)
 	return agents.NewCodexAgent(opts...)
@@ -113,6 +129,13 @@ func newCopilotAgentFromConfig(cfg *config.Config, binaryPath string, extra ...a
 	}
 	if cfg.Providers.Copilot.ReasoningEffort != "" {
 		opts = append(opts, agents.WithCopilotEffort(cfg.Providers.Copilot.ReasoningEffort))
+	}
+	if cfg.Providers.Copilot.Timeout != "" {
+		if d, err := time.ParseDuration(cfg.Providers.Copilot.Timeout); err == nil {
+			opts = append(opts, agents.WithCopilotDefaultTimeout(d))
+		} else {
+			logging.Get().Warnf("invalid copilot timeout %q, using default: %v", cfg.Providers.Copilot.Timeout, err)
+		}
 	}
 	opts = append(opts, extra...)
 	return agents.NewCopilotAgent(opts...)
