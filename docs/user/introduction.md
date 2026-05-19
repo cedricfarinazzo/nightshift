@@ -1,31 +1,56 @@
 # Introduction
 
-Nightshift is a Go CLI that runs AI coding agents (Claude Code, Codex, GitHub Copilot) on your repos overnight, using your remaining provider budget. It finds dead code, doc drift, test gaps, security issues, and 50+ other things silently accumulating while you ship features.
+Nightshift is a Go CLI that runs AI coding agents (Claude Code, Codex, GitHub Copilot) on your repos overnight.
 
-> It finds what you forgot to look for.
+Two flagship workflows:
+
+1. **Autonomous Jira pipeline** — fetch labeled todo tickets, validate, plan, implement, commit, push a PR, transition status. End-to-end ticket lifecycle, fully autonomous, resumable across runs via `🤖` Jira comments. **This is the headline use case.** See [Jira Pipeline](jira-pipeline.md).
+2. **Maintenance task catalog** — ~60 built-in tasks (lint, docs, tests, bug-finding, refactors, security audits, bus-factor analysis, ...). Runs on a schedule, uses leftover provider budget. See [Tasks](tasks.md).
+
+> It finds what you forgot to look for — and it ships your tickets while you sleep.
 
 ## Core Principles
 
-- **Everything is a PR.** Nightshift never writes directly to your primary branch. Don't like a change? Close the PR.
-- **Budget-aware.** Live provider Usage API checks gate every run. Default max: 90%.
-- **Multi-project.** Point it at your repos; it already knows what to look for.
-- **Autonomous Jira pipeline.** Validates, plans, codes, commits, PRs, transitions status — overnight.
-- **No CGO, no cloud.** SQLite via `modernc.org/sqlite`, all state on disk.
+- **Everything is a PR.** Nightshift never writes directly to your primary branch. Every change is a branch + PR. Don't like it? Close it.
+- **Resumable.** Jira phases post `🤖` comment markers. Crashes / timeouts / interruptions don't restart from scratch — they pick up at the next unfinished phase.
+- **Budget-aware.** Live provider Usage API checks gate every run. Single knob: `max_percent` (default 90%).
+- **Multi-project, multi-repo.** Each Jira project can target multiple repos; each repo gets its own workspace.
+- **No CGO, no cloud.** Pure-Go SQLite, all state on disk.
 
-## What It Does
+## What a Typical Night Looks Like
 
-1. Wakes up on schedule (or runs on demand).
-2. Checks provider budget. Skips if exhausted.
-3. Selects projects + tasks based on priority, staleness, and cost.
-4. Spawns the configured agent (`claude`, `codex`, `gh copilot`).
-5. Pushes a branch + opens a PR per change.
-6. Writes a run report.
+```
+22:00  cron fires → daemon runs
+       ├─ jira run
+       │    fetch labeled todo tickets in VC project
+       │    BuildDependencyGraph → topo-sort
+       │    for each ticket:
+       │       validate (LLM scores 7/10) → plan → implement → commit → PR → status
+       │       post 🤖 comments after each successful phase
+       │       fail? → 🤖 error comment, move to next ticket
+       └─ task run (if budget remains)
+            select highest-priority eligible task
+            run it on the next project in priority order
 
-## Quick Glance
+07:30  you wake up
+       ├─ 3 new PRs on github.com/org/repo
+       ├─ 3 Jira tickets transitioned to "In Review"
+       └─ a run report at ~/.local/share/nightshift/reports/
+```
+
+## Quick Start
 
 ```bash
 brew install marcus/tap/nightshift
-nightshift setup
+nightshift setup                  # configure providers + projects + Jira
+export NIGHTSHIFT_JIRA_TOKEN=...   # Atlassian API token
+nightshift jira preview            # dry-run: see what would happen
+nightshift jira run                # process all labeled tickets
+```
+
+For the maintenance-task workflow:
+
+```bash
 nightshift preview
 nightshift run
 ```
@@ -34,3 +59,4 @@ nightshift run
 
 - [Installation](installation.md)
 - [Quick Start](quick-start.md)
+- [Jira Pipeline](jira-pipeline.md) — start here if Jira is your primary use case

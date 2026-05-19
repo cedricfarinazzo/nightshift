@@ -4,34 +4,51 @@
 
 ![Nightshift logo](logo.png)
 
-Nightshift is a Go CLI that orchestrates AI coding agents (Claude Code, Codex, GitHub Copilot) to work on your repos overnight using your remaining provider budget. It finds dead code, doc drift, test gaps, security issues, and dozens of other things silently accumulating while you ship features.
+Nightshift is a Go CLI that orchestrates AI coding agents (Claude Code, Codex, GitHub Copilot) to work on your repos overnight.
 
-It also ships an **autonomous Jira pipeline**: point it at a project + label, and Nightshift fetches todo tickets, validates them with an LLM, resolves cross-ticket dependencies, sets up a workspace per repo, then drives each ticket through `validate → plan → implement → commit → PR → status transition` — fully overnight. The validate, plan, implement, PR, and status-change phases each post a `🤖` comment to the ticket (failures post an error comment instead); the commit phase is silent. On the next run, `detectResumeState` reads those markers and skips straight to the next unfinished phase — interrupted runs never restart from scratch. PR review comments on tickets in "In Review" are picked up the next run and fed back to the agent as a rework prompt.
+**Headline feature — autonomous Jira pipeline.** Point it at a project + label and Nightshift fetches todo tickets, validates each one with an LLM, resolves cross-ticket dependencies (topo-sorts via `BuildDependencyGraph`), sets up a workspace per repo, and drives every ticket through:
+
+```
+validate → plan → implement → commit → PR → status transition
+```
+
+Five of those six phases (all except commit) post a `🤖 <!-- nightshift:type=… -->` comment to the Jira ticket on success. Failures post a `🤖 error` comment instead. On the next run, `detectResumeState` reads those markers and resumes from the next unfinished phase — interrupted runs **never restart from scratch**. PR review comments on tickets already "In Review" are picked up automatically the next run and fed back to the agent as a rework prompt; `lastReworkAt` makes the feedback loop idempotent.
+
+It also ships a catalog of ~60 maintenance tasks (lint, doc backfill, test gaps, bug-finder, security audits, bus-factor, dependency audits, ...) that run on a schedule against your repos using leftover provider budget.
 
 Everything lands as a branch or PR. Nightshift never writes directly to your primary branch. Don't like a change? Close the PR. That's the entire rollback plan.
 
 ---
 
-## Quick Start
+## Quick Start — Jira
 
 ```bash
 brew install marcus/tap/nightshift
-nightshift setup
-nightshift preview
-nightshift run
+nightshift setup                       # walks through providers + jira block
+export NIGHTSHIFT_JIRA_TOKEN=...        # atlassian API token
+nightshift jira preview                # dry-run: see what would happen
+nightshift jira run                    # process all labeled todo tickets
 ```
 
-See [`docs/user/quick-start.md`](docs/user/quick-start.md) for the 2-minute walkthrough.
+Run `nightshift daemon start` to do this on a schedule. Full walkthrough in [`docs/user/quick-start.md`](docs/user/quick-start.md); full Jira reference in [`docs/user/jira-pipeline.md`](docs/user/jira-pipeline.md).
+
+## Quick Start — Maintenance Tasks
+
+```bash
+nightshift preview                     # next scheduled runs
+nightshift run                         # preflight + confirm + execute
+```
 
 ---
 
 ## Features
 
+- **Autonomous Jira pipeline** — validate → plan → implement → commit → PR → status, end-to-end, resumable via `🤖` comment markers, PR-review feedback loop included
+- **Multi-repo per project** — a single Jira project can target multiple repos; each gets its own workspace and branch
 - **Budget-aware** — live provider Usage API checks gate every run; single knob `max_percent`
-- **Multi-agent** — Claude Code, Codex, or GitHub Copilot; preference-ordered fallback
-- **Multi-project** — point it at any number of repos
-- **Zero-risk** — every change is a PR; merge what you like, close the rest
-- **Autonomous Jira pipeline** — validates, plans, codes, commits, PRs, and transitions Jira tickets overnight
+- **Multi-agent** — Claude Code, Codex, or GitHub Copilot; per-phase provider/model selection in Jira config
+- **~60 maintenance tasks** — lint, docs, tests, refactors, bug-finder, security audits
+- **Zero-risk** — every change is a branch + PR; merge what you like, close the rest
 - **Bus-factor analysis** — quantifies code ownership concentration and flags single-contributor risk
 - **No CGO, no cloud** — pure-Go SQLite, all state on disk
 
@@ -74,6 +91,23 @@ Details: [`docs/user/agents.md`](docs/user/agents.md).
 
 ## Common Commands
 
+### Jira pipeline
+
+```bash
+nightshift jira preview                  # dry-run: tickets, phase plan, budget
+nightshift jira preview --validate       # also run LLM scoring per ticket
+nightshift jira preview --explain        # per-phase token estimate
+
+nightshift jira run                      # process all labeled todo tickets
+nightshift jira run --ticket VC-42       # one ticket
+nightshift jira run --max-tickets 5
+nightshift jira run --skip-validation    # save tokens, skip the LLM scoring phase
+nightshift jira run --review-only        # only handle PR review feedback
+nightshift jira run --todo-only          # skip review-feedback loop
+```
+
+### Maintenance tasks
+
 ```bash
 nightshift run                    # one run now (preflight + confirm + execute)
 nightshift run --dry-run          # show what would run, no execution
@@ -85,16 +119,16 @@ nightshift budget                 # current provider capacity
 nightshift task list              # browse the catalog
 nightshift task show lint-fix
 nightshift task run lint-fix --provider claude
+```
 
-nightshift jira run               # process all labeled Jira tickets
-nightshift jira preview           # dry-run summary
+### Operations
 
-nightshift busfactor              # code ownership analysis
+```bash
 nightshift daemon start           # background scheduler
-
 nightshift doctor                 # check env + credentials + config
 nightshift status                 # recent run state
 nightshift report list            # browse run reports
+nightshift busfactor              # code ownership analysis
 ```
 
 Full reference: [`docs/user/cli-reference.md`](docs/user/cli-reference.md).
@@ -123,9 +157,27 @@ providers:
 
 projects:
   - path: ~/code/myrepo
+
+# Optional: autonomous Jira pipeline
+jira:
+  site: yourorg                              # yourorg.atlassian.net
+  email: you@example.com
+  token_env: NIGHTSHIFT_JIRA_TOKEN
+  max_tickets: 10
+  validation: { provider: copilot, model: gpt-5.4-mini,        timeout: 2m  }
+  plan:       { provider: copilot, model: claude-sonnet-4.6,   timeout: 5m  }
+  implement:  { provider: copilot, model: claude-sonnet-4.6,   timeout: 30m }
+  review_fix: { provider: copilot, model: gpt-5.4-mini,        timeout: 20m }
+  projects:
+    - key: VC
+      label: nightshift
+      repos:
+        - name: nightshift
+          url: git@github.com:org/nightshift.git    # SSH required
+          base_branch: main
 ```
 
-Full reference: [`docs/user/configuration.md`](docs/user/configuration.md). Run `nightshift setup` for an interactive wizard.
+Full reference: [`docs/user/configuration.md`](docs/user/configuration.md). Jira-specific reference: [`docs/user/jira-pipeline.md`](docs/user/jira-pipeline.md). Run `nightshift setup` for an interactive wizard.
 
 ---
 

@@ -6,14 +6,22 @@ Plain-markdown docs for Nightshift. Organised into three tracks.
 
 For people running Nightshift on their own machine.
 
+**Start here:**
+
 - [Introduction](user/introduction.md) — what Nightshift is and the core ideas
 - [Installation](user/installation.md) — Homebrew, binaries, source builds
-- [Quick Start](user/quick-start.md) — 2-minute getting started
+- [Quick Start](user/quick-start.md) — 2-minute walkthrough (Jira flavour + tasks flavour)
+
+**Jira pipeline (the headline workflow):**
+
+- [Jira Pipeline](user/jira-pipeline.md) — full lifecycle, config, resume logic, failure modes
+- [Agents](user/agents.md) — per-phase provider/model selection
+- [CLI Reference](user/cli-reference.md) — `nightshift jira run` / `preview` flags
+
+**General:**
+
 - [Configuration](user/configuration.md) — YAML reference
-- [CLI Reference](user/cli-reference.md) — every command and flag
-- [Tasks](user/tasks.md) — built-in tasks, categories, cost tiers
-- [Agents](user/agents.md) — Claude / Codex / Copilot setup
-- [Jira Pipeline](user/jira-pipeline.md) — autonomous ticket implementation
+- [Tasks](user/tasks.md) — maintenance task catalog
 - [Budget](user/budget.md) — how budget enforcement works
 - [Scheduling](user/scheduling.md) — cron vs interval
 - [Bus Factor](user/bus-factor.md) — code ownership analysis
@@ -35,11 +43,17 @@ For running Nightshift as a long-lived service.
 For people hacking on the Nightshift codebase.
 
 - [Architecture](dev/architecture.md) — package map, layers, key constraints
+
+**Jira pipeline internals:**
+
+- [Jira Pipeline Internals](dev/jira-pipeline.md) — phase state machine, resume logic, dependency graph
+- [Workspace Management](dev/workspace.md) — clone/branch/push conventions
+- [Agents Internals](dev/agents-internals.md) — provider wrappers used by every Jira phase
+
+**General internals:**
+
 - [Run Lifecycle](dev/run-lifecycle.md) — end-to-end task run flow
 - [Task Orchestrator](dev/orchestrator.md) — plan→implement→review loop
-- [Agents Internals](dev/agents-internals.md) — Claude/Codex/Copilot wrappers, compression
-- [Jira Pipeline Internals](dev/jira-pipeline.md) — phase machine, resume logic
-- [Workspace Management](dev/workspace.md) — clone, branch, push conventions
 - [Database](dev/database.md) — SQLite schema, migrations
 - [Budget Internals](dev/budget-internals.md) — capacity formula, provider APIs
 - [Tasks Internals](dev/tasks-internals.md) — `TaskDefinition`, selector scoring
