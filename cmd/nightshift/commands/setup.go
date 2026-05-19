@@ -19,14 +19,14 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 
-	"github.com/marcus/nightshift/internal/config"
-	"github.com/marcus/nightshift/internal/db"
-	jiraconfig "github.com/marcus/nightshift/internal/jira"
-	"github.com/marcus/nightshift/internal/providers"
-	"github.com/marcus/nightshift/internal/reporting"
-	"github.com/marcus/nightshift/internal/scheduler"
-	"github.com/marcus/nightshift/internal/setup"
-	"github.com/marcus/nightshift/internal/tasks"
+	"github.com/cedricfarinazzo/nightshift/internal/config"
+	"github.com/cedricfarinazzo/nightshift/internal/db"
+	jiraconfig "github.com/cedricfarinazzo/nightshift/internal/jira"
+	"github.com/cedricfarinazzo/nightshift/internal/providers"
+	"github.com/cedricfarinazzo/nightshift/internal/reporting"
+	"github.com/cedricfarinazzo/nightshift/internal/scheduler"
+	"github.com/cedricfarinazzo/nightshift/internal/setup"
+	"github.com/cedricfarinazzo/nightshift/internal/tasks"
 )
 
 var setupCmd = &cobra.Command{

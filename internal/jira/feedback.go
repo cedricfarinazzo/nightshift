@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/marcus/nightshift/internal/agents"
-	"github.com/marcus/nightshift/internal/logging"
+	"github.com/cedricfarinazzo/nightshift/internal/agents"
+	"github.com/cedricfarinazzo/nightshift/internal/logging"
 )
 
 // FeedbackResult holds the outcome of processing review feedback for a ticket.

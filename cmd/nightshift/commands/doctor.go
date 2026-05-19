@@ -11,11 +11,11 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/marcus/nightshift/internal/budget"
-	"github.com/marcus/nightshift/internal/config"
-	"github.com/marcus/nightshift/internal/db"
-	"github.com/marcus/nightshift/internal/scheduler"
-	"github.com/marcus/nightshift/internal/state"
+	"github.com/cedricfarinazzo/nightshift/internal/budget"
+	"github.com/cedricfarinazzo/nightshift/internal/config"
+	"github.com/cedricfarinazzo/nightshift/internal/db"
+	"github.com/cedricfarinazzo/nightshift/internal/scheduler"
+	"github.com/cedricfarinazzo/nightshift/internal/state"
 )
 
 type checkStatus string

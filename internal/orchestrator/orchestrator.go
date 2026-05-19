@@ -14,9 +14,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/marcus/nightshift/internal/agents"
-	"github.com/marcus/nightshift/internal/logging"
-	"github.com/marcus/nightshift/internal/tasks"
+	"github.com/cedricfarinazzo/nightshift/internal/agents"
+	"github.com/cedricfarinazzo/nightshift/internal/logging"
+	"github.com/cedricfarinazzo/nightshift/internal/tasks"
 )
 
 // Constants for orchestration.
@@ -397,7 +397,7 @@ func (o *Orchestrator) SetRunMetadata(m *RunMetadata) {
 func (o *Orchestrator) buildMetadataBlock(task *tasks.Task, result *TaskResult) string {
 	var b strings.Builder
 	b.WriteString("\n---\n")
-	b.WriteString("*Automated by [nightshift](https://github.com/marcus/nightshift)*\n\n")
+	b.WriteString("*Automated by [nightshift](https://github.com/cedricfarinazzo/nightshift)*\n\n")
 	b.WriteString("<!-- nightshift:metadata\n")
 	fmt.Fprintf(&b, "task-id: %s\n", task.ID)
 	fmt.Fprintf(&b, "task-type: %s\n", task.Type)
@@ -719,7 +719,7 @@ func (o *Orchestrator) review(ctx context.Context, task *tasks.Task, impl *Imple
 func (o *Orchestrator) commit(_ context.Context, task *tasks.Task, impl *ImplementOutput, _ string) error {
 	// For now, commit is a no-op. In full implementation:
 	// - Create git commit with changes
-	// - Include a commit message with https://github.com/marcus/nightshift
+	// - Include a commit message with https://github.com/cedricfarinazzo/nightshift
 	// - Update task state
 	// - Send notifications
 	o.logger.Infof("commit: task=%s files=%d", task.ID, len(impl.FilesModified))
@@ -769,7 +769,7 @@ func (o *Orchestrator) buildPlanInstructions(task *tasks.Task) string {
 2. Before creating your branch, record the current branch name and plan to switch back after the PR is opened.
 3. If you create commits, include a concise message with these git trailers:
    Nightshift-Task: %s
-   Nightshift-Ref: https://github.com/marcus/nightshift
+   Nightshift-Ref: https://github.com/cedricfarinazzo/nightshift
 4. Analyze the task requirements
 5. Identify files that need to be modified
 6. Create step-by-step implementation plan`, branchInstruction, task.Type)
@@ -828,7 +828,7 @@ func (o *Orchestrator) buildImplementInstructions(task *tasks.Task, workDir stri
    When finished, open a PR. After the PR is submitted, switch back to the original branch. If you cannot open a PR, leave the branch and explain next steps.
 1. If you create commits, include a concise message with these git trailers:
    Nightshift-Task: %s
-   Nightshift-Ref: https://github.com/marcus/nightshift
+   Nightshift-Ref: https://github.com/cedricfarinazzo/nightshift
 2. Implement the plan step by step
 3. Make all necessary code changes
 4. Ensure tests pass`, branchInstruction, workDirNote, task.Type)

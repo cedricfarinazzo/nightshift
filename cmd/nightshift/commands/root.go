@@ -4,7 +4,7 @@ package commands
 import (
 	"os"
 
-	"github.com/marcus/nightshift/internal/usage"
+	"github.com/cedricfarinazzo/nightshift/internal/usage"
 	"github.com/spf13/cobra"
 )
 

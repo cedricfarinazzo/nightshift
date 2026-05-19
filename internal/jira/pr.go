@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/marcus/nightshift/internal/logging"
+	"github.com/cedricfarinazzo/nightshift/internal/logging"
 )
 
 // PRInfo describes a GitHub pull request created or updated for a Jira ticket.

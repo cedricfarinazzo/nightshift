@@ -5,8 +5,8 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/marcus/nightshift/internal/agents"
-	"github.com/marcus/nightshift/internal/config"
+	"github.com/cedricfarinazzo/nightshift/internal/agents"
+	"github.com/cedricfarinazzo/nightshift/internal/config"
 )
 
 // mockRunner captures args for helpers tests.

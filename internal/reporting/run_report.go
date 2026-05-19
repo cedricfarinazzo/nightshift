@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/marcus/nightshift/internal/usage"
+	"github.com/cedricfarinazzo/nightshift/internal/usage"
 )
 
 // DefaultRunReportPath returns the default path for a run report file.

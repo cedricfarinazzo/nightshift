@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/marcus/nightshift/internal/agents"
-	"github.com/marcus/nightshift/internal/tasks"
+	"github.com/cedricfarinazzo/nightshift/internal/agents"
+	"github.com/cedricfarinazzo/nightshift/internal/tasks"
 )
 
 // noopGitValidator is a git validator that always succeeds, used in tests

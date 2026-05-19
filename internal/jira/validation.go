@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/marcus/nightshift/internal/agents"
-	"github.com/marcus/nightshift/internal/logging"
+	"github.com/cedricfarinazzo/nightshift/internal/agents"
+	"github.com/cedricfarinazzo/nightshift/internal/logging"
 )
 
 const validationTimeout = 2 * time.Minute

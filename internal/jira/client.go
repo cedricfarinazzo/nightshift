@@ -10,7 +10,7 @@ import (
 	atlassianagile "github.com/ctreminiom/go-atlassian/v2/jira/agile"
 	atlassianjira "github.com/ctreminiom/go-atlassian/v2/jira/v3"
 	model "github.com/ctreminiom/go-atlassian/v2/pkg/infra/models"
-	"github.com/marcus/nightshift/internal/logging"
+	"github.com/cedricfarinazzo/nightshift/internal/logging"
 )
 
 // Client wraps the go-atlassian Jira client with nightshift-specific helpers.

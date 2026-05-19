@@ -9,10 +9,10 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/marcus/nightshift/internal/analysis"
-	"github.com/marcus/nightshift/internal/config"
-	"github.com/marcus/nightshift/internal/db"
-	"github.com/marcus/nightshift/internal/logging"
+	"github.com/cedricfarinazzo/nightshift/internal/analysis"
+	"github.com/cedricfarinazzo/nightshift/internal/config"
+	"github.com/cedricfarinazzo/nightshift/internal/db"
+	"github.com/cedricfarinazzo/nightshift/internal/logging"
 )
 
 var busFactorCmd = &cobra.Command{

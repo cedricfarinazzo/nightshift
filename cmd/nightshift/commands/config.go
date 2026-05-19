@@ -11,7 +11,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 
-	"github.com/marcus/nightshift/internal/config"
+	"github.com/cedricfarinazzo/nightshift/internal/config"
 )
 
 var configCmd = &cobra.Command{

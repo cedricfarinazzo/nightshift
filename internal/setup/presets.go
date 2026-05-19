@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/marcus/nightshift/internal/tasks"
+	"github.com/cedricfarinazzo/nightshift/internal/tasks"
 )
 
 // Preset identifies a task selection profile (safe, balanced, aggressive).

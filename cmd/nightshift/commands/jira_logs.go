@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/marcus/nightshift/internal/db"
+	"github.com/cedricfarinazzo/nightshift/internal/db"
 	"github.com/muesli/termenv"
 	"github.com/spf13/cobra"
 )

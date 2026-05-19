@@ -9,7 +9,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/marcus/nightshift/internal/db"
+	"github.com/cedricfarinazzo/nightshift/internal/db"
 )
 
 const maxOutputRunes = 10_000

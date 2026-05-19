@@ -11,8 +11,8 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/marcus/nightshift/internal/config"
-	"github.com/marcus/nightshift/internal/reporting"
+	"github.com/cedricfarinazzo/nightshift/internal/config"
+	"github.com/cedricfarinazzo/nightshift/internal/reporting"
 	"github.com/muesli/termenv"
 	"github.com/spf13/cobra"
 )

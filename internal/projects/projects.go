@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/marcus/nightshift/internal/config"
-	"github.com/marcus/nightshift/internal/state"
+	"github.com/cedricfarinazzo/nightshift/internal/config"
+	"github.com/cedricfarinazzo/nightshift/internal/state"
 	"github.com/spf13/viper"
 )
 

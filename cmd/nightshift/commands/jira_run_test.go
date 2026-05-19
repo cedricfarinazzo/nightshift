@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/marcus/nightshift/internal/config"
-	"github.com/marcus/nightshift/internal/jira"
+	"github.com/cedricfarinazzo/nightshift/internal/config"
+	"github.com/cedricfarinazzo/nightshift/internal/jira"
 )
 
 func TestPrintJiraPreflightSummary(t *testing.T) {

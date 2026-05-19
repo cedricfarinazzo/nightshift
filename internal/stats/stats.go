@@ -14,8 +14,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/marcus/nightshift/internal/db"
-	"github.com/marcus/nightshift/internal/reporting"
+	"github.com/cedricfarinazzo/nightshift/internal/db"
+	"github.com/cedricfarinazzo/nightshift/internal/reporting"
 )
 
 // Duration wraps time.Duration for clean JSON serialization as seconds.

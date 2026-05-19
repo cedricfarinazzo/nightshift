@@ -6,11 +6,11 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/marcus/nightshift/internal/budget"
-	"github.com/marcus/nightshift/internal/config"
-	"github.com/marcus/nightshift/internal/db"
-	"github.com/marcus/nightshift/internal/logging"
-	"github.com/marcus/nightshift/internal/reporting"
+	"github.com/cedricfarinazzo/nightshift/internal/budget"
+	"github.com/cedricfarinazzo/nightshift/internal/config"
+	"github.com/cedricfarinazzo/nightshift/internal/db"
+	"github.com/cedricfarinazzo/nightshift/internal/logging"
+	"github.com/cedricfarinazzo/nightshift/internal/reporting"
 )
 
 type runReport struct {

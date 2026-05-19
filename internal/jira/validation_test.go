@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/marcus/nightshift/internal/agents"
+	"github.com/cedricfarinazzo/nightshift/internal/agents"
 )
 
 // stubAgent is a mock agents.Agent for unit testing.

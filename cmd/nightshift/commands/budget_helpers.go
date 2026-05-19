@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/marcus/nightshift/internal/budget"
-	"github.com/marcus/nightshift/internal/config"
+	"github.com/cedricfarinazzo/nightshift/internal/budget"
+	"github.com/cedricfarinazzo/nightshift/internal/config"
 )
 
 func resolveProviderList(cfg *config.Config, filter string) ([]string, error) {

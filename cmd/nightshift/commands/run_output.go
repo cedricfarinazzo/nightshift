@@ -8,9 +8,9 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/marcus/nightshift/internal/budget"
-	"github.com/marcus/nightshift/internal/orchestrator"
-	"github.com/marcus/nightshift/internal/tasks"
+	"github.com/cedricfarinazzo/nightshift/internal/budget"
+	"github.com/cedricfarinazzo/nightshift/internal/orchestrator"
+	"github.com/cedricfarinazzo/nightshift/internal/tasks"
 )
 
 // runStyles holds lipgloss styles for colored run output, matching the

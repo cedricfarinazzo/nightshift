@@ -18,7 +18,7 @@ Repo: https://github.com/cedricfarinazzo/nightshift
 - **Logging**: `rs/zerolog`
 - **Config format**: YAML
 - **Build/release**: `Makefile` + `goreleaser`
-- **Docs site**: Docusaurus v3 (`website/`)
+- **Docs**: Plain markdown under `docs/` (no static-site generator)
 - **CI**: GitHub Actions (`.github/workflows/`)
 
 ---
@@ -173,47 +173,42 @@ internal/
     register.go         # RegisterCustomTasksFromConfig(): config → TaskDefinition; rolls back on failure
     selector.go         # Task selection logic (budget-aware, staleness-aware)
 
-docs/                   # Internal developer docs (NOT user-facing)
-  guides/
-    architecture.md            # Full architecture reference (component graph, data flow)
-    run-lifecycle.md           # End-to-end run lifecycle (daemon → scheduler → orchestrator → agent)
-    adding-tasks.md            # How to add a new built-in or custom task type
-    tasks-internals.md         # CostTier, RiskLevel, TaskCategory, selector scoring formula
-    budget-internals.md        # Budget modes, reserve, active tracking, Manager interfaces
-    state-and-snapshots.md     # RunRecord, staleness, Snapshot, snapshot retention
-    scheduling.md              # Cron vs interval config, daemon mode, time windows
-    orchestrator-internals.md  # Task orchestrator state machine, Jira phase lifecycle, ghExec
-    jira-pipeline.md           # Jira autonomous pipeline deep dive
-    workspace-management.md    # Workspace setup/cleanup, SSH URL requirement, branch conventions
-    integrations-dev.md        # Reader interface, how to add a new integration, Hint types
-    reporting.md               # Run reports, JSON results, daily summaries, retention
-    bus-factor-analysis.md     # GitParser, HHI, Gini, risk levels, bus-factor count
-    security.md                # Credentials, audit log, sandbox model
-    database.md                # Schema, migration system, how to add migrations
-    logging.md                 # zerolog setup, component loggers, log levels, jq queries
-    testing.md                 # Test patterns, MockRunner, stubJiraClient, e2e tests
+docs/                   # All documentation (plain markdown, no static-site generator)
+  README.md             # Index pointing at user/operations/dev trees
+  user/                 # End-user guides
+    introduction.md     installation.md     quick-start.md
+    configuration.md    cli-reference.md    tasks.md
+    agents.md           jira-pipeline.md    budget.md
+    scheduling.md       bus-factor.md       troubleshooting.md
+  operations/           # Running Nightshift as a long-lived service
+    daemon.md           systemd-install.md  logs-and-reports.md
+    data-and-backup.md  security.md         release.md
+  dev/                  # Internal / developer guides
+    architecture.md            # Package map, layers, key design constraints
+    run-lifecycle.md           # End-to-end run flow
+    orchestrator.md            # Task plan→implement→review loop
+    agents-internals.md        # CommandRunner, compression, temp-file pattern
+    jira-pipeline.md           # Phase state machine, resume, dependency graph
+    workspace.md               # Clone/branch/push conventions (Jira pipeline)
+    database.md                # Schema, migration system
+    budget-internals.md        # Capacity formula, provider APIs
+    tasks-internals.md         # TaskDefinition, selector scoring
+    state-and-snapshots.md     # RunRecord, staleness, snapshot collector
+    scheduling-internals.md    # Cron wrapper, SkipIfStillRunning
+    reporting.md               # Run reports, summaries, retention
+    logging.md                 # zerolog setup, printf-style API, jq queries
+    bus-factor.md              # HHI, Gini, risk classification
+    testing.md                 # MockRunner, stubJiraClient, e2e patterns
     contributing.md            # Dev setup, git conventions, PR checklist
     debugging.md               # Log locations, common errors + fixes
-    codex-budget-tracking.md   # Codex-specific usage tracking
-    website.md                 # Docusaurus site development
-  implemented/          # Design docs for completed features
-  deprecated/           # Archived docs
-
-website/                # Docusaurus v3 user-facing documentation site
-  docs/                 # User guides: installation, config, cli-reference, budget, scheduling,
-                        # tasks, agents, jira, troubleshooting, etc.
-  package.json          # Node.js deps; deployed to https://nightshift.haplab.com
 
 scripts/
   pre-commit.sh         # Runs gofmt, go vet, go build on staged .go files
 
-.claude/skills/
-  nightshift-release/   # Claude Code skill: cut a release (goreleaser, git tag, GH Actions verify)
-
 .goreleaser.yml         # Builds darwin/linux amd64+arm64; archives as tar.gz; auto-changelog
 Makefile                # Targets: build, test, test-verbose, test-race, coverage, lint, clean,
                         # deps, check, install, install-hooks
-go.mod                  # module github.com/marcus/nightshift; Go 1.24
+go.mod                  # module github.com/cedricfarinazzo/nightshift; Go 1.24
 CHANGELOG.md            # Version history
 SECURITY_AUDIT.md       # Security findings
 ```
@@ -308,6 +303,56 @@ Agents MUST follow these Go conventions:
 
 ---
 
+## Documentation Workflow
+
+Documentation lives in `docs/` as plain markdown, in three tracks:
+
+- `docs/user/` — end-user guides (introduction, installation, quick-start, configuration, CLI reference, tasks, agents, jira-pipeline, budget, scheduling, bus-factor, troubleshooting)
+- `docs/operations/` — running Nightshift as a service (daemon, systemd-install, logs-and-reports, data-and-backup, security, release)
+- `docs/dev/` — internals (architecture, run-lifecycle, orchestrator, agents-internals, jira-pipeline, workspace, database, budget-internals, tasks-internals, state-and-snapshots, scheduling-internals, reporting, logging, bus-factor, testing, contributing, debugging)
+
+Index: `docs/README.md`.
+
+### Reading the docs FIRST when exploring
+
+Before grepping or `Read`-ing source to understand a feature, **read the relevant `docs/dev/*.md` page first**. They are kept in sync with code and contain mermaid diagrams that map the package + state-machine layout faster than reading files. Mapping for common questions:
+
+| Question | Start in |
+|---|---|
+| "How is the project structured?" | `docs/dev/architecture.md` |
+| "How does a task run end-to-end?" | `docs/dev/run-lifecycle.md`, then `docs/dev/orchestrator.md` |
+| "How does the Jira pipeline work?" | `docs/dev/jira-pipeline.md`, then `docs/user/jira-pipeline.md` |
+| "How are prompts built / agents invoked?" | `docs/dev/agents-internals.md` |
+| "How is the workspace managed?" | `docs/dev/workspace.md` |
+| "How is budget enforced?" | `docs/dev/budget-internals.md` |
+| "How does the selector pick tasks?" | `docs/dev/tasks-internals.md` |
+| "How does the scheduler avoid overlap?" | `docs/dev/scheduling-internals.md` |
+| "What's in the database?" | `docs/dev/database.md` |
+| "How do I add a test?" | `docs/dev/testing.md` |
+| "Where does this log go?" | `docs/dev/logging.md`, `docs/operations/logs-and-reports.md` |
+
+When the docs disagree with the code, trust the code AND fix the docs in the same PR.
+
+### Keeping docs in sync when changing code
+
+Documentation is part of every code-changing PR. The rule is **same PR**, not "follow-up PR" — drift starts the moment a docs update is deferred.
+
+For each code change, walk this checklist before requesting review:
+
+- **Behaviour-visible to users** (new flag, changed default, removed command, new config field, new error message): update `docs/user/`. Mandatory.
+- **New / renamed / removed CLI command or flag**: update `docs/user/cli-reference.md` and any `docs/user/*` page that demos it.
+- **New / changed config field**: update `docs/user/configuration.md`; if Jira-related, also `docs/user/jira-pipeline.md`.
+- **New / changed task in the catalog**: update `docs/user/tasks.md` if categories/tiers/intervals change; `docs/dev/tasks-internals.md` if the selector or definition shape changes.
+- **Touched `internal/<pkg>/`**: update `docs/dev/<corresponding-page>.md`. If a mermaid diagram in that page no longer matches the code, regenerate it.
+- **Operational change** (new file path on disk, new PID-file behaviour, new env var, new systemd-relevant detail): update `docs/operations/`.
+- **Schema migration**: bump `docs/dev/database.md` and call it out in `CHANGELOG.md`.
+- **New package or major file**: add a one-line entry to the Project Structure section in this file.
+- **New gotcha discovered while debugging**: add to the `## Gotchas` section in this file. Include the *why* so future-you knows when the workaround can be removed.
+
+If your change makes a doc page obsolete, **delete the page** in the same PR and remove links from `docs/README.md` and any sibling pages that reference it.
+
+CI is not currently enforcing this — reviewers must. PRs that change `internal/` or `cmd/` without touching `docs/` should get a comment asking why.
+
 ## Self-Improvement Loop
 
 Agents MUST follow these rules:
@@ -316,7 +361,7 @@ Agents MUST follow these rules:
 - **Add gotchas as soon as discovered**: add them to the `## Gotchas` section below to avoid repeating the same investigation.
 - **On adding a new package, module, or file**: add it to the Project Structure section above with a one-line description.
 - **Before using any package**: search online for the latest stable version and docs; never assume a cached version is current.
-- **When user-facing docs in `website/docs/` become stale**: update them in the same PR as the code change.
+- **When user-facing docs in `docs/user/` become stale**: update them in the same PR as the code change.
 - **Security findings**: add to `SECURITY_AUDIT.md`.
 - **Agents are encouraged to add notes, new sections, or any content they find useful** directly into this file at any time. If it's worth knowing, put it here. This file is meant to grow over time as institutional knowledge accumulates.
 

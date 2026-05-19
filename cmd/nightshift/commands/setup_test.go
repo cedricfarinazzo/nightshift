@@ -8,9 +8,9 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/marcus/nightshift/internal/config"
-	"github.com/marcus/nightshift/internal/setup"
-	"github.com/marcus/nightshift/internal/tasks"
+	"github.com/cedricfarinazzo/nightshift/internal/config"
+	"github.com/cedricfarinazzo/nightshift/internal/setup"
+	"github.com/cedricfarinazzo/nightshift/internal/tasks"
 )
 
 func TestApplyBudgetEdit_MaxPercentBounds(t *testing.T) {
