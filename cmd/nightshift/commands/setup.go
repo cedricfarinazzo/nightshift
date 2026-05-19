@@ -283,12 +283,14 @@ type setupModel struct {
 	jiraErr           string
 
 	// Multi-project Jira state
-	jiraProjects            []jiraProjectEntry
-	jiraProjectCursor       int
-	jiraProjectEditMode     bool
-	jiraProjectEditSubStep  int // 0=key, 1=label, 2=repos
-	jiraEditProjectKey      string
-	jiraEditProjectLabel    string
+	jiraProjects                    []jiraProjectEntry
+	jiraProjectCursor               int
+	jiraProjectEditMode             bool
+	jiraProjectEditSubStep          int // 0=key, 1=label, 2=repos, 3=board_id, 4=exclude_future_sprints
+	jiraEditProjectKey              string
+	jiraEditProjectLabel            string
+	jiraEditProjectBoardID          int
+	jiraEditProjectExcludeFutureSprints bool
 
 	// Prompt compression step state
 	compressionCursor    int    // 0=enable toggle, 1=provider, 2=model, 3=effort
@@ -344,9 +346,11 @@ type jiraRepoEntry struct {
 }
 
 type jiraProjectEntry struct {
-	Key   string
-	Label string
-	Repos []jiraRepoEntry
+	Key                  string
+	Label                string
+	Repos                []jiraRepoEntry
+	BoardID              int
+	ExcludeFutureSprints bool
 }
 
 type pathOption struct {
@@ -2933,6 +2937,8 @@ func (m *setupModel) handleJiraProjectsInput(msg tea.KeyMsg) (tea.Model, tea.Cmd
 		m.jiraProjectEditSubStep = 0
 		m.jiraEditProjectKey = ""
 		m.jiraEditProjectLabel = "nightshift"
+		m.jiraEditProjectBoardID = 0
+		m.jiraEditProjectExcludeFutureSprints = false
 		m.jiraRepos = nil
 		m.jiraRepoCursor = 0
 		m.jiraRepoEditing = false
@@ -3009,24 +3015,76 @@ func (m *setupModel) handleJiraProjectEditInput(msg tea.KeyMsg) (tea.Model, tea.
 		model, cmd := m.handleJiraRepoInput(msg)
 		mm := model.(*setupModel)
 		// When repos step is "done" (enter pressed with repos), it transitions to jiraSubStepPhases.
-		// Intercept that and instead finalise the project.
+		// Intercept that and instead advance to board_id substep.
 		if mm.jiraSubStep == jiraSubStepPhases {
-			// Revert the substep change — we handle the transition ourselves.
 			mm.jiraSubStep = jiraSubStepProjects
-			// Append the new project.
-			mm.jiraProjects = append(mm.jiraProjects, jiraProjectEntry{
-				Key:   mm.jiraEditProjectKey,
-				Label: mm.jiraEditProjectLabel,
-				Repos: append([]jiraRepoEntry(nil), mm.jiraRepos...),
-			})
-			mm.jiraProjectCursor = len(mm.jiraProjects) - 1
-			mm.jiraProjectEditMode = false
-			mm.jiraProjectEditSubStep = 0
-			mm.jiraRepos = nil
-			mm.jiraRepoCursor = 0
+			mm.jiraProjectEditSubStep = 3
+			mm.jiraInput.SetValue("")
+			mm.jiraInput.Placeholder = ""
+			mm.jiraInput.Focus()
 			mm.jiraErr = ""
 		}
 		return mm, cmd
+	case 3: // board_id
+		switch msg.String() {
+		case "esc":
+			m.jiraProjectEditSubStep = 2
+			m.jiraInput.Blur()
+			m.jiraErr = ""
+		case "enter":
+			raw := strings.TrimSpace(m.jiraInput.Value())
+			if raw == "" {
+				m.jiraEditProjectBoardID = 0
+			} else {
+				id, err := strconv.Atoi(raw)
+				if err != nil || id < 0 {
+					m.jiraErr = "board ID must be a non-negative integer (leave empty to skip)"
+					return m, nil
+				}
+				m.jiraEditProjectBoardID = id
+			}
+			m.jiraErr = ""
+			m.jiraProjectEditSubStep = 4
+			m.jiraEditProjectExcludeFutureSprints = false
+			m.jiraInput.SetValue("")
+			m.jiraInput.Placeholder = "y/N"
+			m.jiraInput.Focus()
+		default:
+			var cmd tea.Cmd
+			m.jiraInput, cmd = m.jiraInput.Update(msg)
+			return m, cmd
+		}
+	case 4: // exclude_future_sprints
+		switch msg.String() {
+		case "esc":
+			m.jiraProjectEditSubStep = 3
+			m.jiraInput.SetValue("")
+			m.jiraInput.Placeholder = ""
+			m.jiraInput.Focus()
+			m.jiraErr = ""
+		case "enter":
+			raw := strings.ToLower(strings.TrimSpace(m.jiraInput.Value()))
+			m.jiraEditProjectExcludeFutureSprints = raw == "y" || raw == "yes"
+			m.jiraErr = ""
+			// Finalise the project.
+			m.jiraProjects = append(m.jiraProjects, jiraProjectEntry{
+				Key:                  m.jiraEditProjectKey,
+				Label:                m.jiraEditProjectLabel,
+				Repos:                append([]jiraRepoEntry(nil), m.jiraRepos...),
+				BoardID:              m.jiraEditProjectBoardID,
+				ExcludeFutureSprints: m.jiraEditProjectExcludeFutureSprints,
+			})
+			m.jiraProjectCursor = len(m.jiraProjects) - 1
+			m.jiraProjectEditMode = false
+			m.jiraProjectEditSubStep = 0
+			m.jiraRepos = nil
+			m.jiraRepoCursor = 0
+			m.jiraInput.Blur()
+		default:
+			var cmd tea.Cmd
+			m.jiraInput, cmd = m.jiraInput.Update(msg)
+			return m, cmd
+		}
 	}
 	return m, nil
 }
@@ -3239,9 +3297,11 @@ func (m *setupModel) applyJiraConfig() {
 			label = "nightshift"
 		}
 		projects = append(projects, jiraconfig.ProjectConfig{
-			Key:   jp.Key,
-			Label: label,
-			Repos: repos,
+			Key:                  jp.Key,
+			Label:                label,
+			Repos:                repos,
+			BoardID:              jp.BoardID,
+			ExcludeFutureSprints: jp.ExcludeFutureSprints,
 		})
 	}
 
@@ -3314,6 +3374,9 @@ func jiraProjectsToMaps(projects []jiraconfig.ProjectConfig) []map[string]interf
 		}
 		if proj.BoardID > 0 {
 			p["board_id"] = proj.BoardID
+		}
+		if proj.ExcludeFutureSprints {
+			p["exclude_future_sprints"] = true
 		}
 		result = append(result, p)
 	}
@@ -3480,6 +3543,24 @@ func renderJiraProjectEditStep(b *strings.Builder, m *setupModel) {
 		b.WriteString("\nPress Enter to continue, Esc to go back.\n")
 	case 2:
 		renderJiraReposStep(b, m)
+	case 3:
+		b.WriteString("Agile board ID (optional)\n")
+		b.WriteString(styleNote.Render("Found in board URL (?rapidView=N or /boards/N). Leave empty to skip backlog filtering."))
+		b.WriteString("\n\n")
+		b.WriteString(m.jiraInput.View() + "\n")
+		if m.jiraErr != "" {
+			b.WriteString(styleWarn.Render("Error: "+m.jiraErr) + "\n")
+		}
+		b.WriteString("\nPress Enter to continue, Esc to go back.\n")
+	case 4:
+		b.WriteString("Exclude future sprint tickets? [y/N]\n")
+		b.WriteString(styleNote.Render("Appends AND sprint not in futureSprints() to JQL. Requires Jira Software license (not available on Work Management)."))
+		b.WriteString("\n\n")
+		b.WriteString(m.jiraInput.View() + "\n")
+		if m.jiraErr != "" {
+			b.WriteString(styleWarn.Render("Error: "+m.jiraErr) + "\n")
+		}
+		b.WriteString("\nPress Enter to confirm, Esc to go back.\n")
 	}
 }
 

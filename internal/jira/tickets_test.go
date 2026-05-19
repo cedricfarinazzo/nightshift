@@ -490,3 +490,42 @@ func TestFetchTodoTickets_NoBoardID_NoBacklogFilter(t *testing.T) {
 		t.Errorf("expected no sprint filter in wire JQL, got: %q", capturedJQL)
 	}
 }
+
+// ── buildTodoJQL ExcludeFutureSprints ─────────────────────────────────────────
+
+func TestBuildTodoJQL_ExcludeFutureSprintsFlag(t *testing.T) {
+	tests := []struct {
+		name                 string
+		excludeFutureSprints bool
+		wantSprintClause     bool
+	}{
+		{
+			name:                 "enabled=true appends futureSprints clause",
+			excludeFutureSprints: true,
+			wantSprintClause:     true,
+		},
+		{
+			name:                 "enabled=false omits sprint clause",
+			excludeFutureSprints: false,
+			wantSprintClause:     false,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			proj := ProjectConfig{
+				Key:                  "PROJ",
+				Label:                "auto",
+				ExcludeFutureSprints: tc.excludeFutureSprints,
+			}
+			jql := buildTodoJQL(proj, "")
+			hasClause := strings.Contains(jql, "sprint not in futureSprints()")
+			if hasClause != tc.wantSprintClause {
+				t.Errorf("ExcludeFutureSprints=%v: JQL sprint clause present=%v, want %v; JQL: %s",
+					tc.excludeFutureSprints, hasClause, tc.wantSprintClause, jql)
+			}
+			if !strings.HasSuffix(strings.TrimSpace(jql), "ORDER BY created ASC") {
+				t.Errorf("JQL should end with ORDER BY created ASC, got: %s", jql)
+			}
+		})
+	}
+}

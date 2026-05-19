@@ -151,8 +151,17 @@ jira:
       require_active_sprint: true       # add: AND sprint in openSprints()
       board_type: kanban
       board_id: 42                      # required for kanban-board (not backlog) filtering
+      exclude_future_sprints: true      # add: AND sprint not in futureSprints()
 ```
 
+| Flag | Effect | Requires |
+|---|---|---|
+| `board_id: <N>` | Exclude board backlog tickets from todo fetch | Board ID from URL (`?rapidView=N` or `/boards/N`) |
+| `require_active_sprint: true` | Append `AND sprint in openSprints()` to todo JQL | Jira Software |
+| `exclude_future_sprints: true` | Append `AND sprint not in futureSprints()` to todo JQL | Jira Software |
+
+- `board_id` must be set to exclude backlog tickets. Without it, all "To Do" tickets with the label are fetched regardless of backlog status. The setup wizard now prompts for it.
+- `exclude_future_sprints: true` prevents tickets assigned to future sprints from being processed prematurely. Default is `false`. **Requires Jira Software** — not available on Work Management; enabling it on Work Management will produce a JQL error at runtime.
 - `require_active_sprint: true` adds `AND sprint in openSprints()` to the todo JQL. Applied only to the todo fetch — in-flight and review tickets are unaffected. Requires Jira Software (not Work Management).
 - Kanban boards: `board/<id>/issue` includes backlog items. `fetchKanbanBoardTickets` calls `board/<id>/issue` and subtracts `board/<id>/backlog` to get on-board items only. Needs both `board_type: kanban` and `board_id: <N>`.
 

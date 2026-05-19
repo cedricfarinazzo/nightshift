@@ -58,6 +58,9 @@ func buildTodoJQL(proj ProjectConfig, issueType string) string {
 	if issueType != "" {
 		jql += fmt.Sprintf(` AND issuetype = "%s"`, issueType)
 	}
+	if proj.ExcludeFutureSprints {
+		jql += ` AND sprint not in futureSprints()`
+	}
 	return jql + ` ORDER BY created ASC`
 }
 
