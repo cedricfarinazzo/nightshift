@@ -75,11 +75,16 @@ var migrations = []migration{
 ## Recent migration (009)
 
 ```sql
-CREATE UNIQUE INDEX IF NOT EXISTS idx_jira_ticket_results_unique
-ON jira_ticket_results(run_id, ticket_key);
+-- Dedup existing rows before adding constraint (prior runs could produce duplicates)
+DELETE FROM jira_ticket_results
+WHERE id NOT IN (
+    SELECT MIN(id) FROM jira_ticket_results GROUP BY run_id, ticket_key
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_jira_ticket_results_run_key
+    ON jira_ticket_results(run_id, ticket_key);
 ```
 
-Prevents duplicate ticket-result rows when the Jira orchestrator restarts mid-run.
+Removes duplicate `(run_id, ticket_key)` rows that could accumulate from orchestrator restarts, then enforces uniqueness going forward. The DELETE must precede the index creation — if existing duplicates are present, `CREATE UNIQUE INDEX` fails.
 
 ## Where SQL lives
 

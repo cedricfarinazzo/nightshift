@@ -90,7 +90,9 @@ Refs: <TICKET-KEY>
 
 ## Cleanup
 
-`CleanupStaleWorkspaces(maxAge)` — removes workspace dirs older than `maxAge` and not currently in use. Called from the daemon periodically.
+`CleanupStaleWorkspaces(cfg)` — removes workspace dirs whose newest file activity (across all contained files and subdirs) is older than `cfg.CleanupAfterDays` days. Called from the daemon periodically.
+
+**Staleness is determined by walking the entire workspace directory tree** and taking the newest mtime found among all entries. The workspace directory entry's own mtime is not used alone, because on Linux, git operations (clone, fetch, checkout, file writes) update file mtimes inside a directory without updating the directory entry's own mtime. Using the directory mtime alone would cause active workspaces to be falsely deleted.
 
 ## Resume semantics
 

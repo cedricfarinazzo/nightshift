@@ -15,11 +15,12 @@ import (
 
 // Client wraps the go-atlassian Jira client with nightshift-specific helpers.
 type Client struct {
-	jira      *atlassianjira.Client
-	agile     *atlassianagile.Client
-	cfg       JiraConfig
-	log       *logging.Logger
-	statusMap *StatusMap // cached result of DiscoverStatuses
+	jira       *atlassianjira.Client
+	agile      *atlassianagile.Client
+	cfg        JiraConfig
+	log        *logging.Logger
+	statusMap  *StatusMap    // cached result of DiscoverStatuses
+	boardCache map[string]int // project key → board ID (0 = no board)
 }
 
 // NewClient creates a Jira client from nightshift config.
@@ -77,6 +78,33 @@ func (c *Client) Ping(ctx context.Context) error {
 
 // Raw returns the underlying go-atlassian client for direct API access.
 func (c *Client) Raw() *atlassianjira.Client { return c.jira }
+
+// discoverBoardID returns the agile board ID for the given project key.
+// Result is cached — the API is called at most once per project per Client lifetime.
+// Returns 0 if the project has no agile board (e.g. Jira Work Management).
+func (c *Client) discoverBoardID(ctx context.Context, projectKey string) int {
+	if c.log == nil {
+		c.log = logging.Component("jira")
+	}
+	if c.boardCache == nil {
+		c.boardCache = make(map[string]int)
+	}
+	if id, ok := c.boardCache[projectKey]; ok {
+		return id
+	}
+	boards, _, err := c.agile.Board.Gets(ctx, &model.GetBoardsOptions{ProjectKeyOrID: projectKey}, 0, 1)
+	if err != nil || boards == nil || len(boards.Values) == 0 {
+		if err != nil {
+			c.log.Warnf("board discovery for %s: %v — backlog filtering disabled", projectKey, err)
+		}
+		c.boardCache[projectKey] = 0
+		return 0
+	}
+	id := boards.Values[0].ID
+	c.boardCache[projectKey] = id
+	c.log.Infof("discovered board ID %d for project %s", id, projectKey)
+	return id
+}
 
 // AddComment posts a comment on the given Jira issue using ADF format.
 // The body is split on blank lines into paragraphs; newlines within a paragraph

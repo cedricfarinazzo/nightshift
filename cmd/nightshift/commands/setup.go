@@ -296,12 +296,12 @@ type setupModel struct {
 	jiraErr           string
 
 	// Multi-project Jira state
-	jiraProjects            []jiraProjectEntry
-	jiraProjectCursor       int
-	jiraProjectEditMode     bool
-	jiraProjectEditSubStep  int // 0=key, 1=label, 2=repos
-	jiraEditProjectKey      string
-	jiraEditProjectLabel    string
+	jiraProjects                    []jiraProjectEntry
+	jiraProjectCursor               int
+	jiraProjectEditMode             bool
+	jiraProjectEditSubStep int // 0=key, 1=label, 2=repos
+	jiraEditProjectKey     string
+	jiraEditProjectLabel   string
 
 	// Agent timeout (shown in providers/model step, applied to all providers)
 	agentTimeout      string          // duration string, e.g. "30m"
@@ -3156,11 +3156,9 @@ func (m *setupModel) handleJiraProjectEditInput(msg tea.KeyMsg) (tea.Model, tea.
 		model, cmd := m.handleJiraRepoInput(msg)
 		mm := model.(*setupModel)
 		// When repos step is "done" (enter pressed with repos), it transitions to jiraSubStepPhases.
-		// Intercept that and instead finalise the project.
+		// Intercept that and finalise the project instead.
 		if mm.jiraSubStep == jiraSubStepPhases {
-			// Revert the substep change — we handle the transition ourselves.
 			mm.jiraSubStep = jiraSubStepProjects
-			// Append the new project.
 			mm.jiraProjects = append(mm.jiraProjects, jiraProjectEntry{
 				Key:   mm.jiraEditProjectKey,
 				Label: mm.jiraEditProjectLabel,
@@ -3171,6 +3169,7 @@ func (m *setupModel) handleJiraProjectEditInput(msg tea.KeyMsg) (tea.Model, tea.
 			mm.jiraProjectEditSubStep = 0
 			mm.jiraRepos = nil
 			mm.jiraRepoCursor = 0
+			mm.jiraInput.Blur()
 			mm.jiraErr = ""
 		}
 		return mm, cmd
@@ -3492,9 +3491,6 @@ func jiraProjectsToMaps(projects []jiraconfig.ProjectConfig) []map[string]interf
 		}
 		if proj.Label != "" {
 			p["label"] = proj.Label
-		}
-		if proj.BoardID > 0 {
-			p["board_id"] = proj.BoardID
 		}
 		result = append(result, p)
 	}

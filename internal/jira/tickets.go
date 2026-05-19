@@ -49,7 +49,10 @@ const searchPageSize = 50
 const acKeyword = "acceptance criteria"
 
 // buildTodoJQL constructs the JQL query for FetchTodoTickets.
-// Builds: project = X AND statusCategory = "To Do" AND labels = Y [AND issuetype = Z] ORDER BY created ASC
+// Always excludes future-sprint tickets via AND sprint not in futureSprints().
+// Builds: project = X AND statusCategory = "To Do" AND labels = Y [AND issuetype = Z]
+//
+//	AND sprint not in futureSprints() ORDER BY created ASC
 func buildTodoJQL(proj ProjectConfig, issueType string) string {
 	jql := fmt.Sprintf(
 		`project = "%s" AND statusCategory = "To Do" AND labels = "%s"`,
@@ -58,23 +61,25 @@ func buildTodoJQL(proj ProjectConfig, issueType string) string {
 	if issueType != "" {
 		jql += fmt.Sprintf(` AND issuetype = "%s"`, issueType)
 	}
+	jql += ` AND (sprint not in futureSprints() OR sprint is EMPTY)`
 	return jql + ` ORDER BY created ASC`
 }
 
 // FetchTodoTickets fetches issues in the "To Do" status category filtered by the project's label.
 // If issueType is non-empty, further filters by issue type (case-insensitive).
-// When proj.BoardID > 0, tickets in the board's backlog are excluded from results.
+// The project's agile board is auto-discovered; tickets in the board's backlog are excluded.
+// Future-sprint tickets are always excluded via JQL.
 func (c *Client) FetchTodoTickets(ctx context.Context, proj ProjectConfig, issueType string) ([]Ticket, error) {
 	jql := buildTodoJQL(proj, issueType)
 	tickets, err := c.fetchTickets(ctx, jql)
 	if err != nil {
 		return nil, err
 	}
-	if proj.BoardID > 0 {
+	if boardID := c.discoverBoardID(ctx, proj.Key); boardID > 0 {
 		opts := &model.IssueOptionScheme{
 			Fields: []string{"summary"},
 		}
-		backlogKeys, err := c.fetchBoardBacklogKeys(ctx, proj.BoardID, opts)
+		backlogKeys, err := c.fetchBoardBacklogKeys(ctx, boardID, opts)
 		if err != nil {
 			return nil, err
 		}

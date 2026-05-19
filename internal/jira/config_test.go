@@ -243,23 +243,3 @@ func TestEffectivePhase_ReasoningEffort(t *testing.T) {
 	}
 }
 
-func TestProjectConfig_BoardID_Preserved(t *testing.T) {
-	// BoardID should be preserved through Defaults().
-	cfg := JiraConfig{
-		Site:  "x",
-		Email: "a@b",
-		Projects: []ProjectConfig{
-			{
-				Key:     "BOARD",
-				Label:   "nightshift",
-				BoardID: 42,
-				Repos:   []RepoConfig{{Name: "r", URL: "u"}},
-			},
-		},
-	}
-	cfg.Defaults()
-
-	if cfg.Projects[0].BoardID != 42 {
-		t.Errorf("Defaults() must not reset BoardID, got %d", cfg.Projects[0].BoardID)
-	}
-}
