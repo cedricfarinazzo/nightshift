@@ -10,10 +10,10 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/marcus/nightshift/internal/agents"
-	"github.com/marcus/nightshift/internal/budget"
-	"github.com/marcus/nightshift/internal/db"
-	"github.com/marcus/nightshift/internal/jira"
+	"github.com/cedricfarinazzo/nightshift/internal/agents"
+	"github.com/cedricfarinazzo/nightshift/internal/budget"
+	"github.com/cedricfarinazzo/nightshift/internal/db"
+	"github.com/cedricfarinazzo/nightshift/internal/jira"
 	"github.com/spf13/cobra"
 )
 

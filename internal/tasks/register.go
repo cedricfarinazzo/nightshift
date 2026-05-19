@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/marcus/nightshift/internal/config"
+	"github.com/cedricfarinazzo/nightshift/internal/config"
 )
 
 // RegisterCustomTasksFromConfig converts custom task configs into TaskDefinitions

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/marcus/nightshift/internal/agents"
+	"github.com/cedricfarinazzo/nightshift/internal/agents"
 )
 
 const validationTimeout = 2 * time.Minute
@@ -30,9 +30,11 @@ func ValidateTicket(ctx context.Context, agent agents.Agent, ticket Ticket, comp
 	defer cancel()
 
 	opts := agents.ExecuteOptions{
-		Prompt:      buildValidationPrompt(ticket),
-		Compression: compression,
-		OnCompress:  onCompress,
+		Prompt:       buildValidationContent(ticket),
+		PromptPrefix: validationRolePrefix,
+		PromptSuffix: validationFormatInstructions,
+		Compression:  compression,
+		OnCompress:   onCompress,
 	}
 	result, err := agent.Execute(ctx, opts)
 	if err != nil {
@@ -45,34 +47,49 @@ func ValidateTicket(ctx context.Context, agent agents.Agent, ticket Ticket, comp
 	return vr, nil
 }
 
-// buildValidationPrompt constructs the prompt sent to the LLM validator.
-// ~42% word reduction vs original (measured: 72 → 42 words static template).
-func buildValidationPrompt(ticket Ticket) string {
+// validationRolePrefix is the role/task context prepended after compression
+// so the compressor cannot strip the agent's role definition.
+const validationRolePrefix = `Ticket quality validator. Assess if ticket has enough info for autonomous AI implementation.
+
+Criteria: CLEAR OBJECTIVE, SUFFICIENT CONTEXT, ACCEPTANCE CRITERIA, SCOPE, NO AMBIGUITY
+
+`
+
+// validationFormatInstructions is the output-format spec appended after
+// compression so the compressor cannot mangle the JSON schema.
+const validationFormatInstructions = `
+Respond in JSON only (no markdown, no code fences):
+{"valid": bool, "score": 1-10, "issues": [...], "missing": [...], "suggestions": [...]}
+
+Valid if score >= 6 and no critical issues.`
+
+// buildValidationContent returns only the compressible ticket data portion.
+// validationRolePrefix and validationFormatInstructions are delivered via
+// PromptPrefix/PromptSuffix and never pass through the compressor.
+func buildValidationContent(ticket Ticket) string {
 	var comments strings.Builder
 	for _, c := range ticket.Comments {
 		fmt.Fprintf(&comments, "- %s: %s\n", c.Author, c.Body)
 	}
 
-	return fmt.Sprintf(`Ticket quality validator. Assess if ticket has enough info for autonomous AI implementation.
-
-Ticket: %s
+	return fmt.Sprintf(`Ticket: %s
 Title: %s
 Description: %s
 Acceptance Criteria: %s
 Comments:
-%s
-Criteria: CLEAR OBJECTIVE, SUFFICIENT CONTEXT, ACCEPTANCE CRITERIA, SCOPE, NO AMBIGUITY
-
-Respond in JSON only (no markdown, no code fences):
-{"valid": bool, "score": 1-10, "issues": [...], "missing": [...], "suggestions": [...]}
-
-Valid if score >= 6 and no critical issues.`,
+%s`,
 		ticket.Key,
 		ticket.Summary,
 		ticket.Description,
 		ticket.AcceptanceCriteria,
 		comments.String(),
 	)
+}
+
+// buildValidationPrompt returns the full prompt (prefix + content + suffix).
+// Used by tests and callers that do not use compression.
+func buildValidationPrompt(ticket Ticket) string {
+	return validationRolePrefix + buildValidationContent(ticket) + validationFormatInstructions
 }
 
 // parseValidationResponse parses the LLM output into a ValidationResult.

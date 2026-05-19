@@ -4,7 +4,7 @@ builds:
   - main: ./cmd/nightshift
     binary: nightshift
     ldflags:
-      - -s -w -X github.com/marcus/nightshift/cmd/nightshift/commands.Version={{ .Version }}
+      - -s -w -X github.com/cedricfarinazzo/nightshift/cmd/nightshift/commands.Version={{ .Version }}
     env:
       - CGO_ENABLED=0
     goos:
@@ -36,4 +36,5 @@ changelog:
       - "^chore:"
 
 # Note: Homebrew formula is manually maintained in marcus/homebrew-tap
-# to build from source (avoids Gatekeeper warnings on macOS)
+# to build from source (avoids macOS Gatekeeper warnings on unsigned binaries).
+# Tap repo: https://github.com/marcus/homebrew-tap

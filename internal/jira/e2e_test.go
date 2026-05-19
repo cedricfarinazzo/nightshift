@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/marcus/nightshift/internal/agents"
+	"github.com/cedricfarinazzo/nightshift/internal/agents"
 )
 
 // e2eClient returns a real Jira client configured for the sedinfra/VC project.

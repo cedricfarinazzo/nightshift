@@ -12,15 +12,15 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/marcus/nightshift/internal/budget"
-	"github.com/marcus/nightshift/internal/config"
-	"github.com/marcus/nightshift/internal/db"
-	"github.com/marcus/nightshift/internal/logging"
-	"github.com/marcus/nightshift/internal/orchestrator"
-	"github.com/marcus/nightshift/internal/reporting"
-	"github.com/marcus/nightshift/internal/scheduler"
-	"github.com/marcus/nightshift/internal/state"
-	"github.com/marcus/nightshift/internal/tasks"
+	"github.com/cedricfarinazzo/nightshift/internal/budget"
+	"github.com/cedricfarinazzo/nightshift/internal/config"
+	"github.com/cedricfarinazzo/nightshift/internal/db"
+	"github.com/cedricfarinazzo/nightshift/internal/logging"
+	"github.com/cedricfarinazzo/nightshift/internal/orchestrator"
+	"github.com/cedricfarinazzo/nightshift/internal/reporting"
+	"github.com/cedricfarinazzo/nightshift/internal/scheduler"
+	"github.com/cedricfarinazzo/nightshift/internal/state"
+	"github.com/cedricfarinazzo/nightshift/internal/tasks"
 	"github.com/spf13/cobra"
 )
 
@@ -82,12 +82,42 @@ func ensurePidDir() error {
 	return os.MkdirAll(dir, 0755)
 }
 
-// writePidFile writes the current process PID to the PID file.
+// writePidFile atomically creates the PID file using O_EXCL to prevent two
+// daemon instances starting simultaneously. If the file already exists and the
+// recorded PID is still alive, returns an error. Stale files (dead PID) are
+// removed and the write is retried once.
 func writePidFile() error {
 	if err := ensurePidDir(); err != nil {
 		return fmt.Errorf("creating pid dir: %w", err)
 	}
-	return os.WriteFile(pidFilePath(), []byte(strconv.Itoa(os.Getpid())), 0644)
+	path := pidFilePath()
+	pid := []byte(strconv.Itoa(os.Getpid()))
+
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0644)
+	if err == nil {
+		_, werr := f.Write(pid)
+		_ = f.Close()
+		return werr
+	}
+	if !errors.Is(err, os.ErrExist) {
+		return fmt.Errorf("create pid file: %w", err)
+	}
+
+	// File exists — check if the recorded PID is alive.
+	existing, readErr := readPidFile()
+	if readErr == nil && isProcessRunning(existing) {
+		return fmt.Errorf("daemon already running (pid %d)", existing)
+	}
+
+	// Stale file: remove and retry once.
+	_ = os.Remove(path)
+	f, err = os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0644)
+	if err != nil {
+		return fmt.Errorf("create pid file after stale removal: %w", err)
+	}
+	_, werr := f.Write(pid)
+	_ = f.Close()
+	return werr
 }
 
 // readPidFile reads the PID from the PID file.
@@ -203,6 +233,7 @@ func runDaemonLoop(cfg *config.Config) error {
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	defer signal.Stop(sigCh)
 	go func() {
 		sig := <-sigCh
 		log.Infof("received signal %v, shutting down", sig)
@@ -302,6 +333,10 @@ func runScheduledTasks(ctx context.Context, cfg *config.Config, database *db.DB,
 			break
 		}
 
+		// Detect the current branch before any tasks run so it can be
+		// injected into RunMetadata for prompt branch instructions.
+		baseBranch, _ := orchestrator.CurrentBranch(ctx, projectPath)
+
 		orch := orchestrator.New(
 			orchestrator.WithAgent(choice.agent),
 			orchestrator.WithConfig(orchestrator.Config{
@@ -312,8 +347,12 @@ func runScheduledTasks(ctx context.Context, cfg *config.Config, database *db.DB,
 			orchestrator.WithLogger(logging.Component("orchestrator")),
 		)
 
-		// Select tasks
-		selectedTasks := selector.SelectTopN(projectPath, 5)
+		// Select tasks — respect schedule.max_tasks from config (default 5).
+		maxTasks := cfg.Schedule.MaxTasks
+		if maxTasks <= 0 {
+			maxTasks = 5
+		}
+		selectedTasks := selector.SelectTopN(projectPath, maxTasks)
 		if len(selectedTasks) == 0 {
 			if report != nil {
 				report.addTask(reporting.TaskResult{
@@ -360,6 +399,15 @@ func runScheduledTasks(ctx context.Context, cfg *config.Config, database *db.DB,
 
 			// Mark as assigned
 			st.MarkAssigned(taskInstance.ID, projectPath, string(scoredTask.Definition.Type))
+
+			orch.SetRunMetadata(&orchestrator.RunMetadata{
+				Provider:  choice.name,
+				TaskType:  string(scoredTask.Definition.Type),
+				TaskScore: scoredTask.Score,
+				CostTier:  scoredTask.Definition.CostTier.String(),
+				RunStart:  projectStart,
+				Branch:    baseBranch,
+			})
 
 			// Execute via orchestrator
 			result, err := orch.RunTask(ctx, taskInstance, projectPath)

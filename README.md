@@ -2,296 +2,223 @@
 
 > It finds what you forgot to look for.
 
-**[nightshift.haplab.com](https://nightshift.haplab.com)** · [Docs](https://nightshift.haplab.com/docs/intro) · [Quick Start](https://nightshift.haplab.com/docs/quick-start) · [CLI Reference](https://nightshift.haplab.com/docs/cli-reference)
-
 ![Nightshift logo](logo.png)
 
-Your tokens get reset every week, you might as well use them. Nightshift runs overnight to find dead code, doc drift, test gaps, security issues, and 59 built-in tasks silently accumulating while you ship features. Like a Roomba for your codebase — runs overnight, worst case you close the PR.
+Nightshift is a Go CLI that orchestrates AI coding agents (Claude Code, Codex, GitHub Copilot) to work on your repos overnight.
 
-Everything lands as a branch or PR. It never writes directly to your primary branch. Don't like something? Close it. That's the whole rollback plan.
+**Headline feature — autonomous Jira pipeline.** Point it at a project + label and Nightshift fetches todo tickets, validates each one with an LLM, resolves cross-ticket dependencies (topo-sorts via `BuildDependencyGraph`), sets up a workspace per repo, and drives every ticket through:
 
-## Features
+```
+validate → plan → implement → commit → PR → status transition
+```
 
-- **Budget-aware**: Tracks provider usage via live API; never exceeds configurable max percent (default 90%)
-- **Multi-project**: Point it at your repos, it already knows what to look for
-- **Zero risk**: Everything is a PR — merge what surprises you, close the rest
-- **Great DX**: Thoughtful CLI defaults with clear output and reports
-- **Jira pipeline**: Autonomously implements Jira tickets — validates, plans, codes, commits, opens PRs, and transitions status overnight
-- **Bus-factor analysis**: Measures code ownership concentration and flags single-contributor risk
+Five of those six phases (all except commit) post a `🤖 <!-- nightshift:type=… -->` comment to the Jira ticket on success. Failures post a `🤖 error` comment instead. On the next run, `detectResumeState` reads those markers and resumes from the next unfinished phase — interrupted runs **never restart from scratch**. PR review comments on tickets already "In Review" are picked up automatically the next run and fed back to the agent as a rework prompt; `lastReworkAt` makes the feedback loop idempotent.
 
-## Installation
+It also ships a catalog of ~60 maintenance tasks (lint, doc backfill, test gaps, bug-finder, security audits, bus-factor, dependency audits, ...) that run on a schedule against your repos using leftover provider budget.
 
-Full guide: [Installation docs](https://nightshift.haplab.com/docs/installation)
+Everything lands as a branch or PR. Nightshift never writes directly to your primary branch. Don't like a change? Close the PR. That's the entire rollback plan.
+
+---
+
+## Quick Start — Jira
 
 ```bash
 brew install marcus/tap/nightshift
+nightshift setup                       # walks through providers + jira block
+export NIGHTSHIFT_JIRA_TOKEN=...        # atlassian API token
+nightshift jira preview                # dry-run: see what would happen
+nightshift jira run                    # process all labeled todo tickets
 ```
 
-Binary downloads are available on the GitHub releases page.
+Run `nightshift daemon start` to do this on a schedule. Full walkthrough in [`docs/user/quick-start.md`](docs/user/quick-start.md); full Jira reference in [`docs/user/jira-pipeline.md`](docs/user/jira-pipeline.md).
 
-Manual install:
+## Quick Start — Maintenance Tasks
 
 ```bash
-go install github.com/marcus/nightshift/cmd/nightshift@latest
+nightshift preview                     # next scheduled runs
+nightshift run                         # preflight + confirm + execute
 ```
 
-## Getting Started
+---
 
-Full guide: [Quick Start docs](https://nightshift.haplab.com/docs/quick-start)
+## Features
 
-After installing, run the guided setup:
+- **Autonomous Jira pipeline** — validate → plan → implement → commit → PR → status, end-to-end, resumable via `🤖` comment markers, PR-review feedback loop included
+- **Multi-repo per project** — a single Jira project can target multiple repos; each gets its own workspace and branch
+- **Budget-aware** — live provider Usage API checks gate every run; single knob `max_percent`
+- **Multi-agent** — Claude Code, Codex, or GitHub Copilot; per-phase provider/model selection in Jira config
+- **~60 maintenance tasks** — lint, docs, tests, refactors, bug-finder, security audits
+- **Zero-risk** — every change is a branch + PR; merge what you like, close the rest
+- **Bus-factor analysis** — quantifies code ownership concentration and flags single-contributor risk
+- **No CGO, no cloud** — pure-Go SQLite, all state on disk
+
+---
+
+## Installation
+
+| Method | Command |
+|--------|---------|
+| Homebrew | `brew install marcus/tap/nightshift` |
+| Go install | `go install github.com/cedricfarinazzo/nightshift/cmd/nightshift@latest` |
+| Source | `git clone https://github.com/cedricfarinazzo/nightshift && cd nightshift && make build` |
+| Binary | [GitHub releases](https://github.com/cedricfarinazzo/nightshift/releases) — darwin/linux × amd64/arm64 |
+
+Verify: `nightshift --version && nightshift doctor`.
+
+Full guide: [`docs/user/installation.md`](docs/user/installation.md).
+
+---
+
+## Agent Authentication
+
+At least one agent CLI must be installed + authenticated.
 
 ```bash
-nightshift setup
+# Claude
+claude /login                                # or: export ANTHROPIC_API_KEY=sk-ant-...
+
+# Codex
+codex --login                                # or: export OPENAI_API_KEY=sk-...
+
+# GitHub Copilot
+gh extension install github/gh-copilot
+gh auth login                                # requires Copilot subscription
 ```
 
-This walks you through provider configuration, project selection, and daemon setup. Once complete you can preview what nightshift will do:
+Details: [`docs/user/agents.md`](docs/user/agents.md).
+
+---
+
+## Common Commands
+
+### Jira pipeline
 
 ```bash
-nightshift preview
-nightshift budget
+nightshift jira preview                  # dry-run: tickets, phase plan, budget
+nightshift jira preview --validate       # also run LLM scoring per ticket
+nightshift jira preview --explain        # per-phase token estimate
+
+nightshift jira run                      # process all labeled todo tickets
+nightshift jira run --ticket VC-42       # one ticket
+nightshift jira run --max-tickets 5
+nightshift jira run --skip-validation    # save tokens, skip the LLM scoring phase
+nightshift jira run --review-only        # only handle PR review feedback
+nightshift jira run --todo-only          # skip review-feedback loop
 ```
 
-Or kick off a run immediately:
+### Maintenance tasks
 
 ```bash
-nightshift run
-```
+nightshift run                    # one run now (preflight + confirm + execute)
+nightshift run --dry-run          # show what would run, no execution
+nightshift run --yes              # skip confirmation
 
-## Common CLI Usage
+nightshift preview                # upcoming scheduled runs
+nightshift budget                 # current provider capacity
 
-Full reference: [CLI Reference docs](https://nightshift.haplab.com/docs/cli-reference)
-
-```bash
-# Preview next scheduled runs with prompt previews
-nightshift preview -n 3
-nightshift preview --long
-nightshift preview --explain
-nightshift preview --plain
-nightshift preview --json
-nightshift preview --write ./nightshift-prompts
-
-# Guided global setup
-nightshift setup
-
-# Check environment and config health
-nightshift doctor
-
-# Budget status
-nightshift budget
-nightshift budget --provider claude
-
-# Browse and inspect available tasks
-nightshift task list
-nightshift task list --category pr
-nightshift task list --cost low --json
-
-# Show task details and planning prompt
+nightshift task list              # browse the catalog
 nightshift task show lint-fix
-nightshift task show skill-groom
-nightshift task show lint-fix --prompt-only
-
-# Run a task immediately
 nightshift task run lint-fix --provider claude
-nightshift task run skill-groom --provider codex --dry-run
-nightshift task run lint-fix --provider codex --dry-run
-
-# Jira pipeline
-nightshift jira preview                    # dry-run: show tickets, phases, budget
-nightshift jira run                        # process all labeled tickets
-nightshift jira run --ticket PROJ-42       # single ticket
-nightshift jira run --skip-validation      # skip LLM validation phase
-nightshift jira run --review-only          # only process review feedback
-
-# Bus-factor analysis
-nightshift busfactor
-nightshift busfactor --project ~/code/repo
 ```
 
-If `gum` is available, preview output is shown through the gum pager. Use `--plain` to disable.
-
-### `nightshift run`
-
-Before executing, `nightshift run` displays a **preflight summary** showing the
-selected provider, budget status, projects, and planned tasks. In interactive
-terminals you are prompted for confirmation; in non-TTY environments (cron,
-daemon, CI) confirmation is auto-skipped.
-
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--dry-run` | `false` | Show preflight summary and exit without executing |
-| `--project`, `-p` | _(all configured)_ | Target a single project directory |
-| `--task`, `-t` | _(auto-select)_ | Run a specific task by name |
-| `--max-projects` | `1` | Max projects to process (ignored when `--project` is set) |
-| `--max-tasks` | `1` | Max tasks per project (ignored when `--task` is set) |
-| `--random-task` | `false` | Pick a random task from eligible tasks instead of the highest-scored one |
-| `--ignore-budget` | `false` | Bypass budget checks (use with caution) |
-| `--yes`, `-y` | `false` | Skip the confirmation prompt |
+### Operations
 
 ```bash
-# Interactive run with preflight summary + confirmation prompt
-nightshift run
-
-# Non-interactive: skip confirmation
-nightshift run --yes
-
-# Dry-run: show preflight summary and exit
-nightshift run --dry-run
-
-# Process up to 3 projects, 2 tasks each
-nightshift run --max-projects 3 --max-tasks 2
-
-# Pick a random eligible task
-nightshift run --random-task
-
-# Bypass budget limits (shows warning)
-nightshift run --ignore-budget
-
-# Target a specific project and task directly
-nightshift run -p ./my-project -t lint-fix
+nightshift daemon start           # background scheduler
+nightshift doctor                 # check env + credentials + config
+nightshift status                 # recent run state
+nightshift report list            # browse run reports
+nightshift busfactor              # code ownership analysis
 ```
 
-Other useful flags:
-- `nightshift status --today` to see today's activity summary
-- `nightshift daemon start --foreground` for debug
-- `--category` — filter tasks by category (pr, analysis, options, safe, map, emergency)
-- `--cost` — filter by cost tier (low, medium, high, veryhigh)
-- `--prompt-only` — output just the raw prompt text for piping
-- `--provider` — required for `task run`, choose claude or codex
-- `--dry-run` — preview the prompt without executing
-- `--timeout` — execution timeout (default 30m)
+Full reference: [`docs/user/cli-reference.md`](docs/user/cli-reference.md).
 
-## Authentication (Subscriptions)
+---
 
-Nightshift supports three AI providers:
-- **Claude Code** - Anthropic's Claude via local CLI
-- **Codex** - OpenAI's GPT via local CLI  
-- **GitHub Copilot** - GitHub's Copilot via GitHub CLI
+## Minimal Configuration
 
-### Claude Code
-
-```bash
-claude
-/login
-```
-
-Supports Claude.ai subscriptions or Anthropic Console credentials.
-
-### Codex
-
-```bash
-codex --login
-```
-
-Supports signing in with ChatGPT or an API key.
-
-### GitHub Copilot
-
-```bash
-# Install Copilot CLI
-npm install -g @github/copilot
-# or
-curl -fsSL https://gh.io/copilot-install | bash
-```
-
-Requires GitHub Copilot subscription.
-
-If you prefer API-based usage, you can authenticate Claude and Codex CLIs with API keys instead.
-
-## Configuration
-
-Full guide: [Configuration docs](https://nightshift.haplab.com/docs/configuration) · [Budget docs](https://nightshift.haplab.com/docs/budget) · [Scheduling docs](https://nightshift.haplab.com/docs/scheduling) · [Tasks docs](https://nightshift.haplab.com/docs/tasks) · [Jira Pipeline](https://nightshift.haplab.com/docs/jira)
-
-Nightshift uses YAML config files to define:
-
-- Provider usage budget limits
-- Target repositories
-- Task priorities
-- Schedule preferences
-
-Run `nightshift setup` to create/update the global config at `~/.config/nightshift/config.yaml`.
-
-See the [full configuration docs](https://nightshift.haplab.com/docs/configuration) for detailed options.
-
-Minimal example:
+`~/.config/nightshift/config.yaml`:
 
 ```yaml
 schedule:
   cron: "0 2 * * *"
 
 budget:
-  max_percent: 90  # stop running when provider usage exceeds this %
+  max_percent: 90
 
 providers:
-  preference:
-    - claude
-    - codex
+  preference: [claude, codex]
   claude:
     enabled: true
-    data_path: "~/.claude"
     dangerously_skip_permissions: true
   codex:
     enabled: true
-    data_path: "~/.codex"
     dangerously_bypass_approvals_and_sandbox: true
 
 projects:
-  - path: ~/code/sidecar
-  - path: ~/code/td
+  - path: ~/code/myrepo
+
+# Optional: autonomous Jira pipeline
+jira:
+  site: yourorg                              # yourorg.atlassian.net
+  email: you@example.com
+  token_env: NIGHTSHIFT_JIRA_TOKEN
+  max_tickets: 10
+  validation: { provider: copilot, model: gpt-5.4-mini,        timeout: 2m  }
+  plan:       { provider: copilot, model: claude-sonnet-4.6,   timeout: 5m  }
+  implement:  { provider: copilot, model: claude-sonnet-4.6,   timeout: 30m }
+  review_fix: { provider: copilot, model: gpt-5.4-mini,        timeout: 20m }
+  projects:
+    - key: VC
+      label: nightshift
+      repos:
+        - name: nightshift
+          url: git@github.com:org/nightshift.git    # SSH required
+          base_branch: main
 ```
 
-Task selection:
+Full reference: [`docs/user/configuration.md`](docs/user/configuration.md). Jira-specific reference: [`docs/user/jira-pipeline.md`](docs/user/jira-pipeline.md). Run `nightshift setup` for an interactive wizard.
 
-```yaml
-tasks:
-  enabled:
-    - lint-fix
-    - docs-backfill
-    - bug-finder
-  priorities:
-    lint-fix: 1
-    skill-groom: 2
-    bug-finder: 2
-  intervals:
-    lint-fix: "24h"
-    skill-groom: "168h"
-    docs-backfill: "168h"
-```
+---
 
-Each task has a default cooldown interval to prevent the same task from running too frequently on a project (e.g., 24h for lint-fix, 7d for docs-backfill). Override per-task with `tasks.intervals`.
+## Documentation
 
-`skill-groom` is enabled by default. Add it to `tasks.disabled` if you want to opt out. It updates project-local skills under `.claude/skills` and `.codex/skills` using `README.md` as project context and starts Agent Skills docs lookup from `https://agentskills.io/llms.txt`.
+All docs live in [`docs/`](docs/) as plain markdown.
+
+**User guides** ([`docs/user/`](docs/user/)) — introduction, installation, quick start, configuration, CLI reference, tasks, agents, Jira pipeline, budget, scheduling, bus factor, troubleshooting.
+
+**Operations** ([`docs/operations/`](docs/operations/)) — daemon mode, systemd install, logs and reports, data and backup, security model, release process.
+
+**Developer / internal** ([`docs/dev/`](docs/dev/)) — architecture, run lifecycle, orchestrator, agents internals, Jira pipeline internals, workspace, database, budget internals, tasks internals, state and snapshots, scheduling, reporting, logging, bus factor, testing, contributing, debugging.
+
+Index: [`docs/README.md`](docs/README.md).
+
+---
 
 ## Development
 
-### Pre-commit hooks
-
-Install the git pre-commit hook to catch formatting and vet issues before pushing:
-
 ```bash
-make install-hooks
+make install-hooks     # symlinks scripts/pre-commit.sh
+make build             # go build -o nightshift ./cmd/nightshift
+make test              # go test ./...
+make test-race
+make lint              # requires golangci-lint
 ```
 
-This symlinks `scripts/pre-commit.sh` into `.git/hooks/pre-commit`. The hook runs:
-- **gofmt** — flags any staged `.go` files that need formatting
-- **go vet** — catches common correctness issues
-- **go build** — ensures the project compiles
+See [`docs/dev/contributing.md`](docs/dev/contributing.md) for conventions, commit style, and the PR checklist.
 
-To bypass in a pinch: `git commit --no-verify`
+---
 
 ## Uninstalling
 
 ```bash
-# Remove the system service
-nightshift uninstall
-
-# Remove configs and data (optional)
-rm -rf ~/.config/nightshift ~/.local/share/nightshift
-
-# Remove the binary
+nightshift uninstall                                  # removes systemd unit
+rm -rf ~/.config/nightshift ~/.local/share/nightshift # config + data
 rm "$(which nightshift)"
 ```
 
+---
+
 ## License
 
-MIT - see [LICENSE](LICENSE) for details.
+MIT — see [`LICENSE`](LICENSE).

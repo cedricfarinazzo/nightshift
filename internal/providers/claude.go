@@ -4,7 +4,6 @@ package providers
 import (
 	"bufio"
 	"bytes"
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -90,25 +89,6 @@ func NewClaudeWithPath(dataPath string) *Claude {
 	return &Claude{
 		dataPath: dataPath,
 	}
-}
-
-// Name returns "claude".
-func (c *Claude) Name() string {
-	return "claude"
-}
-
-// Execute runs a task via Claude Code CLI.
-func (c *Claude) Execute(ctx context.Context, task Task) (Result, error) {
-	// TODO: Implement - spawn claude CLI process
-	return Result{}, nil
-}
-
-// Cost returns Claude's token pricing (cents per 1K tokens).
-// Based on Claude Opus 4 pricing.
-func (c *Claude) Cost() (inputCents, outputCents int64) {
-	// Claude Opus 4: $15/M input, $75/M output
-	// Per 1K: 1.5 cents input, 7.5 cents output
-	return 150, 750 // in hundredths of a cent for precision
 }
 
 // ParseStatsCache reads and parses the stats-cache.json file.

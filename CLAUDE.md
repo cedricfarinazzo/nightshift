@@ -18,7 +18,7 @@ Repo: https://github.com/cedricfarinazzo/nightshift
 - **Logging**: `rs/zerolog`
 - **Config format**: YAML
 - **Build/release**: `Makefile` + `goreleaser`
-- **Docs site**: Docusaurus v3 (`website/`)
+- **Docs**: Plain markdown under `docs/` (no static-site generator)
 - **CI**: GitHub Actions (`.github/workflows/`)
 
 ---
@@ -72,6 +72,8 @@ internal/
     compress.go         # CompressConfig struct; CompressPrompt() threshold check + fallback;
                         # compressViaAgent() calls configured provider CLI (claude/codex/copilot) with
                         # caveman meta-prompt; writePromptFile() creates temp file, appends file context
+    util.go             # handleExecuteResult(): shared post-run logic for all three agents (exit code
+                        # mapping, timeout detection, JSON extraction, CompressStats propagation)
 
   analysis/             # Bus-factor / code ownership analysis
     analyzer.go         # GitParser: extracts commit authors from git history
@@ -91,7 +93,8 @@ internal/
   db/                   # SQLite persistence layer — all SQL lives here, nowhere else
     db.go               # DB struct; DefaultPath = ~/.local/share/nightshift/nightshift.db;
                         # Open() applies pragmas + auto-runs migrations
-    migrations.go       # Versioned schema migrations; auto-applied on Open()
+    migrations.go       # Versioned schema migrations (001–009); auto-applied on Open();
+                        # migration009 adds UNIQUE index on jira_ticket_results(run_id, ticket_key)
     import.go           # Bulk data import utilities
 
   jira/                 # Jira autonomous system — drives ticket lifecycle via AI agents
@@ -114,29 +117,25 @@ internal/
     feedback.go         # ProcessFeedback, buildReworkPrompt, filterNewComments; idempotency filter
                         # by lastReworkAt — skips review comments posted before the last CommentRework
 
-  integrations/         # Readers for external config and task sources
-    integrations.go     # Reader interface + Result/TaskItem/Hint types
-    claudemd.go         # ClaudeMDReader: reads CLAUDE.md from project root; enabled via cfg.Integrations.ClaudeMD
-    agentsmd.go         # AgentsMDReader: reads AGENTS.md from project root (legacy); returns nil if file absent
-    td.go               # TDReader: integrates with `td` CLI for task sourcing; enabled via config
-    github.go           # GitHub integration reader
-
   logging/              # zerolog setup
     logging.go          # Logger init; log files → ~/.local/share/nightshift/logs/nightshift-YYYY-MM-DD.log
 
   orchestrator/         # Coordinates agent execution (plan-implement-review loop)
     orchestrator.go     # Orchestrator: task lifecycle; statuses: pending→planning→executing→reviewing
-                        # →completed/failed/abandoned; DefaultMaxIterations=3
+                        # →completed/failed/abandoned; DefaultMaxIterations=3;
+                        # RunTask() validates workDir via gitValidator (blocks non-git dirs and $HOME);
+                        # saves current branch before task and restores via defer checkoutBranch();
+                        # gitValidator field is injectable for tests (WithGitValidator option);
+                        # prompts split: compressible Prompt (task data) + protected PromptSuffix (instructions/schema)
     events.go           # Event types emitted during orchestration (consumed by TUI and logging)
 
   projects/             # Project discovery and management
     projects.go         # Scans configured paths; returns ProjectConfig list
 
-  providers/            # AI provider API backends (distinct from agents: providers track usage/cost)
-    provider.go         # Provider interface: Name(), Execute(), Cost() (inputCents, outputCents per 1K tokens)
-    claude.go           # Claude provider: usage/cost tracking via Anthropic API
-    codex.go            # Codex provider: usage/cost tracking via OpenAI API
-    copilot.go          # Copilot provider: usage/cost tracking
+  providers/            # AI provider usage/quota tracking (distinct from agents/ which spawns binaries)
+    claude.go           # Claude provider: token usage tracking via Anthropic API
+    codex.go            # Codex provider: usage tracking via OpenAI API
+    copilot.go          # Copilot provider: request-count tracking (monthly, no API exposure)
 
   reporting/            # Report generation
     run_report.go       # Per-run report → ~/.local/share/nightshift/reports/run-YYYY-MM-DD-HHMMSS.md
@@ -144,7 +143,8 @@ internal/
     summary.go          # Daily summary → ~/.local/share/nightshift/summaries/summary-YYYY-MM-DD.md
 
   scheduler/            # Cron-based scheduling
-    scheduler.go        # Wraps robfig/cron; reads schedule config; triggers runs
+    scheduler.go        # Wraps robfig/cron with SkipIfStillRunning middleware (prevents concurrent fires);
+                        # reads schedule config; triggers runs
 
   security/             # Credential management — env vars only, never config files
     credentials.go      # CredentialManager: validates ANTHROPIC_API_KEY, OPENAI_API_KEY;
@@ -166,57 +166,49 @@ internal/
   stats/                # Performance metrics
     stats.go            # Aggregates historical run data for display
 
-  tasks/                # Task registry and queue
+  tasks/                # Task registry and selector
     tasks.go            # TaskDefinition: Type, Category, Name, Description,
                         # CostTier (Low/Medium/High/VeryHigh), RiskLevel, Interval;
                         # 6 categories: PR, Analysis, Options, Safe, Map, Emergency
     register.go         # RegisterCustomTasksFromConfig(): config → TaskDefinition; rolls back on failure
     selector.go         # Task selection logic (budget-aware, staleness-aware)
 
-  trends/               # Historical trend analysis
-    analyzer.go         # Analyzes run history for trends and anomalies
-
-docs/                   # Internal developer docs (NOT user-facing)
-  guides/
-    architecture.md            # Full architecture reference (component graph, data flow)
-    run-lifecycle.md           # End-to-end run lifecycle (daemon → scheduler → orchestrator → agent)
-    adding-tasks.md            # How to add a new built-in or custom task type
-    tasks-internals.md         # CostTier, RiskLevel, TaskCategory, selector scoring formula
-    budget-internals.md        # Budget modes, reserve, active tracking, Manager interfaces
-    state-and-snapshots.md     # RunRecord, staleness, Snapshot, snapshot retention
-    scheduling.md              # Cron vs interval config, daemon mode, time windows
-    orchestrator-internals.md  # Task orchestrator state machine, Jira phase lifecycle, ghExec
-    jira-pipeline.md           # Jira autonomous pipeline deep dive
-    workspace-management.md    # Workspace setup/cleanup, SSH URL requirement, branch conventions
-    integrations-dev.md        # Reader interface, how to add a new integration, Hint types
-    reporting.md               # Run reports, JSON results, daily summaries, retention
-    bus-factor-analysis.md     # GitParser, HHI, Gini, risk levels, bus-factor count
-    security.md                # Credentials, audit log, sandbox model
-    database.md                # Schema, migration system, how to add migrations
-    logging.md                 # zerolog setup, component loggers, log levels, jq queries
-    testing.md                 # Test patterns, MockRunner, stubJiraClient, e2e tests
+docs/                   # All documentation (plain markdown, no static-site generator)
+  README.md             # Index pointing at user/operations/dev trees
+  user/                 # End-user guides
+    introduction.md     installation.md     quick-start.md
+    configuration.md    cli-reference.md    tasks.md
+    agents.md           jira-pipeline.md    budget.md
+    scheduling.md       bus-factor.md       troubleshooting.md
+  operations/           # Running Nightshift as a long-lived service
+    daemon.md           systemd-install.md  logs-and-reports.md
+    data-and-backup.md  security.md         release.md
+  dev/                  # Internal / developer guides
+    architecture.md            # Package map, layers, key design constraints
+    run-lifecycle.md           # End-to-end run flow
+    orchestrator.md            # Task plan→implement→review loop
+    agents-internals.md        # CommandRunner, compression, temp-file pattern
+    jira-pipeline.md           # Phase state machine, resume, dependency graph
+    workspace.md               # Clone/branch/push conventions (Jira pipeline)
+    database.md                # Schema, migration system
+    budget-internals.md        # Capacity formula, provider APIs
+    tasks-internals.md         # TaskDefinition, selector scoring
+    state-and-snapshots.md     # RunRecord, staleness, snapshot collector
+    scheduling-internals.md    # Cron wrapper, SkipIfStillRunning
+    reporting.md               # Run reports, summaries, retention
+    logging.md                 # zerolog setup, printf-style API, jq queries
+    bus-factor.md              # HHI, Gini, risk classification
+    testing.md                 # MockRunner, stubJiraClient, e2e patterns
     contributing.md            # Dev setup, git conventions, PR checklist
     debugging.md               # Log locations, common errors + fixes
-    codex-budget-tracking.md   # Codex-specific usage tracking
-    website.md                 # Docusaurus site development
-  implemented/          # Design docs for completed features
-  deprecated/           # Archived docs
-
-website/                # Docusaurus v3 user-facing documentation site
-  docs/                 # User guides: installation, config, cli-reference, budget, scheduling,
-                        # tasks, agents, jira, troubleshooting, etc.
-  package.json          # Node.js deps; deployed to https://nightshift.haplab.com
 
 scripts/
   pre-commit.sh         # Runs gofmt, go vet, go build on staged .go files
 
-.claude/skills/
-  nightshift-release/   # Claude Code skill: cut a release (goreleaser, git tag, GH Actions verify)
-
 .goreleaser.yml         # Builds darwin/linux amd64+arm64; archives as tar.gz; auto-changelog
 Makefile                # Targets: build, test, test-verbose, test-race, coverage, lint, clean,
                         # deps, check, install, install-hooks
-go.mod                  # module github.com/marcus/nightshift; Go 1.24
+go.mod                  # module github.com/cedricfarinazzo/nightshift; Go 1.24
 CHANGELOG.md            # Version history
 SECURITY_AUDIT.md       # Security findings
 ```
@@ -225,8 +217,7 @@ SECURITY_AUDIT.md       # Security findings
 
 ## Critical Integrations (Claude / Codex / Copilot)
 
-- **CLAUDE.md** (this file) is read at runtime by `internal/integrations/claudemd.go` and injected as context into agent prompts. Keep it accurate and up to date.
-- **AGENTS.md** legacy reader (`internal/integrations/agentsmd.go`) gracefully returns nil when the file is absent — no code change needed after removal.
+- **CLAUDE.md** (this file) is injected as context into agent prompts via the `Hint` mechanism in `cmd/nightshift/commands/daemon.go`. Keep it accurate and up to date.
 - **Authentication** — credentials from env vars only:
   - `ANTHROPIC_API_KEY` — Claude
   - `OPENAI_API_KEY` — Codex
@@ -312,6 +303,56 @@ Agents MUST follow these Go conventions:
 
 ---
 
+## Documentation Workflow
+
+Documentation lives in `docs/` as plain markdown, in three tracks:
+
+- `docs/user/` — end-user guides (introduction, installation, quick-start, configuration, CLI reference, tasks, agents, jira-pipeline, budget, scheduling, bus-factor, troubleshooting)
+- `docs/operations/` — running Nightshift as a service (daemon, systemd-install, logs-and-reports, data-and-backup, security, release)
+- `docs/dev/` — internals (architecture, run-lifecycle, orchestrator, agents-internals, jira-pipeline, workspace, database, budget-internals, tasks-internals, state-and-snapshots, scheduling-internals, reporting, logging, bus-factor, testing, contributing, debugging)
+
+Index: `docs/README.md`.
+
+### Reading the docs FIRST when exploring
+
+Before grepping or `Read`-ing source to understand a feature, **read the relevant `docs/dev/*.md` page first**. They are kept in sync with code and contain mermaid diagrams that map the package + state-machine layout faster than reading files. Mapping for common questions:
+
+| Question | Start in |
+|---|---|
+| "How is the project structured?" | `docs/dev/architecture.md` |
+| "How does a task run end-to-end?" | `docs/dev/run-lifecycle.md`, then `docs/dev/orchestrator.md` |
+| "How does the Jira pipeline work?" | `docs/dev/jira-pipeline.md`, then `docs/user/jira-pipeline.md` |
+| "How are prompts built / agents invoked?" | `docs/dev/agents-internals.md` |
+| "How is the workspace managed?" | `docs/dev/workspace.md` |
+| "How is budget enforced?" | `docs/dev/budget-internals.md` |
+| "How does the selector pick tasks?" | `docs/dev/tasks-internals.md` |
+| "How does the scheduler avoid overlap?" | `docs/dev/scheduling-internals.md` |
+| "What's in the database?" | `docs/dev/database.md` |
+| "How do I add a test?" | `docs/dev/testing.md` |
+| "Where does this log go?" | `docs/dev/logging.md`, `docs/operations/logs-and-reports.md` |
+
+When the docs disagree with the code, trust the code AND fix the docs in the same PR.
+
+### Keeping docs in sync when changing code
+
+Documentation is part of every code-changing PR. The rule is **same PR**, not "follow-up PR" — drift starts the moment a docs update is deferred.
+
+For each code change, walk this checklist before requesting review:
+
+- **Behaviour-visible to users** (new flag, changed default, removed command, new config field, new error message): update `docs/user/`. Mandatory.
+- **New / renamed / removed CLI command or flag**: update `docs/user/cli-reference.md` and any `docs/user/*` page that demos it.
+- **New / changed config field**: update `docs/user/configuration.md`; if Jira-related, also `docs/user/jira-pipeline.md`.
+- **New / changed task in the catalog**: update `docs/user/tasks.md` if categories/tiers/intervals change; `docs/dev/tasks-internals.md` if the selector or definition shape changes.
+- **Touched `internal/<pkg>/`**: update `docs/dev/<corresponding-page>.md`. If a mermaid diagram in that page no longer matches the code, regenerate it.
+- **Operational change** (new file path on disk, new PID-file behaviour, new env var, new systemd-relevant detail): update `docs/operations/`.
+- **Schema migration**: bump `docs/dev/database.md` and call it out in `CHANGELOG.md`.
+- **New package or major file**: add a one-line entry to the Project Structure section in this file.
+- **New gotcha discovered while debugging**: add to the `## Gotchas` section in this file. Include the *why* so future-you knows when the workaround can be removed.
+
+If your change makes a doc page obsolete, **delete the page** in the same PR and remove links from `docs/README.md` and any sibling pages that reference it.
+
+CI is not currently enforcing this — reviewers must. PRs that change `internal/` or `cmd/` without touching `docs/` should get a comment asking why.
+
 ## Self-Improvement Loop
 
 Agents MUST follow these rules:
@@ -320,7 +361,7 @@ Agents MUST follow these rules:
 - **Add gotchas as soon as discovered**: add them to the `## Gotchas` section below to avoid repeating the same investigation.
 - **On adding a new package, module, or file**: add it to the Project Structure section above with a one-line description.
 - **Before using any package**: search online for the latest stable version and docs; never assume a cached version is current.
-- **When user-facing docs in `website/docs/` become stale**: update them in the same PR as the code change.
+- **When user-facing docs in `docs/user/` become stale**: update them in the same PR as the code change.
 - **Security findings**: add to `SECURITY_AUDIT.md`.
 - **Agents are encouraged to add notes, new sections, or any content they find useful** directly into this file at any time. If it's worth knowing, put it here. This file is meant to grow over time as institutional knowledge accumulates.
 
@@ -331,7 +372,7 @@ Agents MUST follow these rules:
 - `modernc.org/sqlite` is pure Go — no CGO needed. Do not switch to `mattn/go-sqlite3`.
 - Agent binaries (`claude`, `codex`, `gh`) must be in PATH. Always use the `CommandRunner` interface for testability; never call `exec.Command` directly in agent code.
 - Credentials are **env-var only** — `CredentialManager` never reads from config files or disk.
-- `internal/integrations/agentsmd.go` still exists and looks for `AGENTS.md` at runtime. It returns `nil` if the file is absent — this is intentional and not an error.
+- `internal/integrations/` package does **not exist** — it was removed. Do not re-create it. CLAUDE.md context is passed via Hints in `cmd/nightshift/commands/daemon.go`.
 - `internal/logging.Logger` does NOT use zerolog's chainable API (`.Error().Str().Msg()`). Use `log.Infof(format, args...)` / `log.Errorf(format, args...)` directly. The zerolog chain is internal.
 - `internal/jira.Orchestrator` stores `jiraClient` as an interface (not `*Client`) for testability. `*Client` satisfies the interface implicitly. The `log` field is lazily initialized inside `ProcessTicket` when nil — safe to omit in tests.
 - `NIGHTSHIFT_JIRA_TOKEN` must be set for all e2e tests in `internal/jira/e2e_test.go`. Tests skip automatically when it is absent.
@@ -352,3 +393,10 @@ Agents MUST follow these rules:
 - **Compression import cycle** — `agents` cannot import `config` (config→jira→agents creates a cycle). `CompressConfig` lives in `agents` package; `PromptCompressionConfig` lives in `config` package. `compressionConfigFromApp()` in `cmd/nightshift/commands/helpers.go` bridges them. Do not try to unify these structs.
 - **Compression uses CLI, not API** — `compressViaAgent()` calls the provider's `agent.Execute()`, which itself uses `writePromptFile()`. The compression meta-prompt+content goes through the same temp-file path. Never add direct HTTP/API calls to `compress.go`.
 - **`ValidateTicket` signature** — takes 4 args: `(ctx, agent, ticket, compression *agents.CompressConfig)`. Pass `nil` for compression when not needed (e.g. jira_preview.go).
+- **workDir git validation** — `orchestrator.RunTask()` calls `validateGitRepo(ctx, workDir)` before executing any task. Refuses to run if workDir is not inside a git repo, or if the repo root is `$HOME`. Prevents agents from running `git init` in unintended locations. Injectable via `WithGitValidator()` for tests.
+- **Branch save/restore in RunTask()** — `RunTask()` calls `CurrentBranch()` before executing and uses `defer checkoutBranch()` to restore it on exit (regardless of outcome). Prevents stacked branches when multiple tasks run sequentially. If `CurrentBranch` fails or returns "HEAD" (detached), no restore is attempted.
+- **Prompt split: compressible vs protected** — `ExecuteOptions.Prompt` is the compressible payload (task data only). `PromptPrefix` and `PromptSuffix` are never compressed. All critical instructions (output format, JSON schemas, behavioral rules) MUST go in `PromptSuffix`, not `Prompt`. Putting instructions in `Prompt` risks them being stripped by the compression agent.
+- **PID file is atomic** — `writePidFile()` uses `O_CREATE|O_EXCL` so only one daemon can start even under a race. If a stale PID file exists (process gone), it is removed and retried. Never use `O_TRUNC` for PID files.
+- **SkipIfStillRunning on cron** — `scheduler.go` wraps the cron instance with `cron.SkipIfStillRunning(cron.DiscardLogger)`. If a scheduled run exceeds its interval, the next fire is silently skipped rather than overlapping. This prevents unbounded goroutine growth on slow runs.
+- **`internal/providers` has no Execute/Name/Cost** — the `Provider` interface and its stubs were removed. `providers/` only tracks quota/usage (token counts, request counts). Do not add `Execute()` back; agent invocation belongs in `internal/agents/`.
+- **`handleExecuteResult` in util.go** — all three agents (claude, codex, copilot) share `handleExecuteResult()` for post-run logic. When adding a new agent, use this helper instead of duplicating exit-code/timeout/JSON-extraction logic.

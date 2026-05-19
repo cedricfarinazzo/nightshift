@@ -6,9 +6,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/marcus/nightshift/internal/agents"
-	"github.com/marcus/nightshift/internal/db"
-	"github.com/marcus/nightshift/internal/logging"
+	"github.com/cedricfarinazzo/nightshift/internal/agents"
+	"github.com/cedricfarinazzo/nightshift/internal/db"
+	"github.com/cedricfarinazzo/nightshift/internal/logging"
 )
 
 // jiraDB is a local interface satisfied by *db.DB.
@@ -451,11 +451,18 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 		if planAgent == nil {
 			planAgent = o.implAgent
 		}
+		planWorkDir := ""
+		if ws != nil && len(ws.Repos) > 0 {
+			planWorkDir = ws.Repos[0].Path
+		}
 		planResult, err := planAgent.Execute(ctx, agents.ExecuteOptions{
-			Prompt:      o.buildPlanPrompt(ticket),
-			Timeout:     parseTimeout(planCfg.Timeout, 5*time.Minute),
-			Model:       planCfg.Model,
-			Compression: o.compression,
+			Prompt:       o.buildPlanContent(ticket),
+			PromptPrefix: jiraPlanRolePrefix,
+			PromptSuffix: jiraPlanInstructionsSuffix,
+			WorkDir:      planWorkDir,
+			Timeout:      parseTimeout(planCfg.Timeout, 5*time.Minute),
+			Model:        planCfg.Model,
+			Compression:  o.compression,
 			OnCompress: func(s *agents.CompressStats) {
 				o.log.Infof("ticket %s: plan compress %d→%d chars (-%d%%) via %s", ticket.Key, s.OriginalLen, s.CompressedLen, s.ReductionPct, s.Provider)
 				if o.progressf != nil {
@@ -500,11 +507,13 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 			workDir = ws.Repos[0].Path
 		}
 		implResult, err := o.implAgent.Execute(ctx, agents.ExecuteOptions{
-			Prompt:      o.buildImplementPrompt(ticket, result.Plan, ws),
-			WorkDir:     workDir,
-			Timeout:     timeout,
-			Model:       implCfg.Model,
-			Compression: o.compression,
+			Prompt:       o.buildImplementContent(ticket),
+			PromptPrefix: jiraImplementRolePrefix,
+			PromptSuffix: o.buildImplementSuffix(result.Plan, ws),
+			WorkDir:      workDir,
+			Timeout:      timeout,
+			Model:        implCfg.Model,
+			Compression:  o.compression,
 			OnCompress: func(s *agents.CompressStats) {
 				o.log.Infof("ticket %s: implement compress %d→%d chars (-%d%%) via %s", ticket.Key, s.OriginalLen, s.CompressedLen, s.ReductionPct, s.Provider)
 				if o.progressf != nil {
@@ -819,9 +828,21 @@ func buildCommentsSection(b *strings.Builder, ticket Ticket) {
 }
 
 // buildPlanPrompt constructs the prompt for the plan phase.
-func (o *Orchestrator) buildPlanPrompt(ticket Ticket) string {
+const jiraPlanRolePrefix = "Planning agent. Create implementation plan for ticket.\n\n"
+
+const jiraPlanInstructionsSuffix = `
+## Instructions
+1. Break work into ordered steps
+2. Identify files to create or modify
+3. Note dependencies and risks
+4. Output plan as plain text
+`
+
+// buildPlanContent returns only the compressible ticket data.
+// jiraPlanRolePrefix and jiraPlanInstructionsSuffix are delivered via
+// PromptPrefix/PromptSuffix and never pass through the compressor.
+func (o *Orchestrator) buildPlanContent(ticket Ticket) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "Planning agent. Create implementation plan for ticket.\n\n")
 	buildParentSection(&b, ticket)
 	fmt.Fprintf(&b, "\n## Ticket\nKey: %s\nTitle: %s\n", ticket.Key, ticket.Summary)
 	fmt.Fprintf(&b, "Description:\n%s\n", ticket.Description)
@@ -829,18 +850,19 @@ func (o *Orchestrator) buildPlanPrompt(ticket Ticket) string {
 		fmt.Fprintf(&b, "\nAcceptance Criteria:\n%s\n", ticket.AcceptanceCriteria)
 	}
 	buildCommentsSection(&b, ticket)
-	b.WriteString("\n## Instructions\n")
-	b.WriteString("1. Break work into ordered steps\n")
-	b.WriteString("2. Identify files to create or modify\n")
-	b.WriteString("3. Note dependencies and risks\n")
-	b.WriteString("4. Output plan as plain text\n")
 	return b.String()
 }
 
-// buildImplementPrompt constructs the prompt for the implementation phase.
-func (o *Orchestrator) buildImplementPrompt(ticket Ticket, plan string, ws *Workspace) string {
+func (o *Orchestrator) buildPlanPrompt(ticket Ticket) string {
+	return jiraPlanRolePrefix + o.buildPlanContent(ticket) + jiraPlanInstructionsSuffix
+}
+
+const jiraImplementRolePrefix = "Implementation agent. Implement ticket below.\n\n"
+
+// buildImplementContent returns only the compressible ticket data (description,
+// comments). Plan and workspace paths are in the suffix — never compressed.
+func (o *Orchestrator) buildImplementContent(ticket Ticket) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "Implementation agent. Implement ticket below.\n\n")
 	buildParentSection(&b, ticket)
 	fmt.Fprintf(&b, "\n## Ticket\nKey: %s\nTitle: %s\n", ticket.Key, ticket.Summary)
 	fmt.Fprintf(&b, "Description:\n%s\n", ticket.Description)
@@ -848,6 +870,12 @@ func (o *Orchestrator) buildImplementPrompt(ticket Ticket, plan string, ws *Work
 		fmt.Fprintf(&b, "\nAcceptance Criteria:\n%s\n", ticket.AcceptanceCriteria)
 	}
 	buildCommentsSection(&b, ticket)
+	return b.String()
+}
+
+// buildImplementSuffix returns plan + workspace + operational instructions (never compressed).
+func (o *Orchestrator) buildImplementSuffix(plan string, ws *Workspace) string {
+	var b strings.Builder
 	fmt.Fprintf(&b, "\n## Plan\n%s\n", plan)
 	if ws != nil && len(ws.Repos) > 0 {
 		b.WriteString("\n## Workspace\n")
@@ -866,6 +894,7 @@ func (o *Orchestrator) buildImplementPrompt(ticket Ticket, plan string, ws *Work
 	b.WriteString("4. Do not commit or push — handled separately\n")
 	b.WriteString("5. On ambiguity, make reasonable assumption and document in comment\n")
 	b.WriteString("6. Do NOT stop early — continue until plan implemented, lint passes, tests pass\n")
+	b.WriteString("7. Never run `git init` under any circumstances\n")
 	if ws != nil && len(ws.Repos) > 0 {
 		b.WriteString("\n## Quality Checks (REQUIRED before finishing)\n")
 		b.WriteString("For each repo above, run commands below and fix ALL failures before stopping:\n\n")
@@ -885,6 +914,11 @@ func (o *Orchestrator) buildImplementPrompt(ticket Ticket, plan string, ws *Work
 		b.WriteString("Do not finish until all lint and test commands exit with code 0.\n")
 	}
 	return b.String()
+}
+
+// buildImplementPrompt constructs the full prompt (for tests/callers without compression).
+func (o *Orchestrator) buildImplementPrompt(ticket Ticket, plan string, ws *Workspace) string {
+	return jiraImplementRolePrefix + o.buildImplementContent(ticket) + o.buildImplementSuffix(plan, ws)
 }
 
 // implementation summary so reviewers have full context inline.

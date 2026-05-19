@@ -15,7 +15,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/marcus/nightshift/internal/db"
+	"github.com/cedricfarinazzo/nightshift/internal/db"
 )
 
 // State manages persistent nightshift state.
@@ -289,7 +289,7 @@ func (s *State) ListAssigned() []AssignedTask {
 		var task AssignedTask
 		if err := rows.Scan(&task.TaskID, &task.Project, &task.TaskType, &task.AssignedAt); err != nil {
 			log.Printf("state: scan assigned: %v", err)
-			return tasks
+			continue
 		}
 		tasks = append(tasks, task)
 	}
@@ -338,7 +338,7 @@ func (s *State) GetProjectState(projectPath string) *ProjectState {
 		var last time.Time
 		if err := rows.Scan(&taskType, &last); err != nil {
 			log.Printf("state: scan task history: %v", err)
-			return state
+			continue
 		}
 		state.TaskHistory[taskType] = last
 	}
@@ -483,7 +483,7 @@ func (s *State) GetRunHistory(n int) []RunRecord {
 		var endTime sql.NullTime
 		if err := rows.Scan(&record.ID, &record.StartTime, &endTime, &record.Provider, &record.Project, &tasksJSON, &record.TokensUsed, &record.Status, &record.Error, &record.Branch); err != nil {
 			log.Printf("state: scan run history: %v", err)
-			return result
+			continue
 		}
 		if endTime.Valid {
 			record.EndTime = endTime.Time
@@ -491,7 +491,7 @@ func (s *State) GetRunHistory(n int) []RunRecord {
 		if tasksJSON != "" {
 			if err := json.Unmarshal([]byte(tasksJSON), &record.Tasks); err != nil {
 				log.Printf("state: unmarshal tasks: %v", err)
-				return result
+				continue
 			}
 		}
 		result = append(result, record)
@@ -532,7 +532,7 @@ func (s *State) GetTodayRuns() []RunRecord {
 		var endTime sql.NullTime
 		if err := rows.Scan(&record.ID, &record.StartTime, &endTime, &record.Provider, &record.Project, &tasksJSON, &record.TokensUsed, &record.Status, &record.Error, &record.Branch); err != nil {
 			log.Printf("state: scan today runs: %v", err)
-			return result
+			continue
 		}
 		if endTime.Valid {
 			record.EndTime = endTime.Time
@@ -540,7 +540,7 @@ func (s *State) GetTodayRuns() []RunRecord {
 		if tasksJSON != "" {
 			if err := json.Unmarshal([]byte(tasksJSON), &record.Tasks); err != nil {
 				log.Printf("state: unmarshal tasks: %v", err)
-				return result
+				continue
 			}
 		}
 		result = append(result, record)

@@ -119,8 +119,9 @@ func (a *CopilotAgent) Execute(ctx context.Context, opts ExecuteOptions) (*Execu
 	// Write prompt (optionally compressed) + file context to a temp file.
 	// Pass a short directive via -p to avoid OS ARG_MAX limits.
 	var promptDirective string
+	var compressStats *CompressStats
 	if opts.Prompt != "" {
-		promptPath, cleanup, err := writePromptFile(ctx, opts)
+		promptPath, cleanup, cs, err := writePromptFile(ctx, opts)
 		if err != nil {
 			return &ExecuteResult{
 				Error:    fmt.Sprintf("writing prompt file: %v", err),
@@ -128,6 +129,7 @@ func (a *CopilotAgent) Execute(ctx context.Context, opts ExecuteOptions) (*Execu
 			}, err
 		}
 		defer cleanup()
+		compressStats = cs
 		promptDirective = fmt.Sprintf("Read and follow the task instructions in file: %s", promptPath)
 	}
 
@@ -155,35 +157,7 @@ func (a *CopilotAgent) Execute(ctx context.Context, opts ExecuteOptions) (*Execu
 
 	// Run command
 	stdout, stderr, exitCode, err := a.runner.Run(ctx, a.binaryPath, args, opts.WorkDir, "")
-
-	result := &ExecuteResult{
-		Output:   stdout,
-		ExitCode: exitCode,
-		Duration: time.Since(start),
-	}
-
-	// Check for context timeout
-	if ctx.Err() == context.DeadlineExceeded {
-		result.Error = fmt.Sprintf("timeout after %v", timeout)
-		result.ExitCode = -1
-		return result, ctx.Err()
-	}
-
-	// Check for other errors
-	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			result.ExitCode = exitErr.ExitCode()
-			result.Error = stderr
-		} else {
-			result.Error = err.Error()
-		}
-		return result, err
-	}
-
-	// Try to parse JSON output
-	result.JSON = a.extractJSON([]byte(stdout))
-
-	return result, nil
+	return handleExecuteResult(ctx, stdout, stderr, exitCode, err, timeout, start, compressStats, a.extractJSON)
 }
 
 // ExecuteWithFiles runs gh copilot with file context included.

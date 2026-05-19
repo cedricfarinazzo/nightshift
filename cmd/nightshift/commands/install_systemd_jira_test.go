@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/marcus/nightshift/internal/config"
+	"github.com/cedricfarinazzo/nightshift/internal/config"
 )
 
 func fakeExecCommand(_ string, _ ...string) error {

@@ -118,8 +118,9 @@ func (a *CodexAgent) Execute(ctx context.Context, opts ExecuteOptions) (*Execute
 
 	// Write prompt (optionally compressed) + file context to a temp file.
 	// Pass a short directive as the arg to avoid OS ARG_MAX limits.
+	var compressStats *CompressStats
 	if opts.Prompt != "" {
-		promptPath, cleanup, err := writePromptFile(ctx, opts)
+		promptPath, cleanup, cs, err := writePromptFile(ctx, opts)
 		if err != nil {
 			return &ExecuteResult{
 				Error:    fmt.Sprintf("writing prompt file: %v", err),
@@ -127,49 +128,13 @@ func (a *CodexAgent) Execute(ctx context.Context, opts ExecuteOptions) (*Execute
 			}, err
 		}
 		defer cleanup()
+		compressStats = cs
 		args = append(args, fmt.Sprintf("Read and follow the task instructions in file: %s", promptPath))
 	}
 
 	// Run command
 	stdout, stderr, exitCode, err := a.runner.Run(ctx, a.binaryPath, args, opts.WorkDir, "")
-
-	result := &ExecuteResult{
-		Output:   stdout,
-		ExitCode: exitCode,
-		Duration: time.Since(start),
-	}
-
-	// Check for context timeout
-	if ctx.Err() == context.DeadlineExceeded {
-		result.Error = fmt.Sprintf("timeout after %v", timeout)
-		if stderr != "" {
-			result.Error = fmt.Sprintf("timeout after %v; stderr: %s", timeout, truncate(stderr, 2000))
-		}
-		if stdout != "" {
-			result.Output = stdout
-		}
-		result.ExitCode = -1
-		return result, ctx.Err()
-	}
-
-	// Check for other errors
-	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			result.ExitCode = exitErr.ExitCode()
-			result.Error = stderr
-		} else {
-			result.Error = err.Error()
-			if stderr != "" {
-				result.Error = fmt.Sprintf("%s; stderr: %s", err.Error(), truncate(stderr, 2000))
-			}
-		}
-		return result, err
-	}
-
-	// Try to parse JSON output
-	result.JSON = a.extractJSON([]byte(stdout))
-
-	return result, nil
+	return handleExecuteResult(ctx, stdout, stderr, exitCode, err, timeout, start, compressStats, a.extractJSON)
 }
 
 // ExecuteWithFiles runs codex with file context included.
@@ -181,9 +146,6 @@ func (a *CodexAgent) ExecuteWithFiles(ctx context.Context, prompt string, files 
 	})
 }
 
-func (a *CodexAgent) buildFileContext(files []string) string {
-	return buildFileContext(files)
-}
 
 func (a *CodexAgent) extractJSON(output []byte) []byte {
 	return extractJSON(output)

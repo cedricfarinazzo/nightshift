@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/marcus/nightshift/internal/db"
-	"github.com/marcus/nightshift/internal/reporting"
+	"github.com/cedricfarinazzo/nightshift/internal/db"
+	"github.com/cedricfarinazzo/nightshift/internal/reporting"
 )
 
 // openTestDB creates a temp SQLite database with full migrations applied.

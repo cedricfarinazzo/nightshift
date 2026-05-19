@@ -46,9 +46,6 @@ debug
 .sidecar/
 .todos/
 .nightshift-plan
-
-# Website
-website/node_modules/
-website/build/
-website/.docusaurus/
-website/.cache-loader/
+.continues-handoff.md
+.plan
+reports/

@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/marcus/nightshift/internal/agents"
-	"github.com/marcus/nightshift/internal/db"
+	"github.com/cedricfarinazzo/nightshift/internal/agents"
+	"github.com/cedricfarinazzo/nightshift/internal/db"
 )
 
 // stubJiraClient implements the jiraClient interface for testing.

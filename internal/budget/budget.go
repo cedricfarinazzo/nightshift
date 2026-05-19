@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/marcus/nightshift/internal/config"
+	"github.com/cedricfarinazzo/nightshift/internal/config"
 )
 
 // UsageProvider is the interface for getting usage data from a provider.

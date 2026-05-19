@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/marcus/nightshift/internal/budget"
-	"github.com/marcus/nightshift/internal/jira"
+	"github.com/cedricfarinazzo/nightshift/internal/budget"
+	"github.com/cedricfarinazzo/nightshift/internal/jira"
 )
 
 // ── renderJiraPreviewText ─────────────────────────────────────────────────────
