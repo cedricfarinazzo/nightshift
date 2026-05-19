@@ -205,9 +205,6 @@ docs/                   # All documentation (plain markdown, no static-site gene
 scripts/
   pre-commit.sh         # Runs gofmt, go vet, go build on staged .go files
 
-.claude/skills/
-  nightshift-release/   # Claude Code skill: cut a release (goreleaser, git tag, GH Actions verify)
-
 .goreleaser.yml         # Builds darwin/linux amd64+arm64; archives as tar.gz; auto-changelog
 Makefile                # Targets: build, test, test-verbose, test-race, coverage, lint, clean,
                         # deps, check, install, install-hooks

@@ -73,6 +73,3 @@ Homebrew formula at `marcus/homebrew-tap` is manually maintained (builds from so
 | Release missing artifacts | `gh release delete vX.Y.Z`, `git push --delete origin vX.Y.Z && git tag -d vX.Y.Z`, re-tag and push |
 | Tap not updated | `HOMEBREW_TAP_TOKEN` repo secret missing or expired |
 
-## Skill
-
-There's also a Claude Code skill at `.claude/skills/nightshift-release/SKILL.md` that walks through this same flow interactively.
