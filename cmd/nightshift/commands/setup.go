@@ -229,8 +229,7 @@ type setupModel struct {
 	taskItems          []taskItem
 	taskErr            string
 	preset             setup.Preset
-	windowWidth        int
-	windowHeight       int
+	windowHeight int
 
 	scheduleMode      string
 	scheduleCursor    int
@@ -380,8 +379,8 @@ func (m *setupModel) calculateTaskViewportHeight() int {
 		}
 		return h
 	}
-	// Fallback to original fixed height if window size not yet known
-	return 15
+	// Fallback before first WindowSizeMsg — conservative to avoid initial overflow
+	return 10
 }
 
 var (
@@ -681,7 +680,6 @@ func (m *setupModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.codexModelIdx = modelIndex(codexModels, m.cfg.Providers.Codex.Model)
 		}
 	case tea.WindowSizeMsg:
-		m.windowWidth = msg.Width
 		m.windowHeight = msg.Height
 	}
 
