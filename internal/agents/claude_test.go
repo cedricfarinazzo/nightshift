@@ -362,8 +362,6 @@ func TestBuildFileContext(t *testing.T) {
 }
 
 func TestClaudeAgent_extractJSON(t *testing.T) {
-	agent := NewClaudeAgent()
-
 	tests := []struct {
 		name     string
 		input    string
@@ -381,7 +379,7 @@ func TestClaudeAgent_extractJSON(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := agent.extractJSON([]byte(tt.input))
+			result := extractJSON([]byte(tt.input))
 			if tt.wantJSON && result == nil {
 				t.Error("expected JSON, got nil")
 			}

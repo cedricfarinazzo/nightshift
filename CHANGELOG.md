@@ -4,6 +4,15 @@ All notable changes to nightshift are documented in this file.
 
 ## [Unreleased]
 
+### Refactoring
+
+- **agents: deduplicate option constructors (VC-92)** — extracted shared `agentConfig` struct and
+  unified `Option` type into `options.go`. All three agents now use `WithBinaryPath`, `WithDefaultTimeout`,
+  `WithRunner`, `WithModel`, `WithEffort`, and `WithBypassPermissions`. Removed per-agent `extractJSON`
+  method wrappers; `handleExecuteResult` calls `extractJSON` directly. Deprecated type aliases
+  (`ClaudeOption`, `CodexOption`, `CopilotOption`) and function var aliases (`WithCodexRunner`, etc.)
+  kept for one-release backward compatibility.
+
 ### Breaking Changes
 
 - **Removed SMTP email reporting** — `reporting.email` config field and all `NIGHTSHIFT_SMTP_*` env vars

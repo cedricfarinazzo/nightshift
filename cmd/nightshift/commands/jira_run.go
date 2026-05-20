@@ -501,45 +501,7 @@ func createJiraAgent(cfg *config.Config, phase jira.PhaseConfig) (agents.Agent, 
 
 	switch provider {
 	case "codex":
-		var extra []agents.CodexOption
-		if m := phase.Model; m != "" {
-			extra = append(extra, agents.WithCodexModel(m))
-		}
-		if phase.ReasoningEffort != "" {
-			extra = append(extra, agents.WithCodexEffort(phase.ReasoningEffort))
-		}
-		if timeout > 0 {
-			extra = append(extra, agents.WithCodexDefaultTimeout(timeout))
-		}
-		// Jira always requires headless non-interactive execution.
-		extra = append(extra, agents.WithDangerouslyBypassApprovalsAndSandbox(true))
-		a := newCodexAgentFromConfig(cfg, extra...)
-		if !a.Available() {
-			return nil, fmt.Errorf("codex CLI not found in PATH")
-		}
-		return a, nil
-
-	case "copilot":
-		var extra []agents.CopilotOption
-		if m := phase.Model; m != "" {
-			extra = append(extra, agents.WithCopilotModel(m))
-		}
-		if phase.ReasoningEffort != "" {
-			extra = append(extra, agents.WithCopilotEffort(phase.ReasoningEffort))
-		}
-		if timeout > 0 {
-			extra = append(extra, agents.WithCopilotDefaultTimeout(timeout))
-		}
-		// Jira always requires headless non-interactive execution.
-		extra = append(extra, agents.WithCopilotDangerouslySkipPermissions(true))
-		a := newCopilotAgentFromConfig(cfg, "", extra...)
-		if !a.Available() {
-			return nil, fmt.Errorf("copilot CLI not found in PATH")
-		}
-		return a, nil
-
-	default: // "claude" or unrecognized
-		var extra []agents.ClaudeOption
+		var extra []agents.Option
 		if m := phase.Model; m != "" {
 			extra = append(extra, agents.WithModel(m))
 		}
@@ -550,7 +512,45 @@ func createJiraAgent(cfg *config.Config, phase jira.PhaseConfig) (agents.Agent, 
 			extra = append(extra, agents.WithDefaultTimeout(timeout))
 		}
 		// Jira always requires headless non-interactive execution.
-		extra = append(extra, agents.WithDangerouslySkipPermissions(true))
+		extra = append(extra, agents.WithBypassPermissions(true))
+		a := newCodexAgentFromConfig(cfg, extra...)
+		if !a.Available() {
+			return nil, fmt.Errorf("codex CLI not found in PATH")
+		}
+		return a, nil
+
+	case "copilot":
+		var extra []agents.Option
+		if m := phase.Model; m != "" {
+			extra = append(extra, agents.WithModel(m))
+		}
+		if phase.ReasoningEffort != "" {
+			extra = append(extra, agents.WithEffort(phase.ReasoningEffort))
+		}
+		if timeout > 0 {
+			extra = append(extra, agents.WithDefaultTimeout(timeout))
+		}
+		// Jira always requires headless non-interactive execution.
+		extra = append(extra, agents.WithBypassPermissions(true))
+		a := newCopilotAgentFromConfig(cfg, "", extra...)
+		if !a.Available() {
+			return nil, fmt.Errorf("copilot CLI not found in PATH")
+		}
+		return a, nil
+
+	default: // "claude" or unrecognized
+		var extra []agents.Option
+		if m := phase.Model; m != "" {
+			extra = append(extra, agents.WithModel(m))
+		}
+		if phase.ReasoningEffort != "" {
+			extra = append(extra, agents.WithEffort(phase.ReasoningEffort))
+		}
+		if timeout > 0 {
+			extra = append(extra, agents.WithDefaultTimeout(timeout))
+		}
+		// Jira always requires headless non-interactive execution.
+		extra = append(extra, agents.WithBypassPermissions(true))
 		a := newClaudeAgentFromConfig(cfg, extra...)
 		if !a.Available() {
 			return nil, fmt.Errorf("claude CLI not found in PATH")

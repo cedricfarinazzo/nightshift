@@ -22,68 +22,21 @@ import (
 // - Standalone: npm install -g @github/copilot or curl script
 // - Usage: copilot -p "<prompt>" --no-ask-user --silent
 type CopilotAgent struct {
-	binaryPath           string        // Path to binary: "gh" or "copilot" (default: "gh")
-	dangerouslySkipPerms bool          // Pass --allow-all-tools --allow-all-urls
-	model                string        // Default model to use
-	effort               string        // Default reasoning effort
-	timeout              time.Duration // Default timeout
-	runner               CommandRunner // Command executor (for testing)
-}
-
-// CopilotOption configures a CopilotAgent.
-type CopilotOption func(*CopilotAgent)
-
-// WithCopilotBinaryPath sets a custom path to the copilot binary ("gh" or "copilot").
-func WithCopilotBinaryPath(path string) CopilotOption {
-	return func(a *CopilotAgent) {
-		a.binaryPath = path
-	}
-}
-
-// WithCopilotDangerouslySkipPermissions sets whether to pass --allow-all-tools and --allow-all-urls.
-func WithCopilotDangerouslySkipPermissions(enabled bool) CopilotOption {
-	return func(a *CopilotAgent) {
-		a.dangerouslySkipPerms = enabled
-	}
-}
-
-// WithCopilotDefaultTimeout sets the default execution timeout.
-func WithCopilotDefaultTimeout(d time.Duration) CopilotOption {
-	return func(a *CopilotAgent) {
-		a.timeout = d
-	}
-}
-
-// WithCopilotModel sets the default model to use.
-func WithCopilotModel(model string) CopilotOption {
-	return func(a *CopilotAgent) {
-		a.model = model
-	}
-}
-
-// WithCopilotEffort sets the default reasoning effort level.
-func WithCopilotEffort(effort string) CopilotOption {
-	return func(a *CopilotAgent) {
-		a.effort = effort
-	}
-}
-
-// WithCopilotRunner sets a custom command runner (for testing).
-func WithCopilotRunner(r CommandRunner) CopilotOption {
-	return func(a *CopilotAgent) {
-		a.runner = r
-	}
+	agentConfig
 }
 
 // NewCopilotAgent creates a GitHub Copilot CLI agent.
-func NewCopilotAgent(opts ...CopilotOption) *CopilotAgent {
+func NewCopilotAgent(opts ...Option) *CopilotAgent {
 	a := &CopilotAgent{
-		binaryPath: "gh",
-		timeout:    DefaultTimeout,
-		runner:     &ExecRunner{},
+		agentConfig: agentConfig{
+			binaryPath:        "gh",
+			timeout:           DefaultTimeout,
+			runner:            &ExecRunner{},
+			bypassPermissions: false,
+		},
 	}
 	for _, opt := range opts {
-		opt(a)
+		opt(&a.agentConfig)
 	}
 	return a
 }
@@ -151,18 +104,15 @@ func (a *CopilotAgent) Execute(ctx context.Context, opts ExecuteOptions) (*Execu
 		args = append(args, "--effort", effort)
 	}
 
-	if a.dangerouslySkipPerms {
+	if a.bypassPermissions {
 		args = append(args, "--allow-all-tools", "--allow-all-urls")
 	}
 
 	// Run command
 	stdout, stderr, exitCode, err := a.runner.Run(ctx, a.binaryPath, args, opts.WorkDir, "")
-	return handleExecuteResult(ctx, stdout, stderr, exitCode, err, timeout, start, compressStats, a.extractJSON)
+	return handleExecuteResult(ctx, stdout, stderr, exitCode, err, timeout, start, compressStats)
 }
 
-func (a *CopilotAgent) extractJSON(output []byte) []byte {
-	return extractJSON(output)
-}
 
 // Available checks if the gh binary is available in PATH and copilot extension is installed.
 func (a *CopilotAgent) Available() bool {

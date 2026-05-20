@@ -85,17 +85,11 @@ func compressViaAgent(ctx context.Context, cfg *CompressConfig, prompt string) (
 	var agent Agent
 	switch strings.ToLower(cfg.Provider) {
 	case "claude":
-		agent = NewClaudeAgent(
-			WithDangerouslySkipPermissions(true),
-		)
+		agent = NewClaudeAgent(WithBypassPermissions(true))
 	case "codex":
-		agent = NewCodexAgent(
-			WithDangerouslyBypassApprovalsAndSandbox(true),
-		)
+		agent = NewCodexAgent(WithBypassPermissions(true))
 	case "copilot":
-		agent = NewCopilotAgent(
-			WithCopilotDangerouslySkipPermissions(true),
-		)
+		agent = NewCopilotAgent(WithBypassPermissions(true))
 	default:
 		return "", fmt.Errorf("unsupported compression provider: %s", cfg.Provider)
 	}
