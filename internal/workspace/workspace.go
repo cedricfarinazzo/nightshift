@@ -21,8 +21,11 @@ type Config struct {
 
 // RepoConfig defines a repository to clone for each workspace.
 type RepoConfig struct {
-	URL  string
-	Name string // defaults to repo basename without .git
+	URL     string
+	Name    string   // defaults to repo basename without .git
+	Tasks   []string // allowed task types; nil = all enabled
+	Pattern string   // path glob pattern
+	Exclude []string // paths to exclude
 }
 
 // Workspace is an isolated working directory created for a single run.
@@ -34,9 +37,12 @@ type Workspace struct {
 
 // RepoWorkspace holds the state of one cloned repository inside a Workspace.
 type RepoWorkspace struct {
-	Name string
-	Path string
-	URL  string
+	Name    string
+	Path    string
+	URL     string
+	Tasks   []string // per-repo allowed task types; nil = all enabled
+	Pattern string
+	Exclude []string
 }
 
 // workspaceMeta is stored as .nightshift-workspace.json inside each workspace dir.
@@ -60,6 +66,14 @@ var gitExecFn = func(ctx context.Context, dir string, args ...string) (string, e
 		return "", fmt.Errorf("git %s: %w", sub, err)
 	}
 	return trimmed, nil
+}
+
+// SetGitExecFn replaces the git executor used by SetupWorkspace. Returns the old
+// function so tests can restore it via defer. Intended for testing only.
+func SetGitExecFn(fn func(context.Context, string, ...string) (string, error)) func(context.Context, string, ...string) (string, error) {
+	old := gitExecFn
+	gitExecFn = fn
+	return old
 }
 
 // SetupWorkspace creates a fresh isolated workspace for runID.
@@ -116,7 +130,7 @@ func SetupWorkspace(ctx context.Context, cfg Config, runID string) (*Workspace, 
 			return nil, fmt.Errorf("write metadata for %s: %w", name, err)
 		}
 
-		repos = append(repos, RepoWorkspace{Name: name, Path: wsPath, URL: r.URL})
+		repos = append(repos, RepoWorkspace{Name: name, Path: wsPath, URL: r.URL, Tasks: r.Tasks, Pattern: r.Pattern, Exclude: r.Exclude})
 	}
 
 	return &Workspace{

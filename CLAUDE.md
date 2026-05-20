@@ -177,7 +177,8 @@ internal/
     workspace.go        # Config/RepoConfig/Workspace/RepoWorkspace types; SetupWorkspace() clones
                         # repos into <root>/<name>_<runID>/, writes .nightshift-workspace.json;
                         # CleanupStaleWorkspaces() removes dirs older than TTLDays (default 7);
-                        # ValidateConfig() enforces SSH URLs; gitExecFn var injectable for tests
+                        # ValidateConfig() enforces SSH URLs; gitExecFn var injectable via SetGitExecFn();
+                        # RepoConfig/RepoWorkspace carry Tasks/Pattern/Exclude for per-repo config
 
 docs/                   # All documentation (plain markdown, no static-site generator)
   README.md             # Index pointing at user/operations/dev trees
@@ -411,3 +412,5 @@ Agents MUST follow these rules:
 - **Workspace state key** — in workspace mode, the repo clone path (not the configured repo name) is used as the state key for cooldown/staleness tracking. This means each fresh clone appears "new" to the staleness tracker, which is intentional: workspace runs always pick the highest-priority tasks.
 - **Workspace clone uses `.` as target** — `git clone <url> .` clones into the already-created `<root>/<name>_<runID>/` directory. The directory must exist and be empty before the clone.
 - **`CleanupStaleWorkspaces` walks dir contents for mtime** — on Linux, git operations update file mtimes inside a directory but not the directory entry's own mtime. `CleanupStaleWorkspaces` uses `filepath.WalkDir` to find the newest mtime across all files/subdirs inside each workspace. The directory entry mtime alone is unreliable and was the source of VC-83 (active workspaces deleted early). When writing tests for this, remember that `os.WriteFile` inside a dir updates the dir's own mtime — re-apply `os.Chtimes` on the dir after writing files if you need the dir entry to appear old.
+- **Daemon workspace mode (VC-87)** — when `workspace.root` is set, `runScheduledTasks` routes to `runScheduledWorkspacedTasks` instead of the project-path loop. Both `nightshift run` and daemon share `runRepoTasks()` for per-repo task execution. State key is always `rw.Name` (not `rw.Path`) in workspace mode. First daemon run after upgrading from a pre-VC-87 release will re-process all workspace repos once (old cooldowns were keyed on paths, new ones on names — safe, one extra run).
+- **`runRepoTasks` allowedTasks filter** — when `workspace.repos[*].tasks` is set, `runRepoTasks` filters selected tasks to only those types before execution. Empty/nil means no filter. Filter applied after selector, so cooldown/staleness scoring still runs on all tasks but only matching types are executed.

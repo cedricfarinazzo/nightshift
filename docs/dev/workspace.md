@@ -107,3 +107,34 @@ For a true clean slate, move the ticket back to TODO and let `CleanupStaleWorksp
 ## Testability
 
 `workspace_test.go` uses a temp dir + a stub `git` executable wrapper. The `Run` function for git commands is a package-level var; substitute in tests.
+
+---
+
+## Task-isolation workspace (`internal/workspace`)
+
+**Note**: This is a separate workspace system from the Jira pipeline workspace described above.
+
+`internal/workspace` manages clone-based isolated working directories for task runs configured via `workspace.root` + `workspace.repos` in the YAML config.
+
+### Daemon workspace mode (VC-87)
+
+When `workspace.root` is set, both `nightshift run` **and** `nightshift daemon` clone repos into fresh workspaces before executing tasks:
+
+- `nightshift run` → `workspacedRun()` in `cmd/nightshift/commands/run.go`
+- `nightshift daemon` → `runScheduledWorkspacedTasks()` in `cmd/nightshift/commands/daemon.go`
+
+Both paths share `runRepoTasks()` for the per-repo task execution loop.
+
+### State key
+
+In workspace mode, the **repo name** (`workspace.repos[*].name`) is used as the state key for cooldown and staleness tracking — not the UUID-suffixed clone path. This ensures cooldowns persist across runs even though each run creates a fresh clone directory.
+
+This applies consistently in both `nightshift run` and `nightshift daemon`.
+
+### Per-repo task filter
+
+`workspace.repos[*].tasks` lists allowed task types for that repo. When set, `runRepoTasks` filters out tasks not in the list before execution. Empty/nil means no filter (all enabled tasks are eligible).
+
+### Exported test helper
+
+`workspace.SetGitExecFn(fn)` replaces the internal git executor and returns the previous function for `defer`-based restoration. Used in `cmd/nightshift/commands/daemon_test.go` to avoid real git clones in tests.

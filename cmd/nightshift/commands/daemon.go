@@ -309,6 +309,11 @@ func runScheduledTasks(ctx context.Context, cfg *config.Config, database *db.DB,
 
 	report := newRunReport(time.Now())
 
+	// Workspace mode: clone repos and run tasks in isolation.
+	if cfg.Workspace.Root != "" && len(cfg.Workspace.Repos) > 0 {
+		return runScheduledWorkspacedTasks(ctx, cfg, database, log, st, budgetMgr, report)
+	}
+
 	// Resolve projects
 	projects, err := resolveProjects(cfg, "")
 	if err != nil {
@@ -531,6 +536,117 @@ func runScheduledTasks(ctx context.Context, cfg *config.Config, database *db.DB,
 		"completed": tasksCompleted,
 		"failed":    tasksFailed,
 		"projects":  len(projects),
+	})
+
+	if report != nil {
+		report.finalize(cfg, log)
+	}
+
+	return nil
+}
+
+// runScheduledWorkspacedTasks is the daemon counterpart of workspacedRun.
+// It clones each configured repo into a fresh workspace and runs tasks in isolation,
+// using the repo Name as the state key for cooldown tracking.
+func runScheduledWorkspacedTasks(
+	ctx context.Context,
+	cfg *config.Config,
+	_ *db.DB,
+	log *logging.Logger,
+	st *state.State,
+	budgetMgr *budget.Manager,
+	report *runReport,
+) error {
+	start := time.Now()
+	log.Info("workspace scheduled run starting")
+
+	runID := newRunID()
+
+	// Clone-timeout: give 5 min for workspace setup, same as workspacedRun.
+	cloneCtx, cloneCancel := context.WithTimeout(ctx, 5*time.Minute)
+	ws, err := workspace.SetupWorkspace(cloneCtx, workspaceConfigFromApp(cfg), runID)
+	cloneCancel()
+	if err != nil {
+		log.Errorf("setup workspace: %v", err)
+		return fmt.Errorf("setup workspace: %w", err)
+	}
+
+	choice, err := selectProvider(cfg, budgetMgr, log, false)
+	if err != nil {
+		log.Infof("no provider available: %v", err)
+		return nil
+	}
+
+	orch := orchestrator.New(
+		orchestrator.WithAgent(choice.agent),
+		orchestrator.WithConfig(orchestrator.Config{
+			MaxIterations: 3,
+			AgentTimeout:  daemonTimeoutFlag,
+			Compression:   compressionConfigFromApp(cfg),
+		}),
+		orchestrator.WithLogger(logging.Component("orchestrator")),
+	)
+
+	maxTasks := cfg.Schedule.MaxTasks
+	if maxTasks <= 0 {
+		maxTasks = 5
+	}
+
+	selector := tasks.NewSelector(cfg, st)
+
+	var tasksRun, tasksCompleted, tasksFailed int
+	projectStart := time.Now()
+
+	for _, rw := range ws.Repos {
+		select {
+		case <-ctx.Done():
+			log.Info("workspace run cancelled")
+			return ctx.Err()
+		default:
+		}
+
+		// Use repo name as state key so cooldowns are stable across run IDs.
+		if st.WasProcessedToday(rw.Name) {
+			log.Debugf("skip workspace repo %s (processed today)", rw.Name)
+			continue
+		}
+
+		baseBranch, _ := orchestrator.CurrentBranch(ctx, rw.Path)
+
+		log.InfoCtx("processing workspace repo", map[string]any{
+			"repo":     rw.Name,
+			"path":     rw.Path,
+			"provider": choice.name,
+		})
+
+		run, ok, fail := runRepoTasks(ctx, repoTasksParams{
+			cfg:          cfg,
+			st:           st,
+			selector:     selector,
+			orch:         orch,
+			choice:       choice,
+			repoPath:     rw.Path,
+			stateKey:     rw.Name,
+			allowedTasks: rw.Tasks,
+			maxTasks:     maxTasks,
+			branch:       baseBranch,
+			report:       report,
+			log:          log,
+			projectStart: projectStart,
+			verbose:      false,
+		})
+		tasksRun += run
+		tasksCompleted += ok
+		tasksFailed += fail
+	}
+
+	duration := time.Since(start)
+	log.InfoCtx("workspace scheduled run complete", map[string]any{
+		"duration":  duration.String(),
+		"tasks_run": tasksRun,
+		"completed": tasksCompleted,
+		"failed":    tasksFailed,
+		"run_id":    runID,
 	})
 
 	if report != nil {

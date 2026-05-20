@@ -40,8 +40,11 @@ type WorkspaceConfig struct {
 
 // WorkspaceRepoConfig defines one repository to clone per workspace run.
 type WorkspaceRepoConfig struct {
-	URL  string `mapstructure:"url"`
-	Name string `mapstructure:"name"` // optional; defaults to repo basename without .git
+	URL     string   `mapstructure:"url"`
+	Name    string   `mapstructure:"name"`    // optional; defaults to repo basename without .git
+	Tasks   []string `mapstructure:"tasks"`   // allowed task types for this repo; nil = all enabled
+	Pattern string   `mapstructure:"pattern"` // path glob pattern for discovery
+	Exclude []string `mapstructure:"exclude"` // paths to exclude
 }
 
 // PromptCompressionConfig controls LLM-based prompt compression before agent execution.
