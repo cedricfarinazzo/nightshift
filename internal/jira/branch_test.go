@@ -29,19 +29,25 @@ func TestBranchName(t *testing.T) {
 func TestCommitMessage(t *testing.T) {
 	tests := []struct {
 		ticketKey   string
+		issueType   string
 		scope       string
 		description string
 		want        string
 	}{
-		{"VC-7", "api", "add login endpoint", "feat(api): VC-7: add login endpoint"},
-		{"VC-7", "", "add login endpoint", "feat: VC-7: add login endpoint"},
-		{"PROJ-123", "auth", "implement OAuth", "feat(auth): PROJ-123: implement OAuth"},
+		{"VC-7", "Story", "api", "add login endpoint", "feat(api): VC-7: add login endpoint"},
+		{"VC-7", "Story", "", "add login endpoint", "feat: VC-7: add login endpoint"},
+		{"PROJ-123", "Story", "auth", "implement OAuth", "feat(auth): PROJ-123: implement OAuth"},
+		{"VC-42", "Bug", "", "fix nil pointer", "fix: VC-42: fix nil pointer"},
+		{"VC-42", "Bug", "api", "fix nil pointer", "fix(api): VC-42: fix nil pointer"},
+		{"VC-42", "bug", "", "case insensitive", "fix: VC-42: case insensitive"},
+		{"VC-10", "Chore", "", "update deps", "chore: VC-10: update deps"},
+		{"VC-10", "", "", "unknown type defaults", "feat: VC-10: unknown type defaults"},
 	}
 	for _, tt := range tests {
-		got := CommitMessage(tt.ticketKey, tt.scope, tt.description)
+		got := CommitMessage(tt.ticketKey, tt.issueType, tt.scope, tt.description)
 		if got != tt.want {
-			t.Errorf("CommitMessage(%q, %q, %q) = %q, want %q",
-				tt.ticketKey, tt.scope, tt.description, got, tt.want)
+			t.Errorf("CommitMessage(%q, %q, %q, %q) = %q, want %q",
+				tt.ticketKey, tt.issueType, tt.scope, tt.description, got, tt.want)
 		}
 	}
 }
@@ -49,18 +55,20 @@ func TestCommitMessage(t *testing.T) {
 func TestPRTitleConventional(t *testing.T) {
 	tests := []struct {
 		ticketKey   string
+		issueType   string
 		scope       string
 		description string
 		want        string
 	}{
-		{"VC-7", "api", "add workspace support", "feat(api): VC-7: add workspace support"},
-		{"VC-7", "", "add workspace support", "feat: VC-7: add workspace support"},
+		{"VC-7", "Story", "api", "add workspace support", "feat(api): VC-7: add workspace support"},
+		{"VC-7", "Story", "", "add workspace support", "feat: VC-7: add workspace support"},
+		{"VC-7", "Bug", "", "fix crash", "fix: VC-7: fix crash"},
 	}
 	for _, tt := range tests {
-		got := PRTitle(tt.ticketKey, tt.scope, tt.description)
+		got := PRTitle(tt.ticketKey, tt.issueType, tt.scope, tt.description)
 		if got != tt.want {
-			t.Errorf("PRTitle(%q, %q, %q) = %q, want %q",
-				tt.ticketKey, tt.scope, tt.description, got, tt.want)
+			t.Errorf("PRTitle(%q, %q, %q, %q) = %q, want %q",
+				tt.ticketKey, tt.issueType, tt.scope, tt.description, got, tt.want)
 		}
 	}
 }

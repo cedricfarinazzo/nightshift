@@ -67,7 +67,7 @@ E.g. `feature/VC-42`. Always rooted at `feature/`.
 
 ## Commit Message
 
-`CommitMessage(ticket, summary)`:
+`CommitMessage(ticketKey, issueType, scope, description)`:
 
 ```
 <type>(<scope>): <summary>

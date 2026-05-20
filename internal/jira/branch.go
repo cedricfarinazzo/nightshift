@@ -14,18 +14,33 @@ func BranchName(ticketKey string) string {
 	return "feature/" + ticketKey
 }
 
-// CommitMessage formats a conventional commit message for a Jira ticket.
-// If scope is empty the format is "feat: ticketKey: description".
-func CommitMessage(ticketKey, scope, description string) string {
-	if scope != "" {
-		return fmt.Sprintf("feat(%s): %s: %s", scope, ticketKey, description)
+// issueTypeToCC maps a Jira issue type to a Conventional Commits prefix.
+// Matching is case-insensitive; unknown types default to "feat".
+func issueTypeToCC(issueType string) string {
+	switch strings.ToLower(issueType) {
+	case "bug":
+		return "fix"
+	case "chore", "maintenance":
+		return "chore"
+	default:
+		return "feat"
 	}
-	return fmt.Sprintf("feat: %s: %s", ticketKey, description)
+}
+
+// CommitMessage formats a conventional commit message for a Jira ticket.
+// issueType is mapped to a Conventional Commits prefix (e.g. "Bug" → "fix:").
+// If scope is empty the format is "<prefix>: ticketKey: description".
+func CommitMessage(ticketKey, issueType, scope, description string) string {
+	prefix := issueTypeToCC(issueType)
+	if scope != "" {
+		return fmt.Sprintf("%s(%s): %s: %s", prefix, scope, ticketKey, description)
+	}
+	return fmt.Sprintf("%s: %s: %s", prefix, ticketKey, description)
 }
 
 // PRTitle returns a pull request title for a Jira ticket (same format as CommitMessage).
-func PRTitle(ticketKey, scope, description string) string {
-	return CommitMessage(ticketKey, scope, description)
+func PRTitle(ticketKey, issueType, scope, description string) string {
+	return CommitMessage(ticketKey, issueType, scope, description)
 }
 
 // HasChanges reports whether the repo at repoPath has uncommitted changes.

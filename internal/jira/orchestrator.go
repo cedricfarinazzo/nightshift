@@ -603,7 +603,7 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 					skippedRepos = append(skippedRepos, repo)
 					continue
 				}
-				msg := CommitMessage(ticket.Key, "", ticket.Summary)
+				msg := CommitMessage(ticket.Key, ticket.IssueType, "", ticket.Summary)
 				o.emit("  committing + pushing %s → %s", repo.Name, repo.Branch)
 				if err := o.fnCommitAndPush(ctx, repo.Path, msg); err != nil {
 					o.postErrorComment(ctx, ticket.Key, PhaseCommit, err)

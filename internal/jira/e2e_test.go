@@ -433,9 +433,9 @@ func TestE2E_VC7_CommitMessage(t *testing.T) {
 		{"", "feat: VC-7: add workspace"},
 	}
 	for _, tt := range tests {
-		got := CommitMessage("VC-7", tt.scope, "add workspace")
+		got := CommitMessage("VC-7", "Story", tt.scope, "add workspace")
 		if got != tt.want {
-			t.Errorf("CommitMessage(VC-7, %q, ...) = %q, want %q", tt.scope, got, tt.want)
+			t.Errorf("CommitMessage(VC-7, Story, %q, ...) = %q, want %q", tt.scope, got, tt.want)
 		}
 	}
 }

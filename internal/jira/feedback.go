@@ -206,7 +206,7 @@ func (o *Orchestrator) ProcessFeedback(ctx context.Context, ticket Ticket, ws *W
 			}
 
 			result.FixesMade++
-			msg := CommitMessage(ticket.Key, "", "address review feedback")
+			msg := CommitMessage(ticket.Key, ticket.IssueType, "", "address review feedback")
 			o.emit("  committing + pushing review fixes → %s", repo.Branch)
 			if err := o.fnCommitAndPush(ctx, repo.Path, msg); err != nil {
 				return nil, fmt.Errorf("jira: feedback: push fixes %s: %w", repo.Name, err)
