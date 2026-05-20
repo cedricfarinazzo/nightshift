@@ -27,9 +27,9 @@ func TestNewCodexAgent_Defaults(t *testing.T) {
 func TestNewCodexAgent_WithOptions(t *testing.T) {
 	mockRunner := &MockRunner{}
 	agent := NewCodexAgent(
-		WithCodexBinaryPath("/custom/codex"),
-		WithCodexDefaultTimeout(5*time.Minute),
-		WithCodexRunner(mockRunner),
+		WithBinaryPath("/custom/codex"),
+		WithDefaultTimeout(5*time.Minute),
+		WithRunner(mockRunner),
 	)
 
 	if agent.binaryPath != "/custom/codex" {
@@ -55,7 +55,7 @@ func TestCodexAgent_Execute_Success(t *testing.T) {
 		Stdout:   "Task completed successfully",
 		ExitCode: 0,
 	}
-	agent := NewCodexAgent(WithCodexRunner(mock))
+	agent := NewCodexAgent(WithRunner(mock))
 
 	result, err := agent.Execute(context.Background(), ExecuteOptions{
 		Prompt:  "fix the bug",
@@ -98,7 +98,7 @@ func TestCodexAgent_Execute_JSONOutput(t *testing.T) {
 		Stdout:   `{"status":"success","files_changed":3}`,
 		ExitCode: 0,
 	}
-	agent := NewCodexAgent(WithCodexRunner(mock))
+	agent := NewCodexAgent(WithRunner(mock))
 
 	result, err := agent.Execute(context.Background(), ExecuteOptions{
 		Prompt: "analyze code",
@@ -120,8 +120,8 @@ func TestCodexAgent_Execute_Timeout(t *testing.T) {
 		Delay: 5 * time.Second, // Will be cancelled
 	}
 	agent := NewCodexAgent(
-		WithCodexRunner(mock),
-		WithCodexDefaultTimeout(50*time.Millisecond),
+		WithRunner(mock),
+		WithDefaultTimeout(50*time.Millisecond),
 	)
 
 	result, err := agent.Execute(context.Background(), ExecuteOptions{
@@ -144,8 +144,8 @@ func TestCodexAgent_Execute_WithOptionsTimeout(t *testing.T) {
 		Delay: 5 * time.Second,
 	}
 	agent := NewCodexAgent(
-		WithCodexRunner(mock),
-		WithCodexDefaultTimeout(10*time.Second), // Long default
+		WithRunner(mock),
+		WithDefaultTimeout(10*time.Second), // Long default
 	)
 
 	result, err := agent.Execute(context.Background(), ExecuteOptions{
@@ -168,7 +168,7 @@ func TestCodexAgent_Execute_ExitError(t *testing.T) {
 		ExitCode: 1,
 		Err:      errors.New("exit status 1"),
 	}
-	agent := NewCodexAgent(WithCodexRunner(mock))
+	agent := NewCodexAgent(WithRunner(mock))
 
 	result, err := agent.Execute(context.Background(), ExecuteOptions{
 		Prompt: "bad task",
@@ -190,8 +190,8 @@ func TestCodexAgent_Execute_BinaryNotFound(t *testing.T) {
 		Err: errors.New("executable file not found"),
 	}
 	agent := NewCodexAgent(
-		WithCodexBinaryPath("/nonexistent/codex"),
-		WithCodexRunner(mock),
+		WithBinaryPath("/nonexistent/codex"),
+		WithRunner(mock),
 	)
 
 	result, err := agent.Execute(context.Background(), ExecuteOptions{
@@ -221,7 +221,7 @@ func TestCodexAgent_Execute_WithFiles(t *testing.T) {
 		Stdout:   "analyzed file",
 		ExitCode: 0,
 	}
-	agent := NewCodexAgent(WithCodexRunner(mock))
+	agent := NewCodexAgent(WithRunner(mock))
 
 	result, err := agent.Execute(context.Background(), ExecuteOptions{
 		Prompt: "review code",
@@ -244,7 +244,7 @@ func TestCodexAgent_Execute_WithFiles(t *testing.T) {
 
 func TestCodexAgent_Execute_MissingFile(t *testing.T) {
 	mock := &MockRunner{Stdout: "ok", ExitCode: 0}
-	agent := NewCodexAgent(WithCodexRunner(mock))
+	agent := NewCodexAgent(WithRunner(mock))
 
 	// Missing files are listed by path only — no read, no error.
 	_, err := agent.Execute(context.Background(), ExecuteOptions{
@@ -271,7 +271,7 @@ func TestCodexAgent_ExecuteWithFiles(t *testing.T) {
 		Stdout:   "ok",
 		ExitCode: 0,
 	}
-	agent := NewCodexAgent(WithCodexRunner(mock))
+	agent := NewCodexAgent(WithRunner(mock))
 
 	result, err := agent.ExecuteWithFiles(context.Background(), "analyze", []string{testFile}, tmpDir)
 
@@ -288,8 +288,6 @@ func TestCodexAgent_ExecuteWithFiles(t *testing.T) {
 
 
 func TestCodexAgent_extractJSON(t *testing.T) {
-	agent := NewCodexAgent()
-
 	tests := []struct {
 		name     string
 		input    string
@@ -307,7 +305,7 @@ func TestCodexAgent_extractJSON(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := agent.extractJSON([]byte(tt.input))
+			result := extractJSON([]byte(tt.input))
 			if tt.wantJSON && result == nil {
 				t.Error("expected JSON, got nil")
 			}
@@ -320,20 +318,20 @@ func TestCodexAgent_extractJSON(t *testing.T) {
 
 func TestCodexAgent_Available(t *testing.T) {
 	// Test with known available binary
-	agent := NewCodexAgent(WithCodexBinaryPath("echo"))
+	agent := NewCodexAgent(WithBinaryPath("echo"))
 	if !agent.Available() {
 		t.Error("expected echo to be available")
 	}
 
 	// Test with nonexistent binary
-	agent = NewCodexAgent(WithCodexBinaryPath("/nonexistent/binary"))
+	agent = NewCodexAgent(WithBinaryPath("/nonexistent/binary"))
 	if agent.Available() {
 		t.Error("expected nonexistent binary to not be available")
 	}
 }
 
 func TestCodexAgent_Version(t *testing.T) {
-	agent := NewCodexAgent(WithCodexBinaryPath("/nonexistent/codex"))
+	agent := NewCodexAgent(WithBinaryPath("/nonexistent/codex"))
 	_, err := agent.Version()
 	if err == nil {
 		t.Error("expected error for nonexistent binary")
@@ -345,8 +343,8 @@ func TestCodexAgent_ContextCancellation(t *testing.T) {
 		Delay: 5 * time.Second,
 	}
 	agent := NewCodexAgent(
-		WithCodexRunner(mock),
-		WithCodexDefaultTimeout(10*time.Second),
+		WithRunner(mock),
+		WithDefaultTimeout(10*time.Second),
 	)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -372,8 +370,8 @@ func TestCodexAgent_ImplementsAgentInterface(t *testing.T) {
 func TestCodexAgent_Execute_WithModel(t *testing.T) {
 	mock := &MockRunner{Stdout: "response", ExitCode: 0}
 	agent := NewCodexAgent(
-		WithCodexModel("gpt-5.1-codex"),
-		WithCodexRunner(mock),
+		WithModel("gpt-5.1-codex"),
+		WithRunner(mock),
 	)
 
 	_, err := agent.Execute(context.Background(), ExecuteOptions{Prompt: "test"})
@@ -390,7 +388,7 @@ func TestCodexAgent_Execute_WithModel(t *testing.T) {
 
 func TestCodexAgent_Execute_NoModel(t *testing.T) {
 	mock := &MockRunner{Stdout: "response", ExitCode: 0}
-	agent := NewCodexAgent(WithCodexRunner(mock))
+	agent := NewCodexAgent(WithRunner(mock))
 
 	_, err := agent.Execute(context.Background(), ExecuteOptions{Prompt: "test"})
 	if err != nil {
@@ -404,8 +402,8 @@ func TestCodexAgent_Execute_NoModel(t *testing.T) {
 func TestCodexAgent_Execute_ModelFromOptions(t *testing.T) {
 	mock := &MockRunner{Stdout: "response", ExitCode: 0}
 	agent := NewCodexAgent(
-		WithCodexModel("gpt-5.2"),
-		WithCodexRunner(mock),
+		WithModel("gpt-5.2"),
+		WithRunner(mock),
 	)
 
 	_, err := agent.Execute(context.Background(), ExecuteOptions{
@@ -430,7 +428,7 @@ func TestCodexAgent_Execute_ModelFromOptions(t *testing.T) {
 // config field defaulted to false.
 func TestCodexAgentDefaultsBypassFlag(t *testing.T) {
 	mock := &MockRunner{Stdout: "done"}
-	agent := NewCodexAgent(WithCodexRunner(mock))
+	agent := NewCodexAgent(WithRunner(mock))
 
 	ctx := context.Background()
 	_, err := agent.Execute(ctx, ExecuteOptions{Prompt: "test"})
@@ -467,9 +465,9 @@ func TestCodexAgent_Effort(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			mock := &MockRunner{Stdout: "response", ExitCode: 0}
-			opts := []CodexOption{WithCodexRunner(mock)}
+			opts := []Option{WithRunner(mock)}
 			if tt.agentEffort != "" {
-				opts = append(opts, WithCodexEffort(tt.agentEffort))
+				opts = append(opts, WithEffort(tt.agentEffort))
 			}
 			agent := NewCodexAgent(opts...)
 
@@ -509,8 +507,8 @@ func TestCodexAgent_Effort(t *testing.T) {
 func TestCodexAgentExplicitFalseBypassDisablesFlag(t *testing.T) {
 	mock := &MockRunner{Stdout: "done"}
 	agent := NewCodexAgent(
-		WithDangerouslyBypassApprovalsAndSandbox(false),
-		WithCodexRunner(mock),
+		WithBypassPermissions(false),
+		WithRunner(mock),
 	)
 
 	ctx := context.Background()

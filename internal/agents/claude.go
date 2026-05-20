@@ -5,9 +5,9 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"os/exec"
 	"strings"
 	"syscall"
+	"os/exec"
 	"time"
 )
 
@@ -57,69 +57,21 @@ func (r *ExecRunner) Run(ctx context.Context, name string, args []string, dir st
 
 // ClaudeAgent spawns Claude Code CLI for task execution.
 type ClaudeAgent struct {
-	binaryPath string        // Path to claude binary (default: "claude")
-	timeout    time.Duration // Default timeout
-	runner     CommandRunner // Command executor (for testing)
-	skipPerms  bool          // Pass --dangerously-skip-permissions
-	model      string        // Default model to use
-	effort     string        // Default reasoning effort
-}
-
-// ClaudeOption configures a ClaudeAgent.
-type ClaudeOption func(*ClaudeAgent)
-
-// WithBinaryPath sets a custom path to the claude binary.
-func WithBinaryPath(path string) ClaudeOption {
-	return func(a *ClaudeAgent) {
-		a.binaryPath = path
-	}
-}
-
-// WithDefaultTimeout sets the default execution timeout.
-func WithDefaultTimeout(d time.Duration) ClaudeOption {
-	return func(a *ClaudeAgent) {
-		a.timeout = d
-	}
-}
-
-// WithDangerouslySkipPermissions sets whether to pass --dangerously-skip-permissions.
-func WithDangerouslySkipPermissions(enabled bool) ClaudeOption {
-	return func(a *ClaudeAgent) {
-		a.skipPerms = enabled
-	}
-}
-
-// WithModel sets the default model to use.
-func WithModel(model string) ClaudeOption {
-	return func(a *ClaudeAgent) {
-		a.model = model
-	}
-}
-
-// WithEffort sets the default reasoning effort level.
-func WithEffort(effort string) ClaudeOption {
-	return func(a *ClaudeAgent) {
-		a.effort = effort
-	}
-}
-
-// WithRunner sets a custom command runner (for testing).
-func WithRunner(r CommandRunner) ClaudeOption {
-	return func(a *ClaudeAgent) {
-		a.runner = r
-	}
+	agentConfig
 }
 
 // NewClaudeAgent creates a Claude Code agent.
-func NewClaudeAgent(opts ...ClaudeOption) *ClaudeAgent {
+func NewClaudeAgent(opts ...Option) *ClaudeAgent {
 	a := &ClaudeAgent{
-		binaryPath: "claude",
-		timeout:    DefaultTimeout,
-		runner:     &ExecRunner{},
-		skipPerms:  true,
+		agentConfig: agentConfig{
+			binaryPath:        "claude",
+			timeout:           DefaultTimeout,
+			runner:            &ExecRunner{},
+			bypassPermissions: true,
+		},
 	}
 	for _, opt := range opts {
-		opt(a)
+		opt(&a.agentConfig)
 	}
 	return a
 }
@@ -139,7 +91,7 @@ func (a *ClaudeAgent) Execute(ctx context.Context, opts ExecuteOptions) (*Execut
 
 	// Build command args
 	args := []string{"--print"}
-	if a.skipPerms {
+	if a.bypassPermissions {
 		args = append(args, "--dangerously-skip-permissions")
 	}
 
@@ -179,7 +131,7 @@ func (a *ClaudeAgent) Execute(ctx context.Context, opts ExecuteOptions) (*Execut
 
 	// Run command
 	stdout, stderr, exitCode, err := a.runner.Run(ctx, a.binaryPath, args, opts.WorkDir, "")
-	return handleExecuteResult(ctx, stdout, stderr, exitCode, err, timeout, start, compressStats, a.extractJSON)
+	return handleExecuteResult(ctx, stdout, stderr, exitCode, err, timeout, start, compressStats)
 }
 
 // ExecuteWithFiles runs claude with file context included.
@@ -191,23 +143,12 @@ func (a *ClaudeAgent) ExecuteWithFiles(ctx context.Context, prompt string, files
 	})
 }
 
-
-func (a *ClaudeAgent) extractJSON(output []byte) []byte {
-	return extractJSON(output)
-}
-
 // Available checks if the claude binary is available in PATH.
 func (a *ClaudeAgent) Available() bool {
-	_, err := exec.LookPath(a.binaryPath)
-	return err == nil
+	return cliAvailable(a.binaryPath)
 }
 
 // Version returns the claude CLI version.
 func (a *ClaudeAgent) Version() (string, error) {
-	cmd := exec.Command(a.binaryPath, "--version")
-	output, err := cmd.Output()
-	if err != nil {
-		return "", fmt.Errorf("getting version: %w", err)
-	}
-	return strings.TrimSpace(string(output)), nil
+	return cliVersion(a.binaryPath)
 }

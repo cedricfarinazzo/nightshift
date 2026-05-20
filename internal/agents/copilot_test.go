@@ -44,10 +44,10 @@ func TestNewCopilotAgent_Defaults(t *testing.T) {
 func TestNewCopilotAgent_WithOptions(t *testing.T) {
 	mockRunner := &MockRunner{}
 	agent := NewCopilotAgent(
-		WithCopilotBinaryPath("/custom/gh"),
-		WithCopilotDefaultTimeout(5*time.Minute),
-		WithCopilotRunner(mockRunner),
-		WithCopilotModel("claude-sonnet-4.6"),
+		WithBinaryPath("/custom/gh"),
+		WithDefaultTimeout(5*time.Minute),
+		WithRunner(mockRunner),
+		WithModel("claude-sonnet-4.6"),
 	)
 
 	if agent.binaryPath != "/custom/gh" {
@@ -76,7 +76,7 @@ func TestCopilotAgent_Execute_Success(t *testing.T) {
 		Stdout:   "Here's a solution to your problem",
 		ExitCode: 0,
 	}
-	agent := NewCopilotAgent(WithCopilotRunner(mock))
+	agent := NewCopilotAgent(WithRunner(mock))
 
 	result, err := agent.Execute(context.Background(), ExecuteOptions{
 		Prompt:  "how to list files",
@@ -127,7 +127,7 @@ func TestCopilotAgent_Execute_JSONOutput(t *testing.T) {
 		Stdout:   `{"suggestion":"ls -la","explanation":"Lists all files"}`,
 		ExitCode: 0,
 	}
-	agent := NewCopilotAgent(WithCopilotRunner(mock))
+	agent := NewCopilotAgent(WithRunner(mock))
 
 	result, err := agent.Execute(context.Background(), ExecuteOptions{
 		Prompt: "list files",
@@ -147,7 +147,7 @@ func TestCopilotAgent_Execute_Error(t *testing.T) {
 		ExitCode: 1,
 		Err:      &mockExitError{code: 1},
 	}
-	agent := NewCopilotAgent(WithCopilotRunner(mock))
+	agent := NewCopilotAgent(WithRunner(mock))
 
 	result, err := agent.Execute(context.Background(), ExecuteOptions{
 		Prompt: "test prompt",
@@ -169,7 +169,7 @@ func TestCopilotAgent_Execute_Timeout(t *testing.T) {
 		Delay:    5 * time.Second,
 		ExitCode: -1,
 	}
-	agent := NewCopilotAgent(WithCopilotRunner(mock))
+	agent := NewCopilotAgent(WithRunner(mock))
 
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
@@ -201,7 +201,7 @@ func TestCopilotAgent_Execute_WithFiles(t *testing.T) {
 		Stdout:   "Response with context",
 		ExitCode: 0,
 	}
-	agent := NewCopilotAgent(WithCopilotRunner(mock))
+	agent := NewCopilotAgent(WithRunner(mock))
 
 	result, err := agent.Execute(context.Background(), ExecuteOptions{
 		Prompt: "analyze this file",
@@ -238,7 +238,7 @@ func TestCopilotAgent_ExecuteWithFiles(t *testing.T) {
 		Stdout:   "Response",
 		ExitCode: 0,
 	}
-	agent := NewCopilotAgent(WithCopilotRunner(mock))
+	agent := NewCopilotAgent(WithRunner(mock))
 
 	result, err := agent.ExecuteWithFiles(context.Background(), "test prompt", []string{testFile}, "/workdir")
 
@@ -256,9 +256,9 @@ func TestCopilotAgent_ExecuteWithFiles(t *testing.T) {
 func TestCopilotAgent_Execute_WithModel_Standalone(t *testing.T) {
 	mock := &MockRunner{Stdout: "response", ExitCode: 0}
 	agent := NewCopilotAgent(
-		WithCopilotBinaryPath("copilot"),
-		WithCopilotModel("claude-sonnet-4.6"),
-		WithCopilotRunner(mock),
+		WithBinaryPath("copilot"),
+		WithModel("claude-sonnet-4.6"),
+		WithRunner(mock),
 	)
 
 	_, err := agent.Execute(context.Background(), ExecuteOptions{Prompt: "test"})
@@ -277,8 +277,8 @@ func TestCopilotAgent_Execute_WithModel_Standalone(t *testing.T) {
 func TestCopilotAgent_Execute_WithModel_GH(t *testing.T) {
 	mock := &MockRunner{Stdout: "response", ExitCode: 0}
 	agent := NewCopilotAgent(
-		WithCopilotModel("gpt-5.1"),
-		WithCopilotRunner(mock),
+		WithModel("gpt-5.1"),
+		WithRunner(mock),
 	)
 
 	_, err := agent.Execute(context.Background(), ExecuteOptions{Prompt: "test"})
@@ -296,7 +296,7 @@ func TestCopilotAgent_Execute_WithModel_GH(t *testing.T) {
 
 func TestCopilotAgent_Execute_NoModel(t *testing.T) {
 	mock := &MockRunner{Stdout: "response", ExitCode: 0}
-	agent := NewCopilotAgent(WithCopilotRunner(mock))
+	agent := NewCopilotAgent(WithRunner(mock))
 
 	_, err := agent.Execute(context.Background(), ExecuteOptions{Prompt: "test"})
 	if err != nil {
@@ -311,8 +311,8 @@ func TestCopilotAgent_Execute_NoModel(t *testing.T) {
 func TestCopilotAgent_Execute_ModelFromOptions(t *testing.T) {
 	mock := &MockRunner{Stdout: "response", ExitCode: 0}
 	agent := NewCopilotAgent(
-		WithCopilotModel("claude-haiku-4.5"),
-		WithCopilotRunner(mock),
+		WithModel("claude-haiku-4.5"),
+		WithRunner(mock),
 	)
 
 	// ExecuteOptions.Model overrides the agent default
@@ -359,9 +359,9 @@ func TestCopilotAgent_Effort(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			mock := &MockRunner{Stdout: "response", ExitCode: 0}
-			opts := []CopilotOption{WithCopilotRunner(mock)}
+			opts := []Option{WithRunner(mock)}
 			if tt.agentEffort != "" {
-				opts = append(opts, WithCopilotEffort(tt.agentEffort))
+				opts = append(opts, WithEffort(tt.agentEffort))
 			}
 			agent := NewCopilotAgent(opts...)
 
@@ -385,8 +385,6 @@ func TestCopilotAgent_Effort(t *testing.T) {
 }
 
 func TestCopilotAgent_ExtractJSON(t *testing.T) {
-	agent := NewCopilotAgent()
-
 	tests := []struct {
 		name   string
 		output string
@@ -421,7 +419,7 @@ func TestCopilotAgent_ExtractJSON(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := agent.extractJSON([]byte(tt.output))
+			result := extractJSON([]byte(tt.output))
 			hasJSON := result != nil
 			if hasJSON != tt.want {
 				t.Errorf("extractJSON() returned JSON = %v, want %v", hasJSON, tt.want)

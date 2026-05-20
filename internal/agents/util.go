@@ -36,7 +36,6 @@ func handleExecuteResult(
 	timeout time.Duration,
 	start time.Time,
 	compressStats *CompressStats,
-	extractJSONFn func([]byte) []byte,
 ) (*ExecuteResult, error) {
 	result := &ExecuteResult{
 		Output:        stdout,
@@ -70,7 +69,7 @@ func handleExecuteResult(
 		return result, err
 	}
 
-	result.JSON = extractJSONFn([]byte(stdout))
+	result.JSON = extractJSON([]byte(stdout))
 	return result, nil
 }
 

@@ -41,7 +41,7 @@ func agentByName(cfg *config.Config, provider string) (agents.Agent, error) {
 	}
 }
 
-func newClaudeAgentFromConfig(cfg *config.Config, extra ...agents.ClaudeOption) *agents.ClaudeAgent {
+func newClaudeAgentFromConfig(cfg *config.Config, extra ...agents.Option) *agents.ClaudeAgent {
 	if cfg == nil {
 		return agents.NewClaudeAgent(extra...)
 	}
@@ -65,7 +65,7 @@ func newClaudeAgentFromConfig(cfg *config.Config, extra ...agents.ClaudeOption) 
 	return agents.NewClaudeAgent(opts...)
 }
 
-func newCodexAgentFromConfig(cfg *config.Config, extra ...agents.CodexOption) *agents.CodexAgent {
+func newCodexAgentFromConfig(cfg *config.Config, extra ...agents.Option) *agents.CodexAgent {
 	if cfg == nil {
 		return agents.NewCodexAgent(extra...)
 	}
@@ -81,19 +81,19 @@ func newCodexAgentFromConfig(cfg *config.Config, extra ...agents.CodexOption) *a
 	// the side of enabling the flag for headless operation is the safe choice;
 	// users who want Codex to prompt for approvals should disable the provider
 	// entirely rather than toggling this flag.
-	opts := []agents.CodexOption{}
+	opts := []agents.Option{}
 	if cfg.Providers.Codex.DangerouslyBypassApprovalsAndSandbox {
-		opts = append(opts, agents.WithDangerouslyBypassApprovalsAndSandbox(true))
+		opts = append(opts, agents.WithBypassPermissions(true))
 	}
 	if cfg.Providers.Codex.Model != "" {
-		opts = append(opts, agents.WithCodexModel(cfg.Providers.Codex.Model))
+		opts = append(opts, agents.WithModel(cfg.Providers.Codex.Model))
 	}
 	if cfg.Providers.Codex.ReasoningEffort != "" {
-		opts = append(opts, agents.WithCodexEffort(cfg.Providers.Codex.ReasoningEffort))
+		opts = append(opts, agents.WithEffort(cfg.Providers.Codex.ReasoningEffort))
 	}
 	if cfg.Providers.Codex.Timeout != "" {
 		if d, err := time.ParseDuration(cfg.Providers.Codex.Timeout); err == nil {
-			opts = append(opts, agents.WithCodexDefaultTimeout(d))
+			opts = append(opts, agents.WithDefaultTimeout(d))
 		} else {
 			logging.Get().Warnf("invalid codex timeout %q, using default: %v", cfg.Providers.Codex.Timeout, err)
 		}
@@ -106,7 +106,7 @@ func newCodexAgentFromConfig(cfg *config.Config, extra ...agents.CodexOption) *a
 // is non-empty it overrides auto-detection; otherwise the binary is resolved
 // from PATH (preferring standalone "copilot", falling back to "gh").
 // Extra CopilotOptions (e.g. phase-specific model/timeout) are applied last.
-func newCopilotAgentFromConfig(cfg *config.Config, binaryPath string, extra ...agents.CopilotOption) *agents.CopilotAgent {
+func newCopilotAgentFromConfig(cfg *config.Config, binaryPath string, extra ...agents.Option) *agents.CopilotAgent {
 	if cfg == nil {
 		return agents.NewCopilotAgent()
 	}
@@ -120,19 +120,19 @@ func newCopilotAgentFromConfig(cfg *config.Config, binaryPath string, extra ...a
 		}
 	}
 
-	opts := []agents.CopilotOption{
-		agents.WithCopilotBinaryPath(binary),
-		agents.WithCopilotDangerouslySkipPermissions(cfg.Providers.Copilot.DangerouslySkipPermissions),
+	opts := []agents.Option{
+		agents.WithBinaryPath(binary),
+		agents.WithBypassPermissions(cfg.Providers.Copilot.DangerouslySkipPermissions),
 	}
 	if cfg.Providers.Copilot.Model != "" {
-		opts = append(opts, agents.WithCopilotModel(cfg.Providers.Copilot.Model))
+		opts = append(opts, agents.WithModel(cfg.Providers.Copilot.Model))
 	}
 	if cfg.Providers.Copilot.ReasoningEffort != "" {
-		opts = append(opts, agents.WithCopilotEffort(cfg.Providers.Copilot.ReasoningEffort))
+		opts = append(opts, agents.WithEffort(cfg.Providers.Copilot.ReasoningEffort))
 	}
 	if cfg.Providers.Copilot.Timeout != "" {
 		if d, err := time.ParseDuration(cfg.Providers.Copilot.Timeout); err == nil {
-			opts = append(opts, agents.WithCopilotDefaultTimeout(d))
+			opts = append(opts, agents.WithDefaultTimeout(d))
 		} else {
 			logging.Get().Warnf("invalid copilot timeout %q, using default: %v", cfg.Providers.Copilot.Timeout, err)
 		}

@@ -65,7 +65,7 @@ func TestNewCodexAgentFromConfig_ReasoningEffort(t *testing.T) {
 			cfg := &config.Config{}
 			cfg.Providers.Codex.ReasoningEffort = tt.effort
 
-			a := newCodexAgentFromConfig(cfg, agents.WithCodexRunner(mr))
+			a := newCodexAgentFromConfig(cfg, agents.WithRunner(mr))
 			_, _ = a.Execute(context.Background(), agents.ExecuteOptions{Prompt: "test"})
 
 			hasConfig := slices.Contains(mr.captured, "--config")
@@ -104,7 +104,7 @@ func TestNewCopilotAgentFromConfig_ReasoningEffort(t *testing.T) {
 			cfg := &config.Config{}
 			cfg.Providers.Copilot.ReasoningEffort = tt.effort
 
-			a := newCopilotAgentFromConfig(cfg, "", agents.WithCopilotRunner(mr))
+			a := newCopilotAgentFromConfig(cfg, "", agents.WithRunner(mr))
 			_, _ = a.Execute(context.Background(), agents.ExecuteOptions{Prompt: "test"})
 
 			hasFlag := slices.Contains(mr.captured, "--effort")

@@ -4,76 +4,26 @@ package agents
 import (
 	"context"
 	"fmt"
-	"os/exec"
-	"strings"
 	"time"
 )
 
 // CodexAgent spawns Codex CLI for task execution.
 type CodexAgent struct {
-	binaryPath string        // Path to codex binary (default: "codex")
-	timeout    time.Duration // Default timeout
-	runner     CommandRunner // Command executor (for testing)
-	bypassPerm bool          // Pass --dangerously-bypass-approvals-and-sandbox
-	model      string        // Default model to use
-	effort     string        // Default reasoning effort
-}
-
-// CodexOption configures a CodexAgent.
-type CodexOption func(*CodexAgent)
-
-// WithCodexBinaryPath sets a custom path to the codex binary.
-func WithCodexBinaryPath(path string) CodexOption {
-	return func(a *CodexAgent) {
-		a.binaryPath = path
-	}
-}
-
-// WithCodexDefaultTimeout sets the default execution timeout.
-func WithCodexDefaultTimeout(d time.Duration) CodexOption {
-	return func(a *CodexAgent) {
-		a.timeout = d
-	}
-}
-
-// WithDangerouslyBypassApprovalsAndSandbox sets whether to pass --dangerously-bypass-approvals-and-sandbox.
-func WithDangerouslyBypassApprovalsAndSandbox(enabled bool) CodexOption {
-	return func(a *CodexAgent) {
-		a.bypassPerm = enabled
-	}
-}
-
-// WithCodexModel sets the default model to use.
-func WithCodexModel(model string) CodexOption {
-	return func(a *CodexAgent) {
-		a.model = model
-	}
-}
-
-// WithCodexEffort sets the default reasoning effort level.
-func WithCodexEffort(effort string) CodexOption {
-	return func(a *CodexAgent) {
-		a.effort = effort
-	}
-}
-
-// WithCodexRunner sets a custom command runner (for testing).
-func WithCodexRunner(r CommandRunner) CodexOption {
-	return func(a *CodexAgent) {
-		a.runner = r
-	}
+	agentConfig
 }
 
 // NewCodexAgent creates a Codex CLI agent.
-func NewCodexAgent(opts ...CodexOption) *CodexAgent {
+func NewCodexAgent(opts ...Option) *CodexAgent {
 	a := &CodexAgent{
-		binaryPath: "codex",
-		timeout:    DefaultTimeout,
-		runner:     &ExecRunner{},
-		bypassPerm: true,
+		agentConfig: agentConfig{
+			binaryPath:        "codex",
+			timeout:           DefaultTimeout,
+			runner:            &ExecRunner{},
+			bypassPermissions: true,
+		},
 	}
 	for _, opt := range opts {
-		opt(a)
+		opt(&a.agentConfig)
 	}
 	return a
 }
@@ -94,7 +44,7 @@ func (a *CodexAgent) Execute(ctx context.Context, opts ExecuteOptions) (*Execute
 	// Build command args for headless/non-interactive execution.
 	// Codex CLI uses the `exec` subcommand for non-interactive mode.
 	args := []string{"exec"}
-	if a.bypassPerm {
+	if a.bypassPermissions {
 		args = append(args, "--dangerously-bypass-approvals-and-sandbox")
 	}
 
@@ -134,7 +84,7 @@ func (a *CodexAgent) Execute(ctx context.Context, opts ExecuteOptions) (*Execute
 
 	// Run command
 	stdout, stderr, exitCode, err := a.runner.Run(ctx, a.binaryPath, args, opts.WorkDir, "")
-	return handleExecuteResult(ctx, stdout, stderr, exitCode, err, timeout, start, compressStats, a.extractJSON)
+	return handleExecuteResult(ctx, stdout, stderr, exitCode, err, timeout, start, compressStats)
 }
 
 // ExecuteWithFiles runs codex with file context included.
@@ -146,23 +96,12 @@ func (a *CodexAgent) ExecuteWithFiles(ctx context.Context, prompt string, files 
 	})
 }
 
-
-func (a *CodexAgent) extractJSON(output []byte) []byte {
-	return extractJSON(output)
-}
-
 // Available checks if the codex binary is available in PATH.
 func (a *CodexAgent) Available() bool {
-	_, err := exec.LookPath(a.binaryPath)
-	return err == nil
+	return cliAvailable(a.binaryPath)
 }
 
 // Version returns the codex CLI version.
 func (a *CodexAgent) Version() (string, error) {
-	cmd := exec.Command(a.binaryPath, "--version")
-	output, err := cmd.Output()
-	if err != nil {
-		return "", fmt.Errorf("getting version: %w", err)
-	}
-	return strings.TrimSpace(string(output)), nil
+	return cliVersion(a.binaryPath)
 }

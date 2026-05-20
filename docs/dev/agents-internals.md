@@ -31,6 +31,25 @@ type ExecuteResult struct {
 
 Compressible vs protected: see [Architecture](architecture.md). Putting instructions in `Prompt` risks them being stripped by the compression agent.
 
+## Option Constructors
+
+All three agents share a single `Option` type and set of constructors defined in `options.go`:
+
+```go
+type Option func(*agentConfig)
+
+func WithBinaryPath(p string) Option
+func WithDefaultTimeout(d time.Duration) Option
+func WithRunner(r CommandRunner) Option
+func WithModel(m string) Option
+func WithEffort(e string) Option
+func WithBypassPermissions(v bool) Option
+```
+
+Deprecated type aliases (`ClaudeOption = Option`, `CodexOption = Option`, `CopilotOption = Option`) and function var aliases (`WithCodexRunner = WithRunner`, etc.) are provided for one-release backward compatibility. Prefer the unified names.
+
+Default `bypassPermissions`: `true` for Claude and Codex, `false` for Copilot — matches original behaviour.
+
 ## Three Implementations
 
 | File | Binary | Notable flags |
@@ -86,7 +105,7 @@ func handleExecuteResult(out, errOut string, exitCode int, err error, compressSt
 
 - Maps exit codes → result status
 - Detects timeout (`context.DeadlineExceeded`)
-- Extracts JSON if agent emitted ```json ... ``` block
+- Calls `extractJSON([]byte(stdout))` directly (no longer takes an `extractJSONFn` parameter)
 - Propagates `CompressStats` so token savings show in reports
 
 Use this helper for any new agent — never duplicate exit/timeout/JSON logic.
@@ -158,6 +177,6 @@ Bridge: `compressionConfigFromApp()` in `cmd/nightshift/commands/helpers.go`. Do
 `DefaultTimeout = 30 * time.Minute`. Override via two mechanisms:
 
 1. **Per-call**: set `ExecuteOptions.Timeout` (takes precedence over agent default).
-2. **Config**: set `providers.<name>.timeout` in `nightshift.yaml` (e.g. `"45m"`). The three factory functions in `cmd/nightshift/commands/helpers.go` (`newClaudeAgentFromConfig`, `newCodexAgentFromConfig`, `newCopilotAgentFromConfig`) read this field and call `WithDefaultTimeout`/`WithCodexDefaultTimeout`/`WithCopilotDefaultTimeout` accordingly.
+2. The factory functions in `cmd/nightshift/commands/helpers.go` call `WithDefaultTimeout` for all three agents.
 
 `nightshift setup` exposes this as a global "Agent timeout" row in the providers step (Tab to row 3, press `t` to edit). Jira phase timeouts are configured separately per-phase in the Jira step (press `t` on focused phase row).
