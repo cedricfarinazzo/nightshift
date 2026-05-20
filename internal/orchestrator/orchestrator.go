@@ -25,6 +25,56 @@ const (
 	DefaultAgentTimeout  = 30 * time.Minute
 )
 
+// ghExec runs a gh subcommand in repoPath and returns trimmed stdout+stderr.
+// Substitutable in tests.
+var ghExec = func(ctx context.Context, repoPath string, args ...string) (string, error) {
+	cmd := exec.CommandContext(ctx, "gh", args...)
+	cmd.Dir = repoPath
+	out, err := cmd.CombinedOutput()
+	trimmed := strings.TrimSpace(string(out))
+	if err != nil {
+		// Sanitize args to avoid leaking large/sensitive values (e.g., full PR body after --body flag)
+		sanitized := sanitizeArgs(args)
+		if trimmed != "" {
+			return "", fmt.Errorf("gh %s failed: %s: %w", sanitized, trimmed, err)
+		}
+		return "", fmt.Errorf("gh %s failed: %w", sanitized, err)
+	}
+	return trimmed, nil
+}
+
+// gitExec runs a git subcommand in repoPath and returns trimmed stdout+stderr.
+// Substitutable in tests.
+var gitExec = func(ctx context.Context, repoPath string, args ...string) (string, error) {
+	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd.Dir = repoPath
+	out, err := cmd.CombinedOutput()
+	trimmed := strings.TrimSpace(string(out))
+	if err != nil {
+		sanitized := strings.Join(args, " ")
+		if trimmed != "" {
+			return "", fmt.Errorf("git %s failed: %s: %w", sanitized, trimmed, err)
+		}
+		return "", fmt.Errorf("git %s failed: %w", sanitized, err)
+	}
+	return trimmed, nil
+}
+
+// sanitizeArgs redacts large/sensitive argument values to prevent leaking them in error messages.
+// Omits values after flags like --body that commonly contain large or sensitive data.
+func sanitizeArgs(args []string) string {
+	var redacted []string
+	for i := 0; i < len(args); i++ {
+		if args[i] == "--body" && i+1 < len(args) {
+			redacted = append(redacted, "--body", "[REDACTED]")
+			i++ // Skip the next arg (the body value)
+		} else {
+			redacted = append(redacted, args[i])
+		}
+	}
+	return strings.Join(redacted, " ")
+}
+
 // TaskStatus represents the outcome of task execution.
 type TaskStatus string
 
@@ -448,15 +498,11 @@ func ParseMetadataBlock(body string) map[string]string {
 // annotatePR appends a metadata block to an existing GitHub PR body.
 // Idempotent: skips if a metadata block already exists.
 func (o *Orchestrator) annotatePR(ctx context.Context, prURL string, task *tasks.Task, result *TaskResult, workDir string) error {
-	// Read current PR body
-	readCmd := exec.CommandContext(ctx, "gh", "pr", "view", prURL, "--json", "body", "-q", ".body")
-	readCmd.Dir = workDir
-	bodyBytes, err := readCmd.CombinedOutput()
+	// Read current PR body (preserving trailing whitespace for Markdown preservation)
+	currentBody, err := getPRBodyVerbatim(ctx, workDir, prURL)
 	if err != nil {
-		return fmt.Errorf("gh pr view: %s: %w", string(bodyBytes), err)
+		return fmt.Errorf("gh pr view: %w", err)
 	}
-
-	currentBody := string(bodyBytes)
 
 	// Skip if metadata already present
 	if ParseMetadataBlock(currentBody) != nil {
@@ -467,12 +513,31 @@ func (o *Orchestrator) annotatePR(ctx context.Context, prURL string, task *tasks
 	newBody := strings.TrimRight(currentBody, "\n") + "\n\n" + metaBlock
 
 	// Update PR body
-	editCmd := exec.CommandContext(ctx, "gh", "pr", "edit", prURL, "--body", newBody)
-	editCmd.Dir = workDir
-	if output, err := editCmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("gh pr edit: %s: %w", string(output), err)
+	if _, err = ghExec(ctx, workDir, "pr", "edit", prURL, "--body", newBody); err != nil {
+		return fmt.Errorf("gh pr edit: %w", err)
 	}
 	return nil
+}
+
+// getPRBodyVerbatim fetches the PR body while preserving trailing whitespace (Markdown-significant).
+// Only trims the single trailing newline added by gh output. Substitutable in tests.
+var getPRBodyVerbatim = func(ctx context.Context, repoPath string, prURL string) (string, error) {
+	cmd := exec.CommandContext(ctx, "gh", "pr", "view", prURL, "--json", "body", "-q", ".body")
+	cmd.Dir = repoPath
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		trimmed := strings.TrimSpace(string(out))
+		if trimmed != "" {
+			return "", fmt.Errorf("gh pr view failed: %s: %w", trimmed, err)
+		}
+		return "", fmt.Errorf("gh pr view failed: %w", err)
+	}
+	// Only trim the trailing newline gh adds, preserve other trailing whitespace
+	body := string(out)
+	if len(body) > 0 && body[len(body)-1] == '\n' {
+		body = body[:len(body)-1]
+	}
+	return body, nil
 }
 
 // plan spawns the plan agent to create an execution plan.
@@ -980,24 +1045,19 @@ func (o *Orchestrator) log(result *TaskResult, level, msg string, fields map[str
 // CurrentBranch resolves the current git branch in the given directory.
 // Returns an error if the directory is not inside a git repository.
 func CurrentBranch(ctx context.Context, workDir string) (string, error) {
-	cmd := exec.CommandContext(ctx, "git", "rev-parse", "--abbrev-ref", "HEAD")
-	cmd.Dir = workDir
-	out, err := cmd.Output()
+	out, err := gitExec(ctx, workDir, "rev-parse", "--abbrev-ref", "HEAD")
 	if err != nil {
 		return "", fmt.Errorf("git rev-parse --abbrev-ref HEAD: %w", err)
 	}
-	return strings.TrimSpace(string(out)), nil
+	return out, nil
 }
 
 // validateGitRepo verifies that workDir is inside an existing git repository.
 func validateGitRepo(ctx context.Context, workDir string) error {
-	cmd := exec.CommandContext(ctx, "git", "rev-parse", "--show-toplevel")
-	cmd.Dir = workDir
-	out, err := cmd.Output()
+	repoRoot, err := gitExec(ctx, workDir, "rev-parse", "--show-toplevel")
 	if err != nil {
 		return fmt.Errorf("not a git repository: %w", err)
 	}
-	repoRoot := strings.TrimSpace(string(out))
 
 	// Ensure the repo root is not $HOME or any parent of it.
 	home, err := os.UserHomeDir()
@@ -1013,12 +1073,8 @@ func validateGitRepo(ctx context.Context, workDir string) error {
 
 // checkoutBranch runs git checkout to restore a branch in the given directory.
 func checkoutBranch(ctx context.Context, workDir, branch string) error {
-	cmd := exec.CommandContext(ctx, "git", "checkout", branch)
-	cmd.Dir = workDir
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("git checkout %s: %s: %w", branch, strings.TrimSpace(string(out)), err)
-	}
-	return nil
+	_, err := gitExec(ctx, workDir, "checkout", branch)
+	return err
 }
 
 // truncateStr returns s trimmed to maxLen characters, appending "..." if truncated.

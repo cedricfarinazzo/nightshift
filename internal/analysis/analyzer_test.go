@@ -1,6 +1,7 @@
 package analysis
 
 import (
+	"errors"
 	"testing"
 	"time"
 )
@@ -173,5 +174,63 @@ func TestParseOptionsWithFilters(t *testing.T) {
 	}
 	if opts.FilePath != "pkg/foo.go" {
 		t.Errorf("expected file path 'pkg/foo.go', got %s", opts.FilePath)
+	}
+}
+
+// --- gitExecFn injectable var tests ---
+
+func TestParseAuthors_Success(t *testing.T) {
+	orig := gitExecFn
+	defer func() { gitExecFn = orig }()
+
+	gitExecFn = func(_ string, _ ...string) ([]byte, error) {
+		return []byte("Alice|alice@a.com\nBob|bob@b.com\n"), nil
+	}
+
+	parser := NewGitParser("/fake")
+	authors, err := parser.ParseAuthors(ParseOptions{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(authors) != 2 {
+		t.Fatalf("expected 2 authors, got %d", len(authors))
+	}
+	for _, a := range authors {
+		if a.Commits != 1 {
+			t.Errorf("author %s: expected Commits=1, got %d", a.Name, a.Commits)
+		}
+	}
+}
+
+func TestParseAuthors_GitError(t *testing.T) {
+	orig := gitExecFn
+	defer func() { gitExecFn = orig }()
+
+	gitExecFn = func(_ string, _ ...string) ([]byte, error) {
+		return nil, errors.New("git not found")
+	}
+
+	parser := NewGitParser("/fake")
+	_, err := parser.ParseAuthors(ParseOptions{})
+	if err == nil {
+		t.Error("expected error from gitExecFn failure")
+	}
+}
+
+func TestParseAuthors_MalformedLines(t *testing.T) {
+	orig := gitExecFn
+	defer func() { gitExecFn = orig }()
+
+	gitExecFn = func(_ string, _ ...string) ([]byte, error) {
+		return []byte("no-separator\nalice@a.com\n\n"), nil
+	}
+
+	parser := NewGitParser("/fake")
+	authors, err := parser.ParseAuthors(ParseOptions{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(authors) != 0 {
+		t.Errorf("expected 0 authors for malformed input, got %d", len(authors))
 	}
 }
