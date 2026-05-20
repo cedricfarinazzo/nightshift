@@ -4,23 +4,23 @@ package commands
 
 import (
 	"context"
-	"os"
 	"testing"
 
 	"github.com/cedricfarinazzo/nightshift/internal/jira"
+	"github.com/cedricfarinazzo/nightshift/internal/security"
 )
 
 // e2eJiraClient returns a real Jira client configured for the sedinfra/VC project.
 // Skips the test if NIGHTSHIFT_JIRA_TOKEN is not set.
 func e2eJiraClient(t *testing.T) (*jira.Client, jira.JiraConfig) {
 	t.Helper()
-	if os.Getenv("NIGHTSHIFT_JIRA_TOKEN") == "" {
+	if security.GetJiraToken() == "" {
 		t.Skip("NIGHTSHIFT_JIRA_TOKEN not set")
 	}
 	cfg := jira.JiraConfig{
 		Site:     "sedinfra",
 		Email:    "cedric.farinazzo@gmail.com",
-		TokenEnv: "NIGHTSHIFT_JIRA_TOKEN",
+		TokenEnv: security.EnvJiraToken,
 		Project:  "VC",
 		Label:    "nightshift",
 	}

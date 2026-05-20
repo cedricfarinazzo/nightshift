@@ -13,7 +13,31 @@ import (
 const (
 	EnvAnthropicKey = "ANTHROPIC_API_KEY"
 	EnvOpenAIKey    = "OPENAI_API_KEY"
+	EnvJiraToken    = "NIGHTSHIFT_JIRA_TOKEN"
+	EnvGitHubToken  = "GITHUB_TOKEN"
+	EnvGHToken      = "GH_TOKEN"
+	EnvCodexToken   = "CODEX_TOKEN"
 )
+
+// GetAnthropicKey returns the Anthropic API key from the environment.
+func GetAnthropicKey() string { return os.Getenv(EnvAnthropicKey) }
+
+// GetOpenAIKey returns the OpenAI API key from the environment.
+func GetOpenAIKey() string { return os.Getenv(EnvOpenAIKey) }
+
+// GetJiraToken returns the Nightshift Jira token from the environment.
+func GetJiraToken() string { return os.Getenv(EnvJiraToken) }
+
+// GetCodexToken returns the Codex token from the environment.
+func GetCodexToken() string { return os.Getenv(EnvCodexToken) }
+
+// GetGitHubToken returns GITHUB_TOKEN with fallback to GH_TOKEN.
+func GetGitHubToken() string {
+	if tok := os.Getenv(EnvGitHubToken); tok != "" {
+		return tok
+	}
+	return os.Getenv(EnvGHToken)
+}
 
 // CredentialStatus represents the validation status of a credential.
 type CredentialStatus struct {
