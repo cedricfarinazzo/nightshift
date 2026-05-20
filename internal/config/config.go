@@ -167,7 +167,6 @@ type LoggingConfig struct {
 // ReportingConfig defines reporting settings.
 type ReportingConfig struct {
 	MorningSummary bool    `mapstructure:"morning_summary"`
-	Email          *string `mapstructure:"email"`         // Optional email notification
 	SlackWebhook   *string `mapstructure:"slack_webhook"` // Optional Slack webhook
 }
 

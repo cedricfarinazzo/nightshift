@@ -200,7 +200,6 @@ logging:
 # Reporting configuration
 reporting:
   morning_summary: true          # Generate morning summary
-  # email: user@example.com      # Optional email notification
   # slack_webhook: https://...   # Optional Slack notification
 `
 }

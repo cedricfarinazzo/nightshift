@@ -9,19 +9,20 @@ import (
 	"time"
 
 	"github.com/cedricfarinazzo/nightshift/internal/agents"
+	"github.com/cedricfarinazzo/nightshift/internal/security"
 )
 
 // e2eClient returns a real Jira client configured for the sedinfra/VC project.
 // Skips the test if NIGHTSHIFT_JIRA_TOKEN is not set.
 func e2eClient(t *testing.T) *Client {
 	t.Helper()
-	if os.Getenv("NIGHTSHIFT_JIRA_TOKEN") == "" {
+	if security.GetJiraToken() == "" {
 		t.Skip("NIGHTSHIFT_JIRA_TOKEN not set; skipping e2e test")
 	}
 	cfg := JiraConfig{
 		Site:     "sedinfra",
 		Email:    "cedric.farinazzo@gmail.com",
-		TokenEnv: "NIGHTSHIFT_JIRA_TOKEN",
+		TokenEnv: security.EnvJiraToken,
 		Projects: []ProjectConfig{{Key: "VC", Label: "nightshift"}},
 	}
 	client, err := NewClient(cfg)
@@ -191,7 +192,7 @@ func TestE2E_VC3_ClientAccessors(t *testing.T) {
 }
 
 func TestE2E_VC3_NewClient_BadCredentials(t *testing.T) {
-	if os.Getenv("NIGHTSHIFT_JIRA_TOKEN") == "" {
+	if security.GetJiraToken() == "" {
 		t.Skip("NIGHTSHIFT_JIRA_TOKEN not set; skipping e2e test")
 	}
 	// Use a wrong token — NewClient should succeed (it only validates config),
@@ -412,7 +413,7 @@ func TestE2E_VC6_ValidateTicket_RejectedFlow(t *testing.T) {
 // ── VC-7: Per-ticket workspace & branch management ───────────────────────────
 
 func TestE2E_VC7_BranchName(t *testing.T) {
-	if os.Getenv("NIGHTSHIFT_JIRA_TOKEN") == "" {
+	if security.GetJiraToken() == "" {
 		t.Skip("NIGHTSHIFT_JIRA_TOKEN not set; skipping e2e test")
 	}
 	got := BranchName("VC-7")
@@ -422,7 +423,7 @@ func TestE2E_VC7_BranchName(t *testing.T) {
 }
 
 func TestE2E_VC7_CommitMessage(t *testing.T) {
-	if os.Getenv("NIGHTSHIFT_JIRA_TOKEN") == "" {
+	if security.GetJiraToken() == "" {
 		t.Skip("NIGHTSHIFT_JIRA_TOKEN not set; skipping e2e test")
 	}
 	tests := []struct {
@@ -441,7 +442,7 @@ func TestE2E_VC7_CommitMessage(t *testing.T) {
 }
 
 func TestE2E_VC7_SetupWorkspace_InvalidKey(t *testing.T) {
-	if os.Getenv("NIGHTSHIFT_JIRA_TOKEN") == "" {
+	if security.GetJiraToken() == "" {
 		t.Skip("NIGHTSHIFT_JIRA_TOKEN not set; skipping e2e test")
 	}
 	proj := ProjectConfig{
@@ -460,7 +461,7 @@ func TestE2E_VC7_SetupWorkspace_InvalidKey(t *testing.T) {
 }
 
 func TestE2E_VC7_CleanupStaleWorkspaces_Empty(t *testing.T) {
-	if os.Getenv("NIGHTSHIFT_JIRA_TOKEN") == "" {
+	if security.GetJiraToken() == "" {
 		t.Skip("NIGHTSHIFT_JIRA_TOKEN not set; skipping e2e test")
 	}
 	cfg := JiraConfig{WorkspaceRoot: t.TempDir(), CleanupAfterDays: 30}
@@ -500,7 +501,7 @@ func TestE2E_VC11_PostComment(t *testing.T) {
 // authenticated. Returns true when both conditions are satisfied.
 func e2eGHAvailable(t *testing.T) bool {
 	t.Helper()
-	if os.Getenv("NIGHTSHIFT_JIRA_TOKEN") == "" {
+	if security.GetJiraToken() == "" {
 		t.Skip("NIGHTSHIFT_JIRA_TOKEN not set; skipping e2e test")
 	}
 	// Verify gh CLI is present and authenticated.

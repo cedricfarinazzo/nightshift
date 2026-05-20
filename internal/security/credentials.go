@@ -13,7 +13,39 @@ import (
 const (
 	EnvAnthropicKey = "ANTHROPIC_API_KEY"
 	EnvOpenAIKey    = "OPENAI_API_KEY"
+	EnvJiraToken    = "NIGHTSHIFT_JIRA_TOKEN"
+	EnvGitHubToken  = "GITHUB_TOKEN"
+	EnvGHToken      = "GH_TOKEN"
+	EnvCodexToken   = "CODEX_TOKEN"
 )
+
+// Get* helpers provide lightweight, direct access to individual credentials.
+// They bypass CredentialManager validation by design: these are utility accessors
+// for simple env-var reads across the codebase. CredentialManager.ValidateRequired
+// and ValidateAll remain the canonical validators for startup/configuration checks.
+// Use Get* for straightforward credential lookups; use CredentialManager for
+// comprehensive validation, masking, and status reporting.
+
+// GetAnthropicKey returns the Anthropic API key from the environment.
+func GetAnthropicKey() string { return os.Getenv(EnvAnthropicKey) }
+
+// GetOpenAIKey returns the OpenAI API key from the environment.
+func GetOpenAIKey() string { return os.Getenv(EnvOpenAIKey) }
+
+// GetJiraToken returns the Nightshift Jira token from the environment.
+func GetJiraToken() string { return os.Getenv(EnvJiraToken) }
+
+// GetCodexToken returns the Codex token from the environment.
+func GetCodexToken() string { return os.Getenv(EnvCodexToken) }
+
+// GetGitHubToken returns GITHUB_TOKEN with fallback to GH_TOKEN.
+// Precedence: GITHUB_TOKEN (preferred) > GH_TOKEN (fallback).
+func GetGitHubToken() string {
+	if tok := os.Getenv(EnvGitHubToken); tok != "" {
+		return tok
+	}
+	return os.Getenv(EnvGHToken)
+}
 
 // CredentialStatus represents the validation status of a credential.
 type CredentialStatus struct {
@@ -51,6 +83,10 @@ func (m *CredentialManager) ValidateRequired() error {
 }
 
 // ValidateAll checks all known credentials and returns their status.
+// Only validates AI provider credentials (Anthropic/OpenAI) since those are
+// always required at startup. Optional credentials (Jira/GitHub/Codex) are
+// validated lazily where they are used. Use the Get* helpers above to retrieve
+// optional credentials without validation.
 func (m *CredentialManager) ValidateAll() []CredentialStatus {
 	credentials := []struct {
 		name   string
