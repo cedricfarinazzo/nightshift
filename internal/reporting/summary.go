@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"net/smtp"
 	"os"
 	"path/filepath"
 	"sort"
@@ -318,14 +317,6 @@ func (g *Generator) SendNotifications(summary *Summary) error {
 
 	var errs []error
 
-	// Send email if configured
-	if g.cfg.Reporting.Email != nil && *g.cfg.Reporting.Email != "" {
-		if err := g.sendEmail(summary, *g.cfg.Reporting.Email); err != nil {
-			g.logger.Errorf("email notification failed: %v", err)
-			errs = append(errs, fmt.Errorf("email: %w", err))
-		}
-	}
-
 	// Send Slack if configured
 	if g.cfg.Reporting.SlackWebhook != nil && *g.cfg.Reporting.SlackWebhook != "" {
 		if err := g.sendSlack(summary, *g.cfg.Reporting.SlackWebhook); err != nil {
@@ -338,45 +329,6 @@ func (g *Generator) SendNotifications(summary *Summary) error {
 		return fmt.Errorf("notification errors: %v", errs)
 	}
 
-	return nil
-}
-
-// sendEmail sends the summary via email.
-func (g *Generator) sendEmail(summary *Summary, to string) error {
-	// Get SMTP settings from environment
-	smtpHost := os.Getenv("NIGHTSHIFT_SMTP_HOST")
-	smtpPort := os.Getenv("NIGHTSHIFT_SMTP_PORT")
-	smtpUser := os.Getenv("NIGHTSHIFT_SMTP_USER")
-	smtpPass := os.Getenv("NIGHTSHIFT_SMTP_PASS")
-	smtpFrom := os.Getenv("NIGHTSHIFT_SMTP_FROM")
-
-	if smtpHost == "" {
-		return fmt.Errorf("NIGHTSHIFT_SMTP_HOST not set")
-	}
-	if smtpPort == "" {
-		smtpPort = "587"
-	}
-	if smtpFrom == "" {
-		smtpFrom = "nightshift@localhost"
-	}
-
-	subject := fmt.Sprintf("Nightshift Summary - %s", summary.Date.Format("2006-01-02"))
-
-	// Build email message
-	msg := fmt.Sprintf("From: %s\r\nTo: %s\r\nSubject: %s\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n%s",
-		smtpFrom, to, subject, summary.Content)
-
-	var auth smtp.Auth
-	if smtpUser != "" && smtpPass != "" {
-		auth = smtp.PlainAuth("", smtpUser, smtpPass, smtpHost)
-	}
-
-	addr := fmt.Sprintf("%s:%s", smtpHost, smtpPort)
-	if err := smtp.SendMail(addr, auth, smtpFrom, []string{to}, []byte(msg)); err != nil {
-		return fmt.Errorf("sending email: %w", err)
-	}
-
-	g.logger.Infof("email sent to %s", to)
 	return nil
 }
 

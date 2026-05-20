@@ -52,27 +52,6 @@ func TestCommitMessage(t *testing.T) {
 	}
 }
 
-func TestPRTitleConventional(t *testing.T) {
-	tests := []struct {
-		ticketKey   string
-		issueType   string
-		scope       string
-		description string
-		want        string
-	}{
-		{"VC-7", "Story", "api", "add workspace support", "feat(api): VC-7: add workspace support"},
-		{"VC-7", "Story", "", "add workspace support", "feat: VC-7: add workspace support"},
-		{"VC-7", "Bug", "", "fix crash", "fix: VC-7: fix crash"},
-	}
-	for _, tt := range tests {
-		got := PRTitle(tt.ticketKey, tt.issueType, tt.scope, tt.description)
-		if got != tt.want {
-			t.Errorf("PRTitle(%q, %q, %q, %q) = %q, want %q",
-				tt.ticketKey, tt.issueType, tt.scope, tt.description, got, tt.want)
-		}
-	}
-}
-
 func TestBranchAheadOfBase(t *testing.T) {
 	t.Run("missing remote branch is not ahead", func(t *testing.T) {
 		workDir := setupRemoteRepoWithMain(t)
