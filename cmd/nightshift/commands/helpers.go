@@ -45,8 +45,8 @@ func newClaudeAgentFromConfig(cfg *config.Config, extra ...agents.Option) *agent
 	if cfg == nil {
 		return agents.NewClaudeAgent(extra...)
 	}
-	opts := []agents.ClaudeOption{
-		agents.WithDangerouslySkipPermissions(cfg.Providers.Claude.DangerouslySkipPermissions),
+	opts := []agents.Option{
+		agents.WithBypassPermissions(cfg.Providers.Claude.DangerouslySkipPermissions),
 	}
 	if cfg.Providers.Claude.Model != "" {
 		opts = append(opts, agents.WithModel(cfg.Providers.Claude.Model))
