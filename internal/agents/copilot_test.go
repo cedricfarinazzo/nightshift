@@ -189,44 +189,6 @@ func TestCopilotAgent_Execute_Timeout(t *testing.T) {
 	}
 }
 
-func TestCopilotAgent_Execute_WithFiles(t *testing.T) {
-	tmpDir := t.TempDir()
-	testFile := tmpDir + "/test.txt"
-	content := "test content"
-	if err := writeTestFile(testFile, content); err != nil {
-		t.Fatal(err)
-	}
-
-	mock := &MockRunner{
-		Stdout:   "Response with context",
-		ExitCode: 0,
-	}
-	agent := NewCopilotAgent(WithCopilotRunner(mock))
-
-	result, err := agent.Execute(context.Background(), ExecuteOptions{
-		Prompt: "analyze this file",
-		Files:  []string{testFile},
-	})
-
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if result.ExitCode != 0 {
-		t.Errorf("ExitCode = %d, want 0", result.ExitCode)
-	}
-
-	// Verify file path was included in prompt file
-	if mock.CapturedPromptFileData == "" {
-		t.Error("expected file context in prompt file")
-	}
-	if !containsString(mock.CapturedPromptFileData, testFile) {
-		t.Error("expected file path in prompt file")
-	}
-	if !containsString(mock.CapturedPromptFileData, "# Related Files") {
-		t.Error("expected related files header in prompt file")
-	}
-}
-
 func TestCopilotAgent_Execute_WithModel_Standalone(t *testing.T) {
 	mock := &MockRunner{Stdout: "response", ExitCode: 0}
 	agent := NewCopilotAgent(

@@ -5,25 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
-	"path/filepath"
-	"strings"
 	"time"
 )
-
-// buildFileContext formats the given file paths as a markdown list for injection
-// into an agent prompt. The agent reads files directly from disk as needed.
-func buildFileContext(files []string) string {
-	var sb strings.Builder
-	sb.WriteString("# Related Files\n\n")
-	for _, path := range files {
-		displayPath := path
-		if abs, err := filepath.Abs(path); err == nil {
-			displayPath = abs
-		}
-		fmt.Fprintf(&sb, "- %s\n", displayPath)
-	}
-	return sb.String()
-}
 
 // handleExecuteResult builds an ExecuteResult from raw runner output, applying
 // uniform timeout detection, exit-code extraction, and JSON parsing. All three
