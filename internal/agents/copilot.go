@@ -160,15 +160,6 @@ func (a *CopilotAgent) Execute(ctx context.Context, opts ExecuteOptions) (*Execu
 	return handleExecuteResult(ctx, stdout, stderr, exitCode, err, timeout, start, compressStats, a.extractJSON)
 }
 
-// ExecuteWithFiles runs gh copilot with file context included.
-func (a *CopilotAgent) ExecuteWithFiles(ctx context.Context, prompt string, files []string, workDir string) (*ExecuteResult, error) {
-	return a.Execute(ctx, ExecuteOptions{
-		Prompt:  prompt,
-		Files:   files,
-		WorkDir: workDir,
-	})
-}
-
 func (a *CopilotAgent) extractJSON(output []byte) []byte {
 	return extractJSON(output)
 }

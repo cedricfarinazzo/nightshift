@@ -182,16 +182,6 @@ func (a *ClaudeAgent) Execute(ctx context.Context, opts ExecuteOptions) (*Execut
 	return handleExecuteResult(ctx, stdout, stderr, exitCode, err, timeout, start, compressStats, a.extractJSON)
 }
 
-// ExecuteWithFiles runs claude with file context included.
-func (a *ClaudeAgent) ExecuteWithFiles(ctx context.Context, prompt string, files []string, workDir string) (*ExecuteResult, error) {
-	return a.Execute(ctx, ExecuteOptions{
-		Prompt:  prompt,
-		Files:   files,
-		WorkDir: workDir,
-	})
-}
-
-
 func (a *ClaudeAgent) extractJSON(output []byte) []byte {
 	return extractJSON(output)
 }
