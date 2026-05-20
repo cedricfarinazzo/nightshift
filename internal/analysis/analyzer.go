@@ -16,6 +16,14 @@ type CommitAuthor struct {
 	Commits int
 }
 
+// gitExecFn runs git with the given args in repoPath and returns raw output.
+// Substitutable in tests.
+var gitExecFn = func(repoPath string, args ...string) ([]byte, error) {
+	cmd := exec.Command("git", args...)
+	cmd.Dir = repoPath
+	return cmd.Output()
+}
+
 // GitParser extracts commit history from a git repository.
 type GitParser struct {
 	repoPath string
@@ -44,10 +52,7 @@ func (gp *GitParser) ParseAuthors(opts ParseOptions) ([]CommitAuthor, error) {
 		args = append(args, "--", opts.FilePath)
 	}
 
-	cmd := exec.Command("git", args...)
-	cmd.Dir = gp.repoPath
-
-	output, err := cmd.Output()
+	output, err := gitExecFn(gp.repoPath, args...)
 	if err != nil {
 		return nil, fmt.Errorf("running git log: %w", err)
 	}

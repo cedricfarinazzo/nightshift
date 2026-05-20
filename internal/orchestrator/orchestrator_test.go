@@ -3,6 +3,8 @@ package orchestrator
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 	"testing"
@@ -918,5 +920,171 @@ func TestRunTaskNoPRURL(t *testing.T) {
 	}
 	if result.OutputRef != "" {
 		t.Errorf("OutputRef = %q, want empty", result.OutputRef)
+	}
+}
+
+// --- ghExec / gitExec injectable var tests ---
+
+func TestAnnotatePR_SkipsWhenMetadataPresent(t *testing.T) {
+	origGh := ghExec
+	defer func() { ghExec = origGh }()
+
+	editCalled := false
+	ghExec = func(_ context.Context, _ string, args ...string) (string, error) {
+		if args[0] == "pr" && args[1] == "view" {
+			return "existing body\n<!-- nightshift:metadata\nkey: val\nnightshift:metadata -->", nil
+		}
+		editCalled = true
+		return "", nil
+	}
+
+	o := New(WithAgent(newMockAgent()))
+	task := &tasks.Task{ID: "t1", Title: "T"}
+	result := &TaskResult{}
+	err := o.annotatePR(context.Background(), "https://github.com/o/r/pull/1", task, result, "/work")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if editCalled {
+		t.Error("gh pr edit should not be called when metadata already present")
+	}
+}
+
+func TestAnnotatePR_AppendsMetadataBlock(t *testing.T) {
+	origGh := ghExec
+	defer func() { ghExec = origGh }()
+
+	var editBody string
+	ghExec = func(_ context.Context, _ string, args ...string) (string, error) {
+		if args[0] == "pr" && args[1] == "view" {
+			return "existing body", nil
+		}
+		// pr edit — capture --body value
+		for i, a := range args {
+			if a == "--body" && i+1 < len(args) {
+				editBody = args[i+1]
+			}
+		}
+		return "", nil
+	}
+
+	o := New(WithAgent(newMockAgent()))
+	task := &tasks.Task{ID: "t1", Title: "MyTask"}
+	result := &TaskResult{Status: StatusCompleted}
+	err := o.annotatePR(context.Background(), "https://github.com/o/r/pull/1", task, result, "/work")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(editBody, "nightshift:metadata") {
+		t.Errorf("edited body missing metadata block, got: %q", editBody)
+	}
+	if !strings.Contains(editBody, "existing body") {
+		t.Errorf("edited body missing original content, got: %q", editBody)
+	}
+}
+
+func TestAnnotatePR_ViewError(t *testing.T) {
+	origGh := ghExec
+	defer func() { ghExec = origGh }()
+
+	ghExec = func(_ context.Context, _ string, args ...string) (string, error) {
+		return "", fmt.Errorf("auth error")
+	}
+
+	o := New(WithAgent(newMockAgent()))
+	err := o.annotatePR(context.Background(), "https://github.com/o/r/pull/1", &tasks.Task{}, &TaskResult{}, "/work")
+	if err == nil {
+		t.Error("expected error from ghExec failure")
+	}
+}
+
+func TestCurrentBranch_OK(t *testing.T) {
+	origGit := gitExec
+	defer func() { gitExec = origGit }()
+
+	gitExec = func(_ context.Context, _ string, args ...string) (string, error) {
+		return "main", nil
+	}
+
+	branch, err := CurrentBranch(context.Background(), "/work")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if branch != "main" {
+		t.Errorf("branch = %q, want main", branch)
+	}
+}
+
+func TestCurrentBranch_Error(t *testing.T) {
+	origGit := gitExec
+	defer func() { gitExec = origGit }()
+
+	gitExec = func(_ context.Context, _ string, args ...string) (string, error) {
+		return "", fmt.Errorf("not a repo")
+	}
+
+	_, err := CurrentBranch(context.Background(), "/work")
+	if err == nil {
+		t.Error("expected error")
+	}
+}
+
+func TestValidateGitRepo_OK(t *testing.T) {
+	origGit := gitExec
+	defer func() { gitExec = origGit }()
+
+	gitExec = func(_ context.Context, _ string, args ...string) (string, error) {
+		return "/some/project", nil
+	}
+
+	err := validateGitRepo(context.Background(), "/some/project")
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateGitRepo_RejectsHome(t *testing.T) {
+	origGit := gitExec
+	defer func() { gitExec = origGit }()
+
+	home, _ := os.UserHomeDir()
+	gitExec = func(_ context.Context, _ string, args ...string) (string, error) {
+		return home, nil
+	}
+
+	err := validateGitRepo(context.Background(), home)
+	if err == nil {
+		t.Error("expected error for HOME as repo root")
+	}
+	if !strings.Contains(err.Error(), "$HOME") {
+		t.Errorf("error should mention $HOME, got: %v", err)
+	}
+}
+
+func TestCheckoutBranch_OK(t *testing.T) {
+	origGit := gitExec
+	defer func() { gitExec = origGit }()
+
+	gitExec = func(_ context.Context, _ string, args ...string) (string, error) {
+		return "", nil
+	}
+
+	err := checkoutBranch(context.Background(), "/work", "feature/x")
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestCheckoutBranch_Error(t *testing.T) {
+	origGit := gitExec
+	defer func() { gitExec = origGit }()
+
+	gitExec = func(_ context.Context, _ string, args ...string) (string, error) {
+		return "", fmt.Errorf("branch not found")
+	}
+
+	err := checkoutBranch(context.Background(), "/work", "feature/x")
+	if err == nil {
+		t.Error("expected error")
 	}
 }
