@@ -230,7 +230,7 @@ func (o *Orchestrator) ProcessFeedback(ctx context.Context, ticket Ticket, ws *W
 	// from re-triggering the agent on the same already-seen review comments.
 	if result.PushedCommits > 0 || result.AcknowledgedOnly {
 		body := result.Summary
-		if result.AcknowledgedOnly {
+		if result.AcknowledgedOnly && result.PushedCommits == 0 {
 			body = "Reviewed open comments — no code changes needed; review feedback already addressed."
 		}
 		o.emit("📝 recording rework acknowledgement on Jira %s", ticket.Key)
