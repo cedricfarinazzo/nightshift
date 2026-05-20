@@ -25,6 +25,7 @@ import (
 	"github.com/cedricfarinazzo/nightshift/internal/providers"
 	"github.com/cedricfarinazzo/nightshift/internal/reporting"
 	"github.com/cedricfarinazzo/nightshift/internal/scheduler"
+	"github.com/cedricfarinazzo/nightshift/internal/security"
 	"github.com/cedricfarinazzo/nightshift/internal/setup"
 	"github.com/cedricfarinazzo/nightshift/internal/tasks"
 )
@@ -466,10 +467,10 @@ func newSetupModel() (*setupModel, error) {
 	includePathStep := !nightshiftInPath
 
 	pendingFetches := 0
-	if os.Getenv("ANTHROPIC_API_KEY") != "" {
+	if security.GetAnthropicKey() != "" {
 		pendingFetches++
 	}
-	if os.Getenv("OPENAI_API_KEY") != "" {
+	if security.GetOpenAIKey() != "" {
 		pendingFetches++
 	}
 
@@ -607,7 +608,7 @@ func newSetupModel() (*setupModel, error) {
 func (m *setupModel) Init() tea.Cmd {
 	cmds := []tea.Cmd{m.spinner.Tick}
 
-	if key := os.Getenv("ANTHROPIC_API_KEY"); key != "" {
+	if key := security.GetAnthropicKey(); key != "" {
 		cmds = append(cmds, func() tea.Msg {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
@@ -616,7 +617,7 @@ func (m *setupModel) Init() tea.Cmd {
 		})
 	}
 
-	if key := os.Getenv("OPENAI_API_KEY"); key != "" {
+	if key := security.GetOpenAIKey(); key != "" {
 		cmds = append(cmds, func() tea.Msg {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()

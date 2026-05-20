@@ -38,11 +38,6 @@ func CommitMessage(ticketKey, issueType, scope, description string) string {
 	return fmt.Sprintf("%s: %s: %s", prefix, ticketKey, description)
 }
 
-// PRTitle returns a pull request title for a Jira ticket (same format as CommitMessage).
-func PRTitle(ticketKey, issueType, scope, description string) string {
-	return CommitMessage(ticketKey, issueType, scope, description)
-}
-
 // HasChanges reports whether the repo at repoPath has uncommitted changes.
 func HasChanges(ctx context.Context, repoPath string) (bool, error) {
 	out, err := gitExec(ctx, repoPath, "status", "--porcelain")

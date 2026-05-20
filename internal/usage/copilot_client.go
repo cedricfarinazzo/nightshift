@@ -7,10 +7,11 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/cedricfarinazzo/nightshift/internal/security"
 )
 
 // Version is injected by the caller at startup to populate User-Agent headers.
@@ -117,13 +118,8 @@ func (c *CopilotClient) discoverToken(ctx context.Context) (string, error) {
 		}
 	}
 
-	// 2. $GITHUB_TOKEN
-	if tok := os.Getenv("GITHUB_TOKEN"); tok != "" {
-		return tok, nil
-	}
-
-	// 3. $GH_TOKEN
-	if tok := os.Getenv("GH_TOKEN"); tok != "" {
+	// 2. $GITHUB_TOKEN with fallback to $GH_TOKEN
+	if tok := security.GetGitHubToken(); tok != "" {
 		return tok, nil
 	}
 
