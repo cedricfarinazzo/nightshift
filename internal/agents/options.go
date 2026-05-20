@@ -55,26 +55,70 @@ type ClaudeOption = Option
 type CodexOption = Option
 type CopilotOption = Option
 
-// Deprecated function aliases for backward compatibility — use the unprefixed equivalents.
-var (
-	WithCodexBinaryPath      = WithBinaryPath
-	WithCodexDefaultTimeout  = WithDefaultTimeout
-	WithCodexRunner          = WithRunner
-	WithCodexModel           = WithModel
-	WithCodexEffort          = WithEffort
-	WithCopilotBinaryPath    = WithBinaryPath
-	WithCopilotDefaultTimeout = WithDefaultTimeout
-	WithCopilotRunner        = WithRunner
-	WithCopilotModel         = WithModel
-	WithCopilotEffort        = WithEffort
+// Deprecated: use WithBinaryPath instead.
+func WithCodexBinaryPath(path string) Option {
+	return WithBinaryPath(path)
+}
 
-	// WithDangerouslySkipPermissions was the Claude-specific bypass flag.
-	WithDangerouslySkipPermissions = WithBypassPermissions
-	// WithDangerouslyBypassApprovalsAndSandbox was the Codex-specific bypass flag.
-	WithDangerouslyBypassApprovalsAndSandbox = WithBypassPermissions
-	// WithCopilotDangerouslySkipPermissions was the Copilot-specific bypass flag.
-	WithCopilotDangerouslySkipPermissions = WithBypassPermissions
-)
+// Deprecated: use WithDefaultTimeout instead.
+func WithCodexDefaultTimeout(d time.Duration) Option {
+	return WithDefaultTimeout(d)
+}
+
+// Deprecated: use WithRunner instead.
+func WithCodexRunner(r CommandRunner) Option {
+	return WithRunner(r)
+}
+
+// Deprecated: use WithModel instead.
+func WithCodexModel(model string) Option {
+	return WithModel(model)
+}
+
+// Deprecated: use WithEffort instead.
+func WithCodexEffort(effort string) Option {
+	return WithEffort(effort)
+}
+
+// Deprecated: use WithBinaryPath instead.
+func WithCopilotBinaryPath(path string) Option {
+	return WithBinaryPath(path)
+}
+
+// Deprecated: use WithDefaultTimeout instead.
+func WithCopilotDefaultTimeout(d time.Duration) Option {
+	return WithDefaultTimeout(d)
+}
+
+// Deprecated: use WithRunner instead.
+func WithCopilotRunner(r CommandRunner) Option {
+	return WithRunner(r)
+}
+
+// Deprecated: use WithModel instead.
+func WithCopilotModel(model string) Option {
+	return WithModel(model)
+}
+
+// Deprecated: use WithEffort instead.
+func WithCopilotEffort(effort string) Option {
+	return WithEffort(effort)
+}
+
+// Deprecated: use WithBypassPermissions instead.
+func WithDangerouslySkipPermissions(enabled bool) Option {
+	return WithBypassPermissions(enabled)
+}
+
+// Deprecated: use WithBypassPermissions instead.
+func WithDangerouslyBypassApprovalsAndSandbox(enabled bool) Option {
+	return WithBypassPermissions(enabled)
+}
+
+// Deprecated: use WithBypassPermissions instead.
+func WithCopilotDangerouslySkipPermissions(enabled bool) Option {
+	return WithBypassPermissions(enabled)
+}
 
 // cliAvailable checks if a binary is available in PATH.
 func cliAvailable(binaryPath string) bool {

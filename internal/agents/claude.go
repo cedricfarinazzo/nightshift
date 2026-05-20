@@ -5,9 +5,9 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"os/exec"
 	"strings"
 	"syscall"
-	"os/exec"
 	"time"
 )
 

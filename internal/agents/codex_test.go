@@ -503,7 +503,7 @@ func TestCodexAgent_Effort(t *testing.T) {
 }
 
 // TestCodexAgentExplicitFalseBypassDisablesFlag verifies that explicitly calling
-// WithDangerouslyBypassApprovalsAndSandbox(false) does disable the flag.
+// WithBypassPermissions(false) does disable the flag.
 func TestCodexAgentExplicitFalseBypassDisablesFlag(t *testing.T) {
 	mock := &MockRunner{Stdout: "done"}
 	agent := NewCodexAgent(
