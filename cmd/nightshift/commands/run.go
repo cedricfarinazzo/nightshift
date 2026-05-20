@@ -622,6 +622,212 @@ func newRunID() string {
 	return hex.EncodeToString(b)
 }
 
+// repoTasksParams holds all parameters for runRepoTasks.
+type repoTasksParams struct {
+	cfg          *config.Config
+	st           *state.State
+	selector     *tasks.Selector
+	orch         *orchestrator.Orchestrator
+	choice       *providerChoice
+	repoPath     string   // filesystem path for agent execution
+	stateKey     string   // key for cooldown / state tracking (rw.Name in workspace mode)
+	allowedTasks []string // per-repo task type filter; nil = no filter
+	taskFilter   string   // --task flag value
+	maxTasks     int
+	randomTask   bool
+	branch       string
+	report       *runReport
+	log          *logging.Logger
+	projectStart time.Time
+	verbose      bool // print task progress to stdout (non-interactive CLI)
+}
+
+// runRepoTasks executes selected tasks for one repo/project and records results.
+// It uses stateKey (not repoPath) for all cooldown / state-record operations.
+// Returns (tasksRun, completed, failed).
+func runRepoTasks(ctx context.Context, p repoTasksParams) (int, int, int) {
+	var selectedTasks []tasks.ScoredTask
+	if p.taskFilter != "" {
+		def, err := tasks.GetDefinition(tasks.TaskType(p.taskFilter))
+		if err != nil {
+			p.log.Errorf("unknown task type: %s", p.taskFilter)
+			return 0, 0, 0
+		}
+		selectedTasks = []tasks.ScoredTask{{
+			Definition: def,
+			Score:      p.selector.ScoreTask(def.Type, p.stateKey),
+			Project:    p.stateKey,
+		}}
+	} else if p.randomTask {
+		if picked := p.selector.SelectRandom(p.stateKey); picked != nil {
+			selectedTasks = []tasks.ScoredTask{*picked}
+		}
+	} else {
+		n := p.maxTasks
+		if n <= 0 {
+			n = 1
+		}
+		selectedTasks = p.selector.SelectTopN(p.stateKey, n)
+	}
+
+	// Apply per-repo task type filter.
+	if len(p.allowedTasks) > 0 {
+		filtered := selectedTasks[:0]
+		for _, st := range selectedTasks {
+			for _, allowed := range p.allowedTasks {
+				if string(st.Definition.Type) == allowed {
+					filtered = append(filtered, st)
+					break
+				}
+			}
+		}
+		selectedTasks = filtered
+	}
+
+	if len(selectedTasks) == 0 {
+		p.log.Infof("no tasks for repo %s", p.stateKey)
+		return 0, 0, 0
+	}
+
+	start := p.projectStart
+	if start.IsZero() {
+		start = time.Now()
+	}
+
+	var tasksRun, completed, failed int
+	projectTaskTypes := make([]string, 0, len(selectedTasks))
+	projectTokensUsed := 0
+
+	for _, scoredTask := range selectedTasks {
+		select {
+		case <-ctx.Done():
+			return tasksRun, completed, failed
+		default:
+		}
+
+		tasksRun++
+		if p.verbose {
+			fmt.Printf("\n--- Running: %s (via %s) ---\n", scoredTask.Definition.Name, p.choice.name)
+		}
+		projectTaskTypes = append(projectTaskTypes, string(scoredTask.Definition.Type))
+
+		p.orch.SetRunMetadata(&orchestrator.RunMetadata{
+			Provider:  p.choice.name,
+			TaskType:  string(scoredTask.Definition.Type),
+			TaskScore: scoredTask.Score,
+			CostTier:  scoredTask.Definition.CostTier.String(),
+			RunStart:  start,
+			Branch:    p.branch,
+		})
+
+		taskInstance := &tasks.Task{
+			ID:          fmt.Sprintf("%s:%s", scoredTask.Definition.Type, p.stateKey),
+			Title:       scoredTask.Definition.Name,
+			Description: scoredTask.Definition.Description,
+			Priority:    int(scoredTask.Score),
+			Type:        scoredTask.Definition.Type,
+		}
+
+		p.st.MarkAssigned(taskInstance.ID, p.stateKey, string(scoredTask.Definition.Type))
+		result, runErr := p.orch.RunTask(ctx, taskInstance, p.repoPath)
+		p.st.ClearAssigned(taskInstance.ID)
+
+		if runErr != nil {
+			failed++
+			p.log.Errorf("task %s failed: %v", taskInstance.ID, runErr)
+			if p.verbose {
+				fmt.Printf("  FAILED: %v\n", runErr)
+			}
+			if p.report != nil {
+				p.report.addTask(reporting.TaskResult{
+					Project:  p.stateKey,
+					TaskType: string(scoredTask.Definition.Type),
+					Title:    scoredTask.Definition.Name,
+					Status:   "failed",
+					Duration: result.Duration,
+				})
+			}
+			continue
+		}
+
+		switch result.Status {
+		case orchestrator.StatusCompleted:
+			completed++
+			p.st.RecordTaskRun(p.stateKey, string(scoredTask.Definition.Type))
+			if p.verbose {
+				fmt.Printf("  COMPLETED in %d iteration(s) (%s)\n", result.Iterations, result.Duration)
+			}
+			_, maxTok := scoredTask.Definition.EstimatedTokens()
+			projectTokensUsed += maxTok
+			if p.report != nil {
+				p.report.addTask(reporting.TaskResult{
+					Project:    p.stateKey,
+					TaskType:   string(scoredTask.Definition.Type),
+					Title:      scoredTask.Definition.Name,
+					Status:     "completed",
+					OutputType: result.OutputType,
+					OutputRef:  result.OutputRef,
+					TokensUsed: maxTok,
+					Duration:   result.Duration,
+					Notes:      compressionNotes(result.Logs),
+				})
+			}
+		case orchestrator.StatusAbandoned:
+			failed++
+			if p.verbose {
+				fmt.Printf("  ABANDONED after %d iteration(s): %s\n", result.Iterations, result.Error)
+			}
+			if p.report != nil {
+				p.report.addTask(reporting.TaskResult{
+					Project:    p.stateKey,
+					TaskType:   string(scoredTask.Definition.Type),
+					Title:      scoredTask.Definition.Name,
+					Status:     "failed",
+					SkipReason: result.Error,
+					Duration:   result.Duration,
+				})
+			}
+		default:
+			failed++
+			if p.verbose {
+				fmt.Printf("  FAILED: %s\n", result.Error)
+			}
+			if p.report != nil {
+				p.report.addTask(reporting.TaskResult{
+					Project:    p.stateKey,
+					TaskType:   string(scoredTask.Definition.Type),
+					Title:      scoredTask.Definition.Name,
+					Status:     "failed",
+					SkipReason: result.Error,
+					Duration:   result.Duration,
+				})
+			}
+		}
+	}
+
+	// Record project run using stateKey so cooldowns work across workspace clones.
+	p.st.RecordProjectRun(p.stateKey)
+	projectStatus := "partial"
+	if failed == 0 && completed > 0 {
+		projectStatus = "success"
+	}
+	if completed == 0 && failed > 0 {
+		projectStatus = "failed"
+	}
+	p.st.AddRunRecord(state.RunRecord{
+		StartTime:  start,
+		EndTime:    time.Now(),
+		Provider:   p.choice.name,
+		Project:    p.stateKey,
+		Tasks:      projectTaskTypes,
+		TokensUsed: projectTokensUsed,
+		Status:     projectStatus,
+		Branch:     p.branch,
+	})
+
+	return tasksRun, completed, failed
+}
+
 // workspacedRun clones each configured repo into a fresh workspace and runs
 // tasks there, using the repo Name as the state key for cooldown tracking.
 func workspacedRun(ctx context.Context, p executeRunParams) error {
@@ -708,14 +914,7 @@ func workspacedRun(ctx context.Context, p executeRunParams) error {
 		default:
 		}
 
-		// Use repo Name as stable state key (not UUID path) so cooldowns work.
-		stateKey := rw.Name
-		projectTaskTypes := make([]string, 0)
-		projectTokensUsed := 0
-		projectCompleted := 0
-		projectFailed := 0
-
-		// Detect branch from cloned workspace repo (or use flag value from params)
+		// Detect branch from cloned workspace repo (or use flag value from params).
 		repoBranch := p.branch
 		if repoBranch == "" {
 			if detected, err := orchestrator.CurrentBranch(ctx, rw.Path); err == nil {
@@ -723,147 +922,32 @@ func workspacedRun(ctx context.Context, p executeRunParams) error {
 			}
 		}
 
-		// Select tasks for this workspace repo using its path as the project key.
-		var selectedTasks []tasks.ScoredTask
-		if p.taskFilter != "" {
-			def, err := tasks.GetDefinition(tasks.TaskType(p.taskFilter))
-			if err != nil {
-				return fmt.Errorf("unknown task type: %s", p.taskFilter)
-			}
-			selectedTasks = []tasks.ScoredTask{{
-				Definition: def,
-				Score:      p.selector.ScoreTask(def.Type, stateKey),
-				Project:    stateKey,
-			}}
-		} else if p.randomTask {
-			if picked := p.selector.SelectRandom(stateKey); picked != nil {
-				selectedTasks = []tasks.ScoredTask{*picked}
-			}
-		} else {
-			n := p.maxTasks
-			if n <= 0 {
-				n = 1
-			}
-			selectedTasks = p.selector.SelectTopN(stateKey, n)
-		}
-
-		if len(selectedTasks) == 0 {
-			p.log.Infof("no tasks for workspace repo %s", rw.Name)
-			continue
-		}
-
 		if !isInteractive() {
 			fmt.Printf("\n=== Workspace Repo: %s (%s) ===\n", rw.Name, rw.Path)
 			fmt.Printf("Provider: %s\n", choice.name)
 		}
 
-		orch.SetRunMetadata(&orchestrator.RunMetadata{
-			Provider: choice.name,
-			RunStart: projectStart,
-			Branch:   repoBranch,
+		run, ok, fail := runRepoTasks(ctx, repoTasksParams{
+			cfg:          p.cfg,
+			st:           p.st,
+			selector:     p.selector,
+			orch:         orch,
+			choice:       choice,
+			repoPath:     rw.Path,
+			stateKey:     rw.Name,
+			allowedTasks: rw.Tasks,
+			taskFilter:   p.taskFilter,
+			maxTasks:     p.maxTasks,
+			randomTask:   p.randomTask,
+			branch:       repoBranch,
+			report:       p.report,
+			log:          p.log,
+			projectStart: projectStart,
+			verbose:      !isInteractive(),
 		})
-
-		for _, scoredTask := range selectedTasks {
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			default:
-			}
-
-			tasksRun++
-			if !isInteractive() {
-				fmt.Printf("\n--- Running: %s (via %s) ---\n", scoredTask.Definition.Name, choice.name)
-			}
-			projectTaskTypes = append(projectTaskTypes, string(scoredTask.Definition.Type))
-
-			taskInstance := &tasks.Task{
-				ID:          fmt.Sprintf("%s:%s", scoredTask.Definition.Type, stateKey),
-				Title:       scoredTask.Definition.Name,
-				Description: scoredTask.Definition.Description,
-				Priority:    int(scoredTask.Score),
-				Type:        scoredTask.Definition.Type,
-			}
-
-			p.st.MarkAssigned(taskInstance.ID, stateKey, string(scoredTask.Definition.Type))
-			result, runErr := orch.RunTask(ctx, taskInstance, rw.Path)
-			p.st.ClearAssigned(taskInstance.ID)
-
-			if runErr != nil {
-				tasksFailed++
-				projectFailed++
-				p.log.Errorf("task %s failed: %v", taskInstance.ID, runErr)
-				if p.report != nil {
-					p.report.addTask(reporting.TaskResult{
-						Project:  rw.Path,
-						TaskType: string(scoredTask.Definition.Type),
-						Title:    scoredTask.Definition.Name,
-						Status:   "failed",
-						Duration: result.Duration,
-					})
-				}
-				continue
-			}
-
-			switch result.Status {
-			case orchestrator.StatusCompleted:
-				tasksCompleted++
-				projectCompleted++
-				if !isInteractive() {
-					fmt.Printf("  COMPLETED in %d iteration(s) (%s)\n", result.Iterations, result.Duration)
-				}
-				p.st.RecordTaskRun(stateKey, string(scoredTask.Definition.Type))
-				_, maxTok := scoredTask.Definition.EstimatedTokens()
-				projectTokensUsed += maxTok
-				if p.report != nil {
-					p.report.addTask(reporting.TaskResult{
-						Project:    rw.Path,
-						TaskType:   string(scoredTask.Definition.Type),
-						Title:      scoredTask.Definition.Name,
-						Status:     "completed",
-						OutputType: result.OutputType,
-						OutputRef:  result.OutputRef,
-						TokensUsed: maxTok,
-						Duration:   result.Duration,
-						Notes:      compressionNotes(result.Logs),
-					})
-				}
-			default:
-				tasksFailed++
-				projectFailed++
-				if !isInteractive() {
-					fmt.Printf("  FAILED: %s\n", result.Error)
-				}
-				if p.report != nil {
-					p.report.addTask(reporting.TaskResult{
-						Project:    rw.Path,
-						TaskType:   string(scoredTask.Definition.Type),
-						Title:      scoredTask.Definition.Name,
-						Status:     "failed",
-						SkipReason: result.Error,
-						Duration:   result.Duration,
-					})
-				}
-			}
-		}
-
-		p.st.RecordProjectRun(stateKey)
-		projectStatus := "partial"
-		if projectFailed == 0 && projectCompleted > 0 {
-			projectStatus = "success"
-		}
-		if projectCompleted == 0 && projectFailed > 0 {
-			projectStatus = "failed"
-		}
-		p.st.AddRunRecord(state.RunRecord{
-			StartTime:  projectStart,
-			EndTime:    time.Now(),
-			Provider:   choice.name,
-			Project:    rw.Path,
-			Tasks:      projectTaskTypes,
-			TokensUsed: projectTokensUsed,
-			Status:     projectStatus,
-			Branch:     p.branch,
-		})
+		tasksRun += run
+		tasksCompleted += ok
+		tasksFailed += fail
 	}
 
 	duration := time.Since(start)
