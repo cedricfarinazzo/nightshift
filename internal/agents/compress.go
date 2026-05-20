@@ -133,6 +133,14 @@ func writePromptFile(ctx context.Context, opts ExecuteOptions) (path string, cle
 		return "", func() {}, nil, fmt.Errorf("write prompt: %w", ferr)
 	}
 
+	if len(opts.Files) > 0 {
+		if _, ferr = fmt.Fprintf(f, "\n\n---\n\n%s", buildFileContext(opts.Files)); ferr != nil {
+			_ = f.Close()
+			_ = os.Remove(f.Name())
+			return "", func() {}, nil, fmt.Errorf("write file context: %w", ferr)
+		}
+	}
+
 	if ferr = f.Close(); ferr != nil {
 		_ = os.Remove(f.Name())
 		return "", func() {}, nil, fmt.Errorf("close prompt file: %w", ferr)

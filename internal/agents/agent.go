@@ -23,6 +23,7 @@ type Agent interface {
 type ExecuteOptions struct {
 	Prompt          string          // The prompt/task for the agent
 	WorkDir         string          // Working directory for execution
+	Files           []string        // Optional file paths to include as context
 	Timeout         time.Duration   // Execution timeout (0 = default)
 	Model           string          // Model to use (optional, uses agent default if empty)
 	ReasoningEffort string          // Reasoning effort (optional; precedence: this value, then agent default, then CLI default)

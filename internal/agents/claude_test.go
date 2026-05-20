@@ -289,6 +289,78 @@ func TestClaudeAgent_Execute_BinaryNotFound(t *testing.T) {
 	}
 }
 
+func TestClaudeAgent_Execute_WithFiles(t *testing.T) {
+	tmpDir := t.TempDir()
+	testFile := filepath.Join(tmpDir, "test.go")
+	if err := os.WriteFile(testFile, []byte("package main"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	mock := &MockRunner{
+		Stdout:   "analyzed file",
+		ExitCode: 0,
+	}
+	agent := NewClaudeAgent(WithRunner(mock))
+
+	result, err := agent.Execute(context.Background(), ExecuteOptions{
+		Prompt: "review code",
+		Files:  []string{testFile},
+	})
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(mock.CapturedPromptFileData, testFile) {
+		t.Error("expected file path in prompt file")
+	}
+	if !strings.Contains(mock.CapturedPromptFileData, "# Related Files") {
+		t.Error("expected related files header in prompt file")
+	}
+	if result.Output != "analyzed file" {
+		t.Errorf("Output = %q", result.Output)
+	}
+}
+
+func TestClaudeAgent_Execute_MissingFile(t *testing.T) {
+	mock := &MockRunner{Stdout: "ok", ExitCode: 0}
+	agent := NewClaudeAgent(WithRunner(mock))
+
+	// Missing files are listed by path only — no read, no error.
+	_, err := agent.Execute(context.Background(), ExecuteOptions{
+		Prompt: "review",
+		Files:  []string{"/nonexistent/file.go"},
+	})
+
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if !strings.Contains(mock.CapturedPromptFileData, "/nonexistent/file.go") {
+		t.Error("expected file path listed in prompt file")
+	}
+}
+
+func TestBuildFileContext(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	file1 := filepath.Join(tmpDir, "file1.txt")
+	file2 := filepath.Join(tmpDir, "file2.go")
+
+	ctx := buildFileContext([]string{file1, file2})
+
+	if ctx == "" {
+		t.Error("expected non-empty context")
+	}
+	if !strings.Contains(ctx, file1) {
+		t.Error("context missing file1 path")
+	}
+	if !strings.Contains(ctx, file2) {
+		t.Error("context missing file2 path")
+	}
+	if !strings.Contains(ctx, "# Related Files") {
+		t.Error("context missing header")
+	}
+}
+
 func TestClaudeAgent_extractJSON(t *testing.T) {
 	agent := NewClaudeAgent()
 
