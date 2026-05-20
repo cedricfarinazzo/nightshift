@@ -642,3 +642,71 @@ func TestProcessFeedback_OnlyFnHasChangesSet_NoPanic(t *testing.T) {
 		t.Errorf("expected error to mention 'push fixes' (commit path reached), got: %v", err)
 	}
 }
+
+// TestProcessFeedback_MixedRepoAcknowledgedOnly reproduces VC-85: when repo1 produces no
+// changes (AcknowledgedOnly=true) and repo2 does push commits, the Jira comment body must
+// use the Summary text, not the "no code changes needed" string.
+func TestProcessFeedback_MixedRepoAcknowledgedOnly(t *testing.T) {
+	sc := &stubJiraClient{}
+	ra := &stubAgent{name: "fix", output: "fixed it"}
+
+	callCount := 0
+	fnHasChanges := func(_ context.Context, _ string) (bool, error) {
+		callCount++
+		// repo1: no changes; repo2: has changes
+		return callCount > 1, nil
+	}
+
+	fnFindPR := func(_ context.Context, _, _ string) (*PRInfo, error) {
+		return &PRInfo{URL: "https://github.com/org/repo/pull/1", Number: 1}, nil
+	}
+	fnFetchReviews := func(_ context.Context, _, _ string) (*PRReviewState, error) {
+		return &PRReviewState{
+			ReviewDecision: "CHANGES_REQUESTED",
+			Reviews:        []Review{{Author: "alice", State: "CHANGES_REQUESTED", Body: "fix it"}},
+		}, nil
+	}
+
+	o := &Orchestrator{
+		client:         sc,
+		cfg:            JiraConfig{},
+		reviewFixAgent: ra,
+		fnHasChanges:   fnHasChanges,
+		fnCommitAndPush: noCommit,
+		fnCreatePR: func(_ context.Context, _ RepoWorkspace, _ Ticket, _ string) (*PRInfo, error) {
+			return nil, nil
+		},
+		fnFindPR:        fnFindPR,
+		fnFetchReviews:  fnFetchReviews,
+		fnPostPRComment: noPRComment,
+	}
+
+	ws := &Workspace{
+		TicketKey: "X-1",
+		Repos: []RepoWorkspace{
+			{Name: "repo1", Path: "/tmp/repo1", Branch: "feature/X-1"},
+			{Name: "repo2", Path: "/tmp/repo2", Branch: "feature/X-1"},
+		},
+	}
+
+	result, err := o.ProcessFeedback(context.Background(), Ticket{Key: "X-1"}, ws)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if result.PushedCommits == 0 {
+		t.Fatal("expected PushedCommits > 0 from repo2")
+	}
+
+	// Jira comment body must NOT be the acknowledged-only message.
+	if len(sc.postCommentCalls) != 1 {
+		t.Fatalf("expected 1 Jira comment, got %d", len(sc.postCommentCalls))
+	}
+	body := sc.postCommentCalls[0].Body
+	if strings.Contains(body, "no code changes needed") {
+		t.Errorf("Jira comment body must not be acknowledged-only message when commits were pushed; got: %q", body)
+	}
+	if !strings.Contains(body, result.Summary) {
+		t.Errorf("Jira comment body should contain the summary; got: %q, want to contain: %q", body, result.Summary)
+	}
+}

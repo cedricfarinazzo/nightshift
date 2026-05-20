@@ -212,6 +212,8 @@ func (o *Orchestrator) ProcessFeedback(ctx context.Context, ticket Ticket, ws *W
 				return nil, fmt.Errorf("jira: feedback: push fixes %s: %w", repo.Name, err)
 			}
 			result.PushedCommits++
+			// If any repo pushes commits, the result is no longer "acknowledged only".
+			result.AcknowledgedOnly = false
 
 			// Post a summary comment on the GitHub PR.
 			o.emit("  posting rework summary to PR %s", prInfo.URL)
@@ -230,7 +232,7 @@ func (o *Orchestrator) ProcessFeedback(ctx context.Context, ticket Ticket, ws *W
 	// from re-triggering the agent on the same already-seen review comments.
 	if result.PushedCommits > 0 || result.AcknowledgedOnly {
 		body := result.Summary
-		if result.AcknowledgedOnly {
+		if result.AcknowledgedOnly && result.PushedCommits == 0 {
 			body = "Reviewed open comments — no code changes needed; review feedback already addressed."
 		}
 		o.emit("📝 recording rework acknowledgement on Jira %s", ticket.Key)
