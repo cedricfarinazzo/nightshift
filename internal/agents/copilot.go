@@ -113,14 +113,6 @@ func (a *CopilotAgent) Execute(ctx context.Context, opts ExecuteOptions) (*Execu
 	return handleExecuteResult(ctx, stdout, stderr, exitCode, err, timeout, start, compressStats)
 }
 
-// ExecuteWithFiles runs gh copilot with file context included.
-func (a *CopilotAgent) ExecuteWithFiles(ctx context.Context, prompt string, files []string, workDir string) (*ExecuteResult, error) {
-	return a.Execute(ctx, ExecuteOptions{
-		Prompt:  prompt,
-		Files:   files,
-		WorkDir: workDir,
-	})
-}
 
 // Available checks if the gh binary is available in PATH and copilot extension is installed.
 func (a *CopilotAgent) Available() bool {

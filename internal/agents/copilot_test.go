@@ -227,32 +227,6 @@ func TestCopilotAgent_Execute_WithFiles(t *testing.T) {
 	}
 }
 
-func TestCopilotAgent_ExecuteWithFiles(t *testing.T) {
-	tmpDir := t.TempDir()
-	testFile := tmpDir + "/test.txt"
-	if err := writeTestFile(testFile, "content"); err != nil {
-		t.Fatal(err)
-	}
-
-	mock := &MockRunner{
-		Stdout:   "Response",
-		ExitCode: 0,
-	}
-	agent := NewCopilotAgent(WithRunner(mock))
-
-	result, err := agent.ExecuteWithFiles(context.Background(), "test prompt", []string{testFile}, "/workdir")
-
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if result.ExitCode != 0 {
-		t.Errorf("ExitCode = %d, want 0", result.ExitCode)
-	}
-	if mock.CapturedDir != "/workdir" {
-		t.Errorf("dir = %q, want %q", mock.CapturedDir, "/workdir")
-	}
-}
-
 func TestCopilotAgent_Execute_WithModel_Standalone(t *testing.T) {
 	mock := &MockRunner{Stdout: "response", ExitCode: 0}
 	agent := NewCopilotAgent(

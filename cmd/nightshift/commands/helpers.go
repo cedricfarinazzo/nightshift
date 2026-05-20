@@ -186,7 +186,13 @@ func newBudgetManager(cfg *config.Config, _ *db.DB) *budget.Manager {
 func workspaceConfigFromApp(cfg *config.Config) workspace.Config {
 	repos := make([]workspace.RepoConfig, len(cfg.Workspace.Repos))
 	for i, r := range cfg.Workspace.Repos {
-		repos[i] = workspace.RepoConfig{URL: r.URL, Name: r.Name}
+		repos[i] = workspace.RepoConfig{
+			URL:     r.URL,
+			Name:    r.Name,
+			Tasks:   r.Tasks,
+			Pattern: r.Pattern,
+			Exclude: r.Exclude,
+		}
 	}
 	return workspace.Config{Root: cfg.Workspace.Root, Repos: repos, TTLDays: 7}
 }

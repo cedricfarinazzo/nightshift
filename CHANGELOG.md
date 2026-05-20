@@ -15,6 +15,9 @@ All notable changes to nightshift are documented in this file.
 
 ### Breaking Changes
 
+- **Removed SMTP email reporting** — `reporting.email` config field and all `NIGHTSHIFT_SMTP_*` env vars
+  are removed. The feature was unwanted and violated config/credential conventions. No replacement.
+
 - **Removed deprecated flat Jira config fields** — `jira.project`, `jira.label`, and `jira.repos`
   top-level fields are removed. Migrate to `jira.projects` list before upgrading:
   ```yaml

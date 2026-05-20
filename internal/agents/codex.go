@@ -87,14 +87,6 @@ func (a *CodexAgent) Execute(ctx context.Context, opts ExecuteOptions) (*Execute
 	return handleExecuteResult(ctx, stdout, stderr, exitCode, err, timeout, start, compressStats)
 }
 
-// ExecuteWithFiles runs codex with file context included.
-func (a *CodexAgent) ExecuteWithFiles(ctx context.Context, prompt string, files []string, workDir string) (*ExecuteResult, error) {
-	return a.Execute(ctx, ExecuteOptions{
-		Prompt:  prompt,
-		Files:   files,
-		WorkDir: workDir,
-	})
-}
 
 // Available checks if the codex binary is available in PATH.
 func (a *CodexAgent) Available() bool {

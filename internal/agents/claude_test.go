@@ -339,32 +339,6 @@ func TestClaudeAgent_Execute_MissingFile(t *testing.T) {
 	}
 }
 
-func TestClaudeAgent_ExecuteWithFiles(t *testing.T) {
-	tmpDir := t.TempDir()
-	testFile := filepath.Join(tmpDir, "main.go")
-	if err := os.WriteFile(testFile, []byte("func main() {}"), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	mock := &MockRunner{
-		Stdout:   "ok",
-		ExitCode: 0,
-	}
-	agent := NewClaudeAgent(WithRunner(mock))
-
-	result, err := agent.ExecuteWithFiles(context.Background(), "analyze", []string{testFile}, tmpDir)
-
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if result.Output != "ok" {
-		t.Errorf("Output = %q", result.Output)
-	}
-	if mock.CapturedDir != tmpDir {
-		t.Errorf("WorkDir = %q, want %q", mock.CapturedDir, tmpDir)
-	}
-}
-
 func TestBuildFileContext(t *testing.T) {
 	tmpDir := t.TempDir()
 

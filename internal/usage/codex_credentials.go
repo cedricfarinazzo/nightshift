@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/cedricfarinazzo/nightshift/internal/security"
 )
 
 // CodexCredentials holds OAuth tokens for the Codex/ChatGPT API.
@@ -39,7 +41,7 @@ type authFileShape struct {
 //  2. $CODEX_HOME/auth.json
 //  3. ~/.codex/auth.json
 func LoadCredentials() (*CodexCredentials, error) {
-	if tok := os.Getenv("CODEX_TOKEN"); tok != "" {
+	if tok := security.GetCodexToken(); tok != "" {
 		return &CodexCredentials{AccessToken: tok}, nil
 	}
 

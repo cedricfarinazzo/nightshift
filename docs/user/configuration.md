@@ -156,7 +156,7 @@ reporting:
 
 ## Workspace Mode
 
-When `workspace.root` is set, each task run clones repos into a fresh isolated directory instead of executing inside your live project directories. This keeps your working tree clean.
+When `workspace.root` is set, each task run clones repos into a fresh isolated directory instead of executing inside your live project directories. This keeps your working tree clean. Workspace mode applies to both `nightshift run` and `nightshift daemon`.
 
 ```yaml
 workspace:
@@ -166,11 +166,20 @@ workspace:
       # name defaults to "repo-a" (URL basename without .git)
     - url: git@github.com:org/repo-b.git
       name: repo-b-custom         # optional override
+      tasks:                      # limit to these task types for this repo only
+        - lint-fix
+        - pr-review
+      pattern: "src/**"           # path glob (informational)
+      exclude:                    # paths to exclude (informational)
+        - vendor/
 ```
 
 - `root`: directory where workspace subdirectories are created. Supports `~`.
 - `repos[].url`: SSH URL only (must start with `git@`). HTTPS URLs are rejected at config load.
-- `repos[].name`: optional human name; defaults to the repo basename without `.git`.
+- `repos[].name`: optional human name; defaults to the repo basename without `.git`. Used as the stable cooldown state key across runs.
+- `repos[].tasks`: optional list of task types allowed for this repo. When set, only these tasks run here regardless of global task config. Omit or use `[]` for no restriction.
+- `repos[].pattern`: optional path glob (informational).
+- `repos[].exclude`: optional exclusion paths (informational).
 
 Each run creates `<root>/<name>_<runID>/` per repo, clones fresh, runs tasks there, and leaves the workspace for 7-day automatic cleanup.
 

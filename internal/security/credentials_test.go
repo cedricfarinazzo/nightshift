@@ -240,3 +240,122 @@ func TestIsConfigFile(t *testing.T) {
 		}
 	}
 }
+
+func TestGetGitHubToken(t *testing.T) {
+	// Save originals
+	origGitHubToken := os.Getenv(EnvGitHubToken)
+	origGHToken := os.Getenv(EnvGHToken)
+	defer func() {
+		_ = os.Setenv(EnvGitHubToken, origGitHubToken)
+		_ = os.Setenv(EnvGHToken, origGHToken)
+	}()
+
+	tests := []struct {
+		name         string
+		githubToken  string
+		ghToken      string
+		expected     string
+	}{
+		{
+			name:        "GITHUB_TOKEN set",
+			githubToken: "token1",
+			ghToken:     "",
+			expected:    "token1",
+		},
+		{
+			name:        "GH_TOKEN set",
+			githubToken: "",
+			ghToken:     "token2",
+			expected:    "token2",
+		},
+		{
+			name:        "both set - GITHUB_TOKEN takes precedence",
+			githubToken: "token1",
+			ghToken:     "token2",
+			expected:    "token1",
+		},
+		{
+			name:        "neither set",
+			githubToken: "",
+			ghToken:     "",
+			expected:    "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_ = os.Unsetenv(EnvGitHubToken)
+			_ = os.Unsetenv(EnvGHToken)
+			if tt.githubToken != "" {
+				_ = os.Setenv(EnvGitHubToken, tt.githubToken)
+			}
+			if tt.ghToken != "" {
+				_ = os.Setenv(EnvGHToken, tt.ghToken)
+			}
+
+			result := GetGitHubToken()
+			if result != tt.expected {
+				t.Errorf("GetGitHubToken() = %q, want %q", result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestGetCredentialAccessors(t *testing.T) {
+	// Save originals
+	origAnthropic := os.Getenv(EnvAnthropicKey)
+	origOpenAI := os.Getenv(EnvOpenAIKey)
+	origJira := os.Getenv(EnvJiraToken)
+	origCodex := os.Getenv(EnvCodexToken)
+	defer func() {
+		_ = os.Setenv(EnvAnthropicKey, origAnthropic)
+		_ = os.Setenv(EnvOpenAIKey, origOpenAI)
+		_ = os.Setenv(EnvJiraToken, origJira)
+		_ = os.Setenv(EnvCodexToken, origCodex)
+	}()
+
+	tests := []struct {
+		name     string
+		envVar   string
+		value    string
+		accessor func() string
+	}{
+		{
+			name:     "GetAnthropicKey",
+			envVar:   EnvAnthropicKey,
+			value:    "sk-ant-test123",
+			accessor: GetAnthropicKey,
+		},
+		{
+			name:     "GetOpenAIKey",
+			envVar:   EnvOpenAIKey,
+			value:    "sk-openai-test456",
+			accessor: GetOpenAIKey,
+		},
+		{
+			name:     "GetJiraToken",
+			envVar:   EnvJiraToken,
+			value:    "jira-token-789",
+			accessor: GetJiraToken,
+		},
+		{
+			name:     "GetCodexToken",
+			envVar:   EnvCodexToken,
+			value:    "codex-token-000",
+			accessor: GetCodexToken,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_ = os.Unsetenv(tt.envVar)
+			if tt.value != "" {
+				_ = os.Setenv(tt.envVar, tt.value)
+			}
+			result := tt.accessor()
+			if result != tt.value {
+				t.Errorf("%s() = %q, want %q", tt.name, result, tt.value)
+			}
+		})
+	}
+}
