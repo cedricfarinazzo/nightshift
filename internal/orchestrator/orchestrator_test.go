@@ -927,15 +927,19 @@ func TestRunTaskNoPRURL(t *testing.T) {
 
 func TestAnnotatePR_SkipsWhenMetadataPresent(t *testing.T) {
 	origGh := ghExec
-	defer func() { ghExec = origGh }()
+	origGetBody := getPRBodyVerbatim
+	defer func() {
+		ghExec = origGh
+		getPRBodyVerbatim = origGetBody
+	}()
 
 	editCalled := false
 	ghExec = func(_ context.Context, _ string, args ...string) (string, error) {
-		if args[0] == "pr" && args[1] == "view" {
-			return "existing body\n<!-- nightshift:metadata\nkey: val\nnightshift:metadata -->", nil
-		}
 		editCalled = true
 		return "", nil
+	}
+	getPRBodyVerbatim = func(_ context.Context, _ string, _ string) (string, error) {
+		return "existing body\n<!-- nightshift:metadata\nkey: val\nnightshift:metadata -->", nil
 	}
 
 	o := New(WithAgent(newMockAgent()))
@@ -952,13 +956,14 @@ func TestAnnotatePR_SkipsWhenMetadataPresent(t *testing.T) {
 
 func TestAnnotatePR_AppendsMetadataBlock(t *testing.T) {
 	origGh := ghExec
-	defer func() { ghExec = origGh }()
+	origGetBody := getPRBodyVerbatim
+	defer func() {
+		ghExec = origGh
+		getPRBodyVerbatim = origGetBody
+	}()
 
 	var editBody string
 	ghExec = func(_ context.Context, _ string, args ...string) (string, error) {
-		if args[0] == "pr" && args[1] == "view" {
-			return "existing body", nil
-		}
 		// pr edit — capture --body value
 		for i, a := range args {
 			if a == "--body" && i+1 < len(args) {
@@ -966,6 +971,9 @@ func TestAnnotatePR_AppendsMetadataBlock(t *testing.T) {
 			}
 		}
 		return "", nil
+	}
+	getPRBodyVerbatim = func(_ context.Context, _ string, _ string) (string, error) {
+		return "existing body", nil
 	}
 
 	o := New(WithAgent(newMockAgent()))
@@ -984,17 +992,17 @@ func TestAnnotatePR_AppendsMetadataBlock(t *testing.T) {
 }
 
 func TestAnnotatePR_ViewError(t *testing.T) {
-	origGh := ghExec
-	defer func() { ghExec = origGh }()
+	origGetBody := getPRBodyVerbatim
+	defer func() { getPRBodyVerbatim = origGetBody }()
 
-	ghExec = func(_ context.Context, _ string, args ...string) (string, error) {
+	getPRBodyVerbatim = func(_ context.Context, _ string, _ string) (string, error) {
 		return "", fmt.Errorf("auth error")
 	}
 
 	o := New(WithAgent(newMockAgent()))
 	err := o.annotatePR(context.Background(), "https://github.com/o/r/pull/1", &tasks.Task{}, &TaskResult{}, "/work")
 	if err == nil {
-		t.Error("expected error from ghExec failure")
+		t.Error("expected error from getPRBodyVerbatim failure")
 	}
 }
 
