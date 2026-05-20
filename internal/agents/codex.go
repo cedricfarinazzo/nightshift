@@ -137,16 +137,6 @@ func (a *CodexAgent) Execute(ctx context.Context, opts ExecuteOptions) (*Execute
 	return handleExecuteResult(ctx, stdout, stderr, exitCode, err, timeout, start, compressStats, a.extractJSON)
 }
 
-// ExecuteWithFiles runs codex with file context included.
-func (a *CodexAgent) ExecuteWithFiles(ctx context.Context, prompt string, files []string, workDir string) (*ExecuteResult, error) {
-	return a.Execute(ctx, ExecuteOptions{
-		Prompt:  prompt,
-		Files:   files,
-		WorkDir: workDir,
-	})
-}
-
-
 func (a *CodexAgent) extractJSON(output []byte) []byte {
 	return extractJSON(output)
 }
