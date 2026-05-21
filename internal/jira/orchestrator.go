@@ -434,14 +434,19 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 			}
 		}
 
-		// Transition to In Progress
-		if err := o.client.TransitionToInProgress(ctx, ticket.Key); err != nil {
-			o.postErrorComment(ctx, ticket.Key, PhaseValidate, err)
-			result.Status = TicketFailed
-			result.Error = err.Error()
-			result.Duration = time.Since(start)
-			o.notifyPhase(ticket.Key, PhaseValidate, true)
-			return result, nil
+		// Transition to In Progress.
+		// Skip when already indeterminate (e.g. ticket fetched by FetchInProgressTickets
+		// after a crash before any phase comment was posted — the ticket is already
+		// "En cours" and Jira exposes no self-loop transition).
+		if ticket.Status.CategoryKey != "indeterminate" {
+			if err := o.client.TransitionToInProgress(ctx, ticket.Key); err != nil {
+				o.postErrorComment(ctx, ticket.Key, PhaseValidate, err)
+				result.Status = TicketFailed
+				result.Error = err.Error()
+				result.Duration = time.Since(start)
+				o.notifyPhase(ticket.Key, PhaseValidate, true)
+				return result, nil
+			}
 		}
 		o.notifyPhase(ticket.Key, PhaseValidate, true)
 	}

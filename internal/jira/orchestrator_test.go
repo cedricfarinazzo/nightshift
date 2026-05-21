@@ -511,6 +511,52 @@ func TestProcessTicket_TransitionToInProgressError(t *testing.T) {
 	}
 }
 
+// TestProcessTicket_InProgressTicket_NoComments covers the crash-resume case:
+// ticket is already "En cours" (indeterminate) with no nightshift comments
+// (crashed before any phase comment was posted). ProcessTicket must NOT call
+// TransitionToInProgress — Jira exposes no self-loop transition and the call
+// would fail with "no reachable in-progress transition available".
+func TestProcessTicket_InProgressTicket_NoComments(t *testing.T) {
+	sc := &stubJiraClient{} // transitionErr is nil — any call would succeed, but we assert it's NOT called
+	va := &stubAgent{
+		name:   "validator",
+		output: `{"valid": true, "score": 8, "issues": [], "missing": [], "suggestions": []}`,
+	}
+	callCount := 0
+	ia := &callCountAgent{
+		calls: []*agents.ExecuteResult{{Output: "plan text"}, {Output: "impl done"}},
+		errs:  []error{nil, nil},
+		count: &callCount,
+	}
+	o := &Orchestrator{
+		client:          sc,
+		cfg:             JiraConfig{},
+		validationAgent: va,
+		implAgent:       ia,
+		fnHasChanges:    func(_ context.Context, _ string) (bool, error) { return false, nil },
+	}
+
+	ticket := Ticket{
+		Key:     "FIN-99",
+		Summary: "crashed mid-run",
+		Status:  Status{CategoryKey: "indeterminate"}, // already "En cours"
+	}
+	result, err := o.ProcessTicket(context.Background(), ticket, &Workspace{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Should proceed past validate (not fail on TransitionToInProgress)
+	if result.Status == TicketFailed && result.Error != "" && strings.Contains(result.Error, "in-progress") {
+		t.Errorf("TransitionToInProgress was called on an already-in-progress ticket: %v", result.Error)
+	}
+	// TransitionToInProgress must NOT have been called
+	for _, call := range sc.transitionCalls {
+		if strings.HasPrefix(call, "inprogress:") {
+			t.Errorf("unexpected TransitionToInProgress call: %s", call)
+		}
+	}
+}
+
 // ── TransitionToReview error ──────────────────────────────────────────────────
 
 func TestProcessTicket_TransitionToReviewError(t *testing.T) {
