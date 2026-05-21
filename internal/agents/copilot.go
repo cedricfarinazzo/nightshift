@@ -95,12 +95,13 @@ func (a *CopilotAgent) Execute(ctx context.Context, opts ExecuteOptions) (*Execu
 		args = append(args, "--model", model)
 	}
 
-	// Add reasoning effort if specified
+	// Add reasoning effort if specified.
+	// Haiku models do not support --effort; skip it regardless of config.
 	effort := opts.ReasoningEffort
 	if effort == "" {
 		effort = a.effort
 	}
-	if effort != "" {
+	if effort != "" && !strings.Contains(strings.ToLower(model), "haiku") {
 		args = append(args, "--effort", effort)
 	}
 
