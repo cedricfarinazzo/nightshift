@@ -38,7 +38,11 @@ func ValidateTicket(ctx context.Context, agent agents.Agent, ticket Ticket, comp
 	}
 	result, err := agent.Execute(ctx, opts)
 	if err != nil {
-		return nil, fmt.Errorf("jira: validation agent error for %s: %w", ticket.Key, err)
+		stderr := ""
+		if result != nil {
+			stderr = result.Error
+		}
+		return nil, fmt.Errorf("jira: validation agent error for %s: %w%s", ticket.Key, err, stderrSuffix(stderr))
 	}
 	vr, err := parseValidationResponse(result.Output)
 	if err != nil {

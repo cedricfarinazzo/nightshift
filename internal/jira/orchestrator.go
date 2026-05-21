@@ -400,6 +400,7 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 				if o.progressf != nil {
 					o.progressf("validate      ✗ failed: %v", err)
 				}
+				o.emit("  ✗ validate failed: %v", err)
 				o.notifyPhase(ticket.Key, PhaseValidate, true)
 				return result, nil
 			}
@@ -1086,6 +1087,15 @@ func agentErrMsg(err error, stderr string) string {
 		return err.Error()
 	}
 	return err.Error() + "; stderr: " + stderr
+}
+
+// stderrSuffix returns "; stderr: <s>" when s is non-empty, else "".
+// Used to append stderr to wrapped error messages without breaking %w.
+func stderrSuffix(s string) string {
+	if s == "" {
+		return ""
+	}
+	return "; stderr: " + s
 }
 
 // saveTicketResult persists the final ticket outcome to the DB. Non-fatal: logs error on failure.
