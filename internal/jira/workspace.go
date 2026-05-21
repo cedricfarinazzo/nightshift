@@ -28,8 +28,6 @@ type RepoWorkspace struct {
 	Branch      string
 	BaseBranch  string
 	IsNew       bool
-	LintCommand string // empty means auto-discover
-	TestCommand string // empty means auto-discover
 }
 
 // SetupWorkspace creates (or reuses) an isolated workspace for ticketKey.
@@ -80,8 +78,6 @@ func SetupWorkspace(ctx context.Context, cfg JiraConfig, proj ProjectConfig, tic
 			Branch:      branch,
 			BaseBranch:  baseBranch,
 			IsNew:       isNew,
-			LintCommand: r.LintCommand,
-			TestCommand: r.TestCommand,
 		})
 	}
 	return &Workspace{TicketKey: ticketKey, Root: wsRoot, Repos: repos}, nil

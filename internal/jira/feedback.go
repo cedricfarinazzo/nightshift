@@ -291,14 +291,6 @@ func buildReworkContent(ticket Ticket) string {
 // Reviewer comments, inline comments, CI failures, and operational instructions
 // must arrive verbatim — they contain file paths, line numbers, and code snippets.
 func buildReworkSuffix(review *PRReviewState, repo RepoWorkspace) string {
-	lintCmd := repo.LintCommand
-	if lintCmd == "" {
-		lintCmd = "golangci-lint run ./..."
-	}
-	testCmd := repo.TestCommand
-	if testCmd == "" {
-		testCmd = "go test ./..."
-	}
 	var b strings.Builder
 	b.WriteString("\n---\n\n")
 	fmt.Fprintf(&b, "## Review Feedback for PR\n\n")
@@ -340,10 +332,8 @@ func buildReworkSuffix(review *PRReviewState, repo RepoWorkspace) string {
 	b.WriteString("2. On disagreement, explain in code comment\n")
 	b.WriteString("3. Don't modify code unrelated to review feedback\n")
 	b.WriteString("\n### Quality Checks (REQUIRED before finishing)\n")
-	b.WriteString("After feedback addressed, run commands below and fix ALL failures:\n\n")
-	fmt.Fprintf(&b, "- Lint: `%s`\n", lintCmd)
-	fmt.Fprintf(&b, "- Test: `%s`\n\n", testCmd)
-	b.WriteString("Do not finish until both exit code 0. Do not commit or push — handled separately.\n")
+	b.WriteString("Detect the project language/toolchain and run the appropriate lint and test commands.\n")
+	b.WriteString("Fix ALL failures. Do not finish until lint and tests pass. Do not commit or push — handled separately.\n")
 	return b.String()
 }
 
