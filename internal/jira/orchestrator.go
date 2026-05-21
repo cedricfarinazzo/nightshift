@@ -487,7 +487,7 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 			result.Error = agentErrMsg(err, stderr)
 			result.Duration = time.Since(start)
 			if o.progressf != nil {
-				o.progressf("plan          ✗ failed: %v", err)
+				o.progressf("plan          ✗ failed: %v", agentErrMsg(err, stderr))
 			}
 			o.notifyPhase(ticket.Key, PhasePlan, true)
 			return result, nil
@@ -542,7 +542,7 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 			result.Error = agentErrMsg(err, stderr)
 			result.Duration = time.Since(start)
 			if o.progressf != nil {
-				o.progressf("implement     ✗ failed: %v", err)
+				o.progressf("implement     ✗ failed: %v", agentErrMsg(err, stderr))
 			}
 			o.notifyPhase(ticket.Key, PhaseImplement, true)
 			return result, nil
