@@ -476,12 +476,16 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 			},
 		})
 		if err != nil {
-			o.savePhaseLog(ctx, ticket.Key, PhasePlan, planCfg.Provider, planCfg.Model, planStart, false, "", err.Error())
+			stderr := ""
+			if planResult != nil {
+				stderr = planResult.Error
+			}
+			o.log.Errorf("ticket %s: plan failed: %v stderr=%q", ticket.Key, err, stderr)
+			o.savePhaseLog(ctx, ticket.Key, PhasePlan, planCfg.Provider, planCfg.Model, planStart, false, "", agentErrMsg(err, stderr))
 			o.postErrorComment(ctx, ticket.Key, PhasePlan, err)
 			result.Status = TicketFailed
-			result.Error = err.Error()
+			result.Error = agentErrMsg(err, stderr)
 			result.Duration = time.Since(start)
-			o.log.Errorf("ticket %s: plan failed: %v", ticket.Key, err)
 			if o.progressf != nil {
 				o.progressf("plan          ✗ failed: %v", err)
 			}
@@ -527,12 +531,16 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 			},
 		})
 		if err != nil {
-			o.savePhaseLog(ctx, ticket.Key, PhaseImplement, implCfg.Provider, implCfg.Model, implStart, false, "", err.Error())
+			stderr := ""
+			if implResult != nil {
+				stderr = implResult.Error
+			}
+			o.log.Errorf("ticket %s: implement failed: %v stderr=%q", ticket.Key, err, stderr)
+			o.savePhaseLog(ctx, ticket.Key, PhaseImplement, implCfg.Provider, implCfg.Model, implStart, false, "", agentErrMsg(err, stderr))
 			o.postErrorComment(ctx, ticket.Key, PhaseImplement, err)
 			result.Status = TicketFailed
-			result.Error = err.Error()
+			result.Error = agentErrMsg(err, stderr)
 			result.Duration = time.Since(start)
-			o.log.Errorf("ticket %s: implement failed: %v", ticket.Key, err)
 			if o.progressf != nil {
 				o.progressf("implement     ✗ failed: %v", err)
 			}
@@ -1068,6 +1076,16 @@ func (o *Orchestrator) savePhaseLog(ctx context.Context, ticketKey string, phase
 	if err := o.db.SaveJiraPhaseLog(ctx, l); err != nil {
 		o.log.Errorf("save phase log %s/%s: %v", ticketKey, phase, err)
 	}
+}
+
+// agentErrMsg combines the process error with captured stderr for richer diagnostics.
+// When stderr is non-empty it is appended so callers get the full picture without
+// having to reconstruct it from two separate fields.
+func agentErrMsg(err error, stderr string) string {
+	if stderr == "" {
+		return err.Error()
+	}
+	return err.Error() + "; stderr: " + stderr
 }
 
 // saveTicketResult persists the final ticket outcome to the DB. Non-fatal: logs error on failure.

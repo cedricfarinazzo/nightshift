@@ -186,7 +186,12 @@ func (o *Orchestrator) ProcessFeedback(ctx context.Context, ticket Ticket, ws *W
 				},
 			})
 			if err != nil {
-				o.savePhaseLog(ctx, ticket.Key, PhaseReviewFix, rfCfg.Provider, rfCfg.Model, rfStart, false, "", err.Error())
+				stderr := ""
+				if agentResult != nil {
+					stderr = agentResult.Error
+				}
+				o.log.Errorf("ticket %s: review-fix failed: %v stderr=%q", ticket.Key, err, stderr)
+				o.savePhaseLog(ctx, ticket.Key, PhaseReviewFix, rfCfg.Provider, rfCfg.Model, rfStart, false, "", agentErrMsg(err, stderr))
 				return nil, fmt.Errorf("jira: feedback: rework agent %s: %w", repo.Name, err)
 			}
 			o.savePhaseLog(ctx, ticket.Key, PhaseReviewFix, rfCfg.Provider, rfCfg.Model, rfStart, true, agentResult.Output, "")
