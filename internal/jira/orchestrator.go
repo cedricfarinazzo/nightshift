@@ -935,21 +935,8 @@ func (o *Orchestrator) buildImplementSuffix(plan string, ws *Workspace) string {
 	b.WriteString("7. Never run `git init` under any circumstances\n")
 	if ws != nil && len(ws.Repos) > 0 {
 		b.WriteString("\n## Quality Checks (REQUIRED before finishing)\n")
-		b.WriteString("For each repo above, run commands below and fix ALL failures before stopping:\n\n")
-		for _, repo := range ws.Repos {
-			lintCmd := repo.LintCommand
-			if lintCmd == "" {
-				lintCmd = "golangci-lint run ./..."
-			}
-			testCmd := repo.TestCommand
-			if testCmd == "" {
-				testCmd = "go test ./..."
-			}
-			fmt.Fprintf(&b, "**%s** (`%s`):\n", repo.Name, repo.Path)
-			fmt.Fprintf(&b, "  - Lint: `%s`\n", lintCmd)
-			fmt.Fprintf(&b, "  - Test: `%s`\n\n", testCmd)
-		}
-		b.WriteString("Do not finish until all lint and test commands exit with code 0.\n")
+		b.WriteString("For each repo above, detect the project language/toolchain and run the appropriate lint and test commands.\n")
+		b.WriteString("Fix ALL failures before stopping. Do not finish until lint and tests pass.\n")
 	}
 	return b.String()
 }

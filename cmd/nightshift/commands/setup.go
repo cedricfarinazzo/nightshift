@@ -2607,7 +2607,7 @@ func writeGlobalConfigToPath(cfg *config.Config, configPath string) error {
 			v.Set("jira.cleanup_after_days", cfg.Jira.CleanupAfterDays)
 		}
 		// Build projects as explicit maps so mapstructure tags are honoured and empty
-		// optional fields (lint_command, test_command, per-project phase overrides) are omitted.
+		// optional fields (per-project phase overrides) are omitted.
 		v.Set("jira.projects", jiraProjectsToMaps(cfg.Jira.Projects))
 		// Write each phase field individually so viper uses the dot-key path instead of
 		// reflecting over a struct (which would lose mapstructure tag key names).
@@ -3467,7 +3467,7 @@ func (m *setupModel) applyJiraConfig() {
 
 // jiraProjectsToMaps serialises Jira project configs into plain maps so viper
 // writes mapstructure-tagged key names (e.g. "base_branch") and omits empty
-// optional fields (lint_command, test_command, per-project phase overrides).
+// optional fields (per-project phase overrides).
 func jiraProjectsToMaps(projects []jiraconfig.ProjectConfig) []map[string]interface{} {
 	result := make([]map[string]interface{}, 0, len(projects))
 	for _, proj := range projects {
@@ -3477,12 +3477,6 @@ func jiraProjectsToMaps(projects []jiraconfig.ProjectConfig) []map[string]interf
 				"name":        r.Name,
 				"url":         r.URL,
 				"base_branch": r.BaseBranch,
-			}
-			if r.LintCommand != "" {
-				repo["lint_command"] = r.LintCommand
-			}
-			if r.TestCommand != "" {
-				repo["test_command"] = r.TestCommand
 			}
 			repoMaps = append(repoMaps, repo)
 		}
