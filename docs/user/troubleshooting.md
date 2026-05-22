@@ -2,7 +2,24 @@
 
 ## `nightshift doctor` is the first step
 
-Run it. It checks PATH, env vars, config, agent binaries, and credentials.
+Run it. It checks PATH, env vars, config, agent binaries, credentials, and **scheduler job health**.
+
+If any scheduled job has failed N or more times within N scheduled intervals (default N=3), doctor reports `[FAIL] scheduler.<job>`. For fewer failures it reports `[WARN]`.
+
+## Daemon scheduled runs failing silently
+
+`nightshift status` now shows the last scheduler failure per job when any have been recorded:
+
+```
+Scheduler failures:
+  [2026-05-22 02:00] scheduled-run: resolve projects: open db: ...
+```
+
+To diagnose further, grep the logs:
+
+```bash
+jq 'select(.message | test("scheduler.*failed"))' ~/.local/share/nightshift/logs/*.log
+```
 
 ## Agent binary not found
 

@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -8,6 +9,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -89,6 +91,7 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	checkCLIs(cfg, add)
 	checkProviders(cfg, add)
 	checkBudget(cfg, database, add)
+	checkSchedulerHealth(cfg, database, add)
 
 	printDoctorResults(results)
 
@@ -252,6 +255,76 @@ func checkBudget(cfg *config.Config, _ *db.DB, add func(string, checkStatus, str
 			add("budget.codex", statusOK, fmt.Sprintf("%.1f%% used", usedPct))
 		}
 	}
+}
+
+func checkSchedulerHealth(cfg *config.Config, database *db.DB, add func(string, checkStatus, string)) {
+	ctx := context.Background()
+
+	names, err := db.DistinctSchedulerJobNames(ctx, database)
+	if err != nil {
+		add("scheduler.failures", statusWarn, fmt.Sprintf("could not query failures: %v", err))
+		return
+	}
+	if len(names) == 0 {
+		add("scheduler.failures", statusOK, "no failures recorded")
+		return
+	}
+
+	// Derive one-interval window from schedule config.
+	threshold := cfg.Scheduler.UnhealthyFailureCount
+	if threshold <= 0 {
+		threshold = 3
+	}
+
+	window := deriveSchedulerWindow(cfg, threshold)
+
+	allOK := true
+	for _, name := range names {
+		count, err := db.CountSchedulerFailuresSince(ctx, database, name, time.Now().Add(-window))
+		if err != nil {
+			add(fmt.Sprintf("scheduler.%s", name), statusWarn, fmt.Sprintf("query error: %v", err))
+			allOK = false
+			continue
+		}
+		if count >= threshold {
+			add(fmt.Sprintf("scheduler.%s", name), statusFail,
+				fmt.Sprintf("%d failures in last %s (threshold %d)", count, window.Round(time.Minute), threshold))
+			allOK = false
+		} else if count > 0 {
+			add(fmt.Sprintf("scheduler.%s", name), statusWarn,
+				fmt.Sprintf("%d failure(s) in last %s", count, window.Round(time.Minute)))
+			allOK = false
+		} else {
+			// Check if any historical failure exists at all.
+			_, _, ok, _ := db.LastSchedulerFailure(ctx, database, name)
+			if ok {
+				add(fmt.Sprintf("scheduler.%s", name), statusWarn, "past failure(s) recorded (outside current window)")
+				allOK = false
+			} else {
+				add(fmt.Sprintf("scheduler.%s", name), statusOK, "no recent failures")
+			}
+		}
+	}
+	if allOK {
+		add("scheduler.failures", statusOK, "no recent failures")
+	}
+}
+
+// deriveSchedulerWindow returns threshold * one-interval as the health window.
+func deriveSchedulerWindow(cfg *config.Config, threshold int) time.Duration {
+	sched, err := scheduler.NewFromConfig(&cfg.Schedule)
+	if err != nil {
+		return time.Duration(threshold) * 24 * time.Hour
+	}
+	runs, err := sched.NextRuns(2)
+	if err != nil || len(runs) < 2 {
+		return time.Duration(threshold) * 24 * time.Hour
+	}
+	interval := runs[1].Sub(runs[0])
+	if interval <= 0 {
+		return time.Duration(threshold) * 24 * time.Hour
+	}
+	return interval * time.Duration(threshold)
 }
 
 func printDoctorResults(results []checkResult) {

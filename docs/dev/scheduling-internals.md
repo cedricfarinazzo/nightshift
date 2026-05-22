@@ -96,8 +96,61 @@ cron tick
 4. Drives the orchestrator
 5. Writes report + updates state
 
+## Failure Capture (VC-96)
+
+Job errors are now surfaced instead of silently discarded.
+
+```
+job returns error
+  → Scheduler.recordFailure(ctx, jobName, err)
+       → failureCounts[jobName]++           (in-memory, guarded by mu)
+       → FailureSink.RecordSchedulerFailure (if wired)
+            → log.Errorf(...)               (daemon wires schedulerFailureSink)
+            → db.RecordSchedulerFailure(...)  (persists to scheduler_job_failures table)
+```
+
+### FailureSink interface
+
+```go
+type FailureSink interface {
+    RecordSchedulerFailure(ctx context.Context, jobName string, failedAt time.Time, errText string)
+}
+```
+
+Scheduler stays decoupled from `internal/db` and `internal/logging`. The sink is wired in `cmd/nightshift/commands/daemon.go` via `sched.WithFailureSink(...)`.
+
+### Named jobs
+
+`AddNamedJob(name, job)` registers a job with an explicit name used in failure records.
+`AddJob(job)` (deprecated) auto-names as `job-0`, `job-1`, etc. for back-compat.
+
+The daemon registers the main job as `"scheduled-run"`.
+
+### Health surface
+
+- `nightshift status` — shows last failure per job (timestamp + message) when any exist.
+- `nightshift doctor` — checks failures within N scheduled intervals (configurable via `scheduler.unhealthy_failure_count`, default 3):
+  - **FAIL**: ≥ N failures within the window.
+  - **WARN**: 1–(N-1) failures within the window, or past failures outside the window.
+  - **OK**: no failures.
+
+### DB table
+
+`scheduler_job_failures` (migration 010):
+
+| column     | type    | notes                |
+|------------|---------|----------------------|
+| id         | INTEGER | PK autoincrement     |
+| job_name   | TEXT    | named job identifier |
+| failed_at  | DATETIME | UTC RFC3339Nano      |
+| error_text | TEXT    | err.Error() string   |
+
+Index on `(job_name, failed_at DESC)` for fast last-failure and count-since queries.
+
 ## Gotchas
 
 - Config changes do not require a daemon restart — `runFunc` re-loads on each fire.
 - Schedule changes (cron/interval) DO require restart — the cron job is registered once.
 - `SkipIfStillRunning` is on the cron instance, not per-job — registering multiple jobs would need refactoring.
+- `failureCounts` is in-memory only — resets on daemon restart. Persistent counts come from the DB via `CountSchedulerFailuresSince`.
+- Sink errors (e.g. DB write failure) are logged by the sink itself and do not propagate into the scheduler — job failure is already recorded in the counter even if the sink fails.

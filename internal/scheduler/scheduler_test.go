@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -639,5 +640,123 @@ func TestNextWindowStartForWindow_ExactStartTime(t *testing.T) {
 	expectedTomorrow := time.Date(2026, 1, 16, 22, 0, 0, 0, time.UTC)
 	if !result3.Equal(expectedTomorrow) {
 		t.Errorf("after start time: got %v, want %v (tomorrow)", result3, expectedTomorrow)
+	}
+}
+
+// fakeSink records calls to RecordSchedulerFailure for assertion.
+type fakeSink struct {
+	mu       sync.Mutex
+	calls    []fakeSinkCall
+}
+
+type fakeSinkCall struct {
+	jobName   string
+	failedAt  time.Time
+	errorText string
+}
+
+func (f *fakeSink) RecordSchedulerFailure(_ context.Context, jobName string, failedAt time.Time, errText string) {
+	f.mu.Lock()
+	f.calls = append(f.calls, fakeSinkCall{jobName, failedAt, errText})
+	f.mu.Unlock()
+}
+
+func (f *fakeSink) Calls() []fakeSinkCall {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]fakeSinkCall, len(f.calls))
+	copy(out, f.calls)
+	return out
+}
+
+func TestRunJobs_FailureRecorded(t *testing.T) {
+	s := New()
+	sink := &fakeSink{}
+	s.WithFailureSink(sink)
+
+	s.AddNamedJob("test-job", func(_ context.Context) error {
+		return errors.New("boom")
+	})
+
+	ctx := context.Background()
+	s.runJobs(ctx)
+
+	if s.FailureCount("test-job") != 1 {
+		t.Errorf("FailureCount = %d, want 1", s.FailureCount("test-job"))
+	}
+	if s.TotalFailures() != 1 {
+		t.Errorf("TotalFailures = %d, want 1", s.TotalFailures())
+	}
+
+	calls := sink.Calls()
+	if len(calls) != 1 {
+		t.Fatalf("sink calls = %d, want 1", len(calls))
+	}
+	if calls[0].jobName != "test-job" {
+		t.Errorf("sink.jobName = %q, want %q", calls[0].jobName, "test-job")
+	}
+	if calls[0].errorText != "boom" {
+		t.Errorf("sink.errorText = %q, want %q", calls[0].errorText, "boom")
+	}
+}
+
+func TestRunJobs_SuccessNoRecord(t *testing.T) {
+	s := New()
+	sink := &fakeSink{}
+	s.WithFailureSink(sink)
+
+	s.AddNamedJob("ok-job", func(_ context.Context) error {
+		return nil
+	})
+
+	s.runJobs(context.Background())
+
+	if s.FailureCount("ok-job") != 0 {
+		t.Errorf("FailureCount = %d, want 0", s.FailureCount("ok-job"))
+	}
+	if len(sink.Calls()) != 0 {
+		t.Errorf("sink calls = %d, want 0", len(sink.Calls()))
+	}
+}
+
+func TestFailureCount_Concurrent(t *testing.T) {
+	s := New()
+	sink := &fakeSink{}
+	s.WithFailureSink(sink)
+
+	s.AddNamedJob("race-job", func(_ context.Context) error {
+		return errors.New("err")
+	})
+
+	const goroutines = 20
+	done := make(chan struct{})
+	for i := 0; i < goroutines; i++ {
+		go func() {
+			s.runJobs(context.Background())
+			done <- struct{}{}
+		}()
+	}
+	for i := 0; i < goroutines; i++ {
+		<-done
+	}
+
+	if s.FailureCount("race-job") != goroutines {
+		t.Errorf("FailureCount = %d, want %d", s.FailureCount("race-job"), goroutines)
+	}
+}
+
+func TestAddNamedJob_AutoName(t *testing.T) {
+	s := New()
+	s.AddJob(func(_ context.Context) error { return nil })
+	s.AddJob(func(_ context.Context) error { return nil })
+
+	if len(s.jobs) != 2 {
+		t.Fatalf("expected 2 jobs, got %d", len(s.jobs))
+	}
+	if s.jobs[0].name != "job-0" {
+		t.Errorf("first job name = %q, want %q", s.jobs[0].name, "job-0")
+	}
+	if s.jobs[1].name != "job-1" {
+		t.Errorf("second job name = %q, want %q", s.jobs[1].name, "job-1")
 	}
 }

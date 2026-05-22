@@ -22,6 +22,7 @@ SQLite at `~/.local/share/nightshift/nightshift.db`. Driver: `modernc.org/sqlite
 | `snapshots` | Provider usage snapshots (timestamp + utilisation) |
 | `bus_factor_results` | Bus-factor analysis output |
 | `jira_ticket_results` | Jira pipeline outcomes per ticket |
+| `scheduler_job_failures` | Scheduler job failure history (job_name, failed_at, error_text) — migration 010 |
 
 ## Migrations
 
@@ -38,7 +39,7 @@ flowchart TD
     Loop -- all applied --> Ready(["DB ready"])
 ```
 
-`internal/db/migrations.go` — numbered functions `migration001`, `migration002`, ... `migration009` etc. Schema version stored in `schema_version` table; `Open()` runs each pending migration in order inside a transaction.
+`internal/db/migrations.go` — numbered functions `migration001`, `migration002`, ... `migration010` etc. Schema version stored in `schema_version` table; `Open()` runs each pending migration in order inside a transaction.
 
 Migrations are **forward-only** — no downs. To revert, you write a new forward migration that reverses the change.
 

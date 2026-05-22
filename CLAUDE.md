@@ -93,8 +93,11 @@ internal/
   db/                   # SQLite persistence layer — all SQL lives here, nowhere else
     db.go               # DB struct; DefaultPath = ~/.local/share/nightshift/nightshift.db;
                         # Open() applies pragmas + auto-runs migrations
-    migrations.go       # Versioned schema migrations (001–009); auto-applied on Open();
-                        # migration009 adds UNIQUE index on jira_ticket_results(run_id, ticket_key)
+    migrations.go       # Versioned schema migrations (001–010); auto-applied on Open();
+                        # migration009: UNIQUE index on jira_ticket_results(run_id, ticket_key);
+                        # migration010: scheduler_job_failures table
+    scheduler_failures.go # RecordSchedulerFailure, LastSchedulerFailure, RecentSchedulerFailures,
+                          # CountSchedulerFailuresSince, DistinctSchedulerJobNames
     import.go           # Bulk data import utilities
 
   jira/                 # Jira autonomous system — drives ticket lifecycle via AI agents
@@ -144,7 +147,8 @@ internal/
 
   scheduler/            # Cron-based scheduling
     scheduler.go        # Wraps robfig/cron with SkipIfStillRunning middleware (prevents concurrent fires);
-                        # reads schedule config; triggers runs
+                        # reads schedule config; triggers runs; FailureSink interface for error capture;
+                        # AddNamedJob/AddJob; FailureCount/TotalFailures accessors
 
   security/             # Credential management — env vars only, never config files
     credentials.go      # CredentialManager: validates ANTHROPIC_API_KEY, OPENAI_API_KEY;
@@ -415,3 +419,5 @@ Agents MUST follow these rules:
 - **Daemon workspace mode (VC-87)** — when `workspace.root` is set, `runScheduledTasks` routes to `runScheduledWorkspacedTasks` instead of the project-path loop. Both `nightshift run` and daemon share `runRepoTasks()` for per-repo task execution. State key is always `rw.Name` (not `rw.Path`) in workspace mode. First daemon run after upgrading from a pre-VC-87 release will re-process all workspace repos once (old cooldowns were keyed on paths, new ones on names — safe, one extra run).
 - **`runRepoTasks` allowedTasks filter** — when `workspace.repos[*].tasks` is set, `runRepoTasks` filters selected tasks to only those types before execution. Empty/nil means no filter. Filter applied after selector, so cooldown/staleness scoring still runs on all tasks but only matching types are executed.
 - **Rejection forces re-validation on next run** — Rejection is posted by the orchestrator as a structured `CommentRejection` NightshiftComment (via `postPhaseComment`); `HandleInvalidTicket` only does the status transition. `detectResumeState` compares `GetLastCommentOfType(CommentRejection).Timestamp` against `GetLastCommentOfType(CommentValidation).Timestamp`: if rejection is newer, `hasValidation` is false and the ticket falls to `PhaseValidate` for re-evaluation. If acceptance is newer (user fixed ticket, later run passed), rejection is ignored. Root cause of FIN-31: prior `CommentValidation` from an older partial run caused `detectResumeState` to skip validation despite a newer rejection.
+- **Scheduler FailureSink decoupling (VC-96)** — `internal/scheduler` must NOT import `internal/db` or `internal/logging` (would introduce import cycle). The `FailureSink` interface lives in `scheduler`; the concrete `schedulerFailureSink` (which does DB writes + logging) lives in `cmd/nightshift/commands/scheduler_sink.go` and is wired in `runDaemonLoop`. Counter is in-memory only; persistent failure history is in the `scheduler_job_failures` table (migration 010). Do not add direct DB/logging calls inside `scheduler.go`.
+- **`scheduler.unhealthy_failure_count` config** — controls the doctor FAIL threshold (default 3). The window is `threshold × derived_interval`. Interval is derived from `sched.NextRuns(2)` delta; falls back to 24h if the schedule is unconfigured or delta is zero.

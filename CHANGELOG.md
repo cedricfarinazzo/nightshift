@@ -4,6 +4,17 @@ All notable changes to nightshift are documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- **scheduler: surface job failures (VC-96)** — scheduler job errors are no longer silently discarded.
+  - `_ = job(ctx)` replaced with error capture; failures logged at ERROR level via `schedulerFailureSink`.
+  - Per-job failure counter (`Scheduler.FailureCount`, `TotalFailures`) guarded by existing mutex.
+  - Failures persisted to new `scheduler_job_failures` table (migration 010: job_name, failed_at, error_text).
+  - `nightshift status` shows last failure per job (timestamp + message) when any exist.
+  - `nightshift doctor` reports `FAIL` when any job has ≥ N failures within N scheduled intervals (configurable: `scheduler.unhealthy_failure_count`, default 3); reports `WARN` for fewer or older failures.
+  - New `FailureSink` interface keeps `internal/scheduler` decoupled from `internal/db` / `internal/logging`.
+  - New config field: `scheduler.unhealthy_failure_count` (int, default 3).
+
 ### Refactoring
 
 - **agents: deduplicate option constructors (VC-92)** — extracted shared `agentConfig` struct and

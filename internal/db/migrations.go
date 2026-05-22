@@ -60,7 +60,23 @@ var migrations = []Migration{
 		Description: "add unique constraint on jira_ticket_results(run_id, ticket_key)",
 		SQL:         migration009SQL,
 	},
+	{
+		Version:     10,
+		Description: "add scheduler_job_failures table",
+		SQL:         migration010SQL,
+	},
 }
+
+const migration010SQL = `
+CREATE TABLE IF NOT EXISTS scheduler_job_failures (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    job_name    TEXT     NOT NULL,
+    failed_at   DATETIME NOT NULL,
+    error_text  TEXT     NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_scheduler_job_failures_name_time
+    ON scheduler_job_failures(job_name, failed_at DESC);
+`
 
 const migration008SQL = `
 ALTER TABLE snapshots ADD COLUMN source TEXT NOT NULL DEFAULT 'file';

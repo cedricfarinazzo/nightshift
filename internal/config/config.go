@@ -19,6 +19,7 @@ import (
 // Config holds all nightshift configuration.
 type Config struct {
 	Schedule          ScheduleConfig          `mapstructure:"schedule"`
+	Scheduler         SchedulerConfig         `mapstructure:"scheduler"`
 	Budget            BudgetConfig            `mapstructure:"budget"`
 	Providers         ProvidersConfig         `mapstructure:"providers"`
 	Projects          []ProjectConfig         `mapstructure:"projects"`
@@ -29,6 +30,13 @@ type Config struct {
 	Jira              jira.JiraConfig         `mapstructure:"jira"`
 	PromptCompression PromptCompressionConfig `mapstructure:"prompt_compression"`
 	Workspace         WorkspaceConfig         `mapstructure:"workspace"`
+}
+
+// SchedulerConfig holds runtime health settings for the scheduler.
+type SchedulerConfig struct {
+	// UnhealthyFailureCount is the number of failures within N scheduled intervals
+	// that causes nightshift doctor to report FAIL. Default 3.
+	UnhealthyFailureCount int `mapstructure:"unhealthy_failure_count"`
 }
 
 // WorkspaceConfig enables clone-based isolated task execution.
@@ -300,6 +308,9 @@ func setDefaults(v *viper.Viper) {
 
 	// Jira systemd defaults
 	v.SetDefault("jira.systemd_on_calendar", "*-*-* 22:00:00")
+
+	// Scheduler health defaults
+	v.SetDefault("scheduler.unhealthy_failure_count", 3)
 
 	// Prompt compression defaults
 	v.SetDefault("prompt_compression.enabled", false)

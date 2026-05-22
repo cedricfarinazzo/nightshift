@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"context"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -40,9 +41,16 @@ Shows the last N runs (default: 5) or today's activity summary.`,
 		}
 
 		if today {
-			return showTodaySummary(st)
+			if err := showTodaySummary(st); err != nil {
+				return err
+			}
+		} else {
+			if err := showLastRuns(st, last); err != nil {
+				return err
+			}
 		}
-		return showLastRuns(st, last)
+		showSchedulerFailures(database)
+		return nil
 	},
 }
 
@@ -153,6 +161,24 @@ func formatTokens(tokens int) string {
 		return fmt.Sprintf("%.1fK", float64(tokens)/1000)
 	}
 	return fmt.Sprintf("%d", tokens)
+}
+
+// showSchedulerFailures prints the last failure per job name, if any exist.
+func showSchedulerFailures(database *db.DB) {
+	ctx := context.Background()
+	names, err := db.DistinctSchedulerJobNames(ctx, database)
+	if err != nil || len(names) == 0 {
+		return
+	}
+
+	fmt.Printf("\nScheduler failures:\n")
+	for _, name := range names {
+		failedAt, errText, ok, err := db.LastSchedulerFailure(ctx, database, name)
+		if err != nil || !ok {
+			continue
+		}
+		fmt.Printf("  [%s] %s: %s\n", failedAt.Local().Format("2006-01-02 15:04"), name, errText)
+	}
 }
 
 func formatDuration(d time.Duration) string {

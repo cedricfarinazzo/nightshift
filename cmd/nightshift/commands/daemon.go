@@ -247,8 +247,11 @@ func runDaemonLoop(cfg *config.Config) error {
 		return fmt.Errorf("init scheduler: %w", err)
 	}
 
+	// Wire failure sink so job errors are logged and persisted.
+	sched.WithFailureSink(&schedulerFailureSink{database: database, log: log})
+
 	// Add the main run job
-	sched.AddJob(func(jobCtx context.Context) error {
+	sched.AddNamedJob("scheduled-run", func(jobCtx context.Context) error {
 		return runScheduledTasks(jobCtx, cfg, database, log)
 	})
 

@@ -28,6 +28,18 @@ var (
 // Job is a function to execute on schedule.
 type Job func(ctx context.Context) error
 
+// FailureSink receives notifications when a scheduled job returns an error.
+// Implementations handle logging and persistence; the scheduler stays decoupled from db/logging.
+type FailureSink interface {
+	RecordSchedulerFailure(ctx context.Context, jobName string, failedAt time.Time, errText string)
+}
+
+// namedJob pairs a job function with a human-readable name for diagnostics.
+type namedJob struct {
+	name string
+	fn   Job
+}
+
 // Scheduler manages scheduled nightshift runs.
 type Scheduler struct {
 	mu sync.RWMutex
@@ -40,13 +52,17 @@ type Scheduler struct {
 
 	// Runtime state
 	cron         *cron.Cron
-	jobs         []Job
+	jobs         []namedJob
 	running      bool
 	stopCh       chan struct{}
 	doneCh       chan struct{}
 	nextRun      time.Time
 	entryID      cron.EntryID
 	stopTimeoutD time.Duration // overridable in tests; 0 means use default (30s)
+
+	// Failure tracking
+	failureSink   FailureSink
+	failureCounts map[string]uint64
 }
 
 // Window represents a time window constraint.
@@ -88,14 +104,23 @@ func (t TimeOfDay) Minutes() int {
 // New creates an empty scheduler.
 func New() *Scheduler {
 	return &Scheduler{
-		location: time.Local,
+		location:      time.Local,
+		failureCounts: make(map[string]uint64),
 	}
+}
+
+// WithFailureSink sets the sink that receives job failure notifications.
+func (s *Scheduler) WithFailureSink(sink FailureSink) {
+	s.mu.Lock()
+	s.failureSink = sink
+	s.mu.Unlock()
 }
 
 // NewFromConfig creates a scheduler from configuration.
 func NewFromConfig(cfg *config.ScheduleConfig) (*Scheduler, error) {
 	s := &Scheduler{
-		location: time.Local,
+		location:      time.Local,
+		failureCounts: make(map[string]uint64),
 	}
 
 	// Parse cron expression
@@ -183,11 +208,51 @@ func (s *Scheduler) SetWindow(cfg *config.WindowConfig) error {
 	return nil
 }
 
-// AddJob adds a job to be executed on schedule.
+// AddJob adds a job to be executed on schedule with an auto-generated name.
+// Deprecated: Prefer AddNamedJob so failures are identifiable.
 func (s *Scheduler) AddJob(job Job) {
 	s.mu.Lock()
-	s.jobs = append(s.jobs, job)
+	name := fmt.Sprintf("job-%d", len(s.jobs))
+	s.jobs = append(s.jobs, namedJob{name: name, fn: job})
 	s.mu.Unlock()
+}
+
+// AddNamedJob adds a job with an explicit name used in failure reporting.
+func (s *Scheduler) AddNamedJob(name string, job Job) {
+	s.mu.Lock()
+	s.jobs = append(s.jobs, namedJob{name: name, fn: job})
+	s.mu.Unlock()
+}
+
+// FailureCount returns the in-memory failure counter for the named job.
+func (s *Scheduler) FailureCount(jobName string) uint64 {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.failureCounts[jobName]
+}
+
+// TotalFailures returns the sum of all in-memory failure counters.
+func (s *Scheduler) TotalFailures() uint64 {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var total uint64
+	for _, v := range s.failureCounts {
+		total += v
+	}
+	return total
+}
+
+// recordFailure increments the counter and notifies the sink.
+func (s *Scheduler) recordFailure(ctx context.Context, jobName string, err error) {
+	now := time.Now()
+	s.mu.Lock()
+	s.failureCounts[jobName]++
+	sink := s.failureSink
+	s.mu.Unlock()
+
+	if sink != nil {
+		sink.RecordSchedulerFailure(ctx, jobName, now, err.Error())
+	}
 }
 
 // Start begins the scheduler loop.
@@ -274,16 +339,18 @@ func (s *Scheduler) runJobs(ctx context.Context) {
 	}
 
 	s.mu.RLock()
-	jobs := make([]Job, len(s.jobs))
+	jobs := make([]namedJob, len(s.jobs))
 	copy(jobs, s.jobs)
 	s.mu.RUnlock()
 
-	for _, job := range jobs {
+	for _, nj := range jobs {
 		select {
 		case <-ctx.Done():
 			return
 		default:
-			_ = job(ctx) // Errors handled by job itself
+			if err := nj.fn(ctx); err != nil {
+				s.recordFailure(ctx, nj.name, err)
+			}
 		}
 	}
 }
