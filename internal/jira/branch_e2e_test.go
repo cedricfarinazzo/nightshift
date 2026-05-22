@@ -2,7 +2,7 @@ package jira
 
 import (
 	"context"
-	"os"
+	"fmt"
 	"testing"
 	"time"
 
@@ -23,8 +23,9 @@ func TestE2E_SetupBranch_FirstPush(t *testing.T) {
 	// Set up a local git repo with a remote so fetch succeeds.
 	workDir := setupRemoteRepoWithMain(t)
 
-	// Create and check out a new branch locally without pushing it.
-	branchName := "feature/e2e-first-push-" + os.Getenv("USER")
+	// Use a timestamp-based suffix so the name is deterministic and git-safe
+	// regardless of the USER env var (which may be empty or contain spaces).
+	branchName := fmt.Sprintf("feature/e2e-first-push-%d", time.Now().UnixNano())
 	runGit(t, workDir, "checkout", "-b", branchName)
 
 	// setupBranch: branch exists locally (Case 1), pull --rebase will get
