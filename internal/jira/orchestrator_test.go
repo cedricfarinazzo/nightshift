@@ -28,7 +28,7 @@ func (s *stubJiraClient) PostComment(_ context.Context, ticketKey string, commen
 	return s.postCommentErr
 }
 
-func (s *stubJiraClient) HandleInvalidTicket(_ context.Context, ticketKey string, _ *ValidationResult) error {
+func (s *stubJiraClient) HandleInvalidTicket(_ context.Context, ticketKey string) error {
 	s.handleInvalidCalls = append(s.handleInvalidCalls, ticketKey)
 	return s.handleInvalidErr
 }
@@ -1113,7 +1113,7 @@ func (s *stubJiraClientPerMethod) PostComment(_ context.Context, _ string, comme
 	s.postCommentCalls = append(s.postCommentCalls, comment)
 	return nil
 }
-func (s *stubJiraClientPerMethod) HandleInvalidTicket(_ context.Context, _ string, _ *ValidationResult) error {
+func (s *stubJiraClientPerMethod) HandleInvalidTicket(_ context.Context, _ string) error {
 	return nil
 }
 func (s *stubJiraClientPerMethod) TransitionToInProgress(_ context.Context, _ string) error {
@@ -1286,6 +1286,143 @@ func TestDetectResumeState_AlreadyComplete(t *testing.T) {
 	rs := detectResumeState(ticket)
 	if !rs.alreadyDone {
 		t.Error("want alreadyDone=true for ticket with status-change comment")
+	}
+}
+
+func rejectionComment(ts time.Time) Comment {
+	return nightshiftCommentAt(CommentRejection, "❌ Nightshift — Ticket Rejected\nQuality score: 5.0/10", ts)
+}
+
+// TestDetectResumeState_RejectionOnly verifies that a lone rejection comment
+// forces re-validation on the next run.
+func TestDetectResumeState_RejectionOnly(t *testing.T) {
+	ticket := Ticket{Comments: []Comment{rejectionComment(time.Now())}}
+	rs := detectResumeState(ticket)
+	if rs.startPhase != PhaseValidate {
+		t.Errorf("want PhaseValidate after rejection, got %s", rs.startPhase)
+	}
+}
+
+// TestDetectResumeState_RejectionNewerThanValidation verifies that when the
+// rejection comment is more recent than the last CommentValidation, re-validation
+// is forced (acceptance from a prior partial run must not cause implementation).
+func TestDetectResumeState_RejectionNewerThanValidation(t *testing.T) {
+	base := time.Now()
+	ticket := Ticket{Comments: []Comment{
+		nightshiftCommentAt(CommentValidation, "ok", base.Add(-2*time.Hour)),
+		rejectionComment(base.Add(-1 * time.Hour)), // rejection is newer
+	}}
+	rs := detectResumeState(ticket)
+	if rs.startPhase != PhaseValidate {
+		t.Errorf("want PhaseValidate (rejection newer than acceptance), got %s", rs.startPhase)
+	}
+}
+
+// TestDetectResumeState_ValidationNewerThanRejection verifies that when the
+// user fixed the ticket and a later run accepted it, the acceptance wins and
+// the ticket resumes from PhasePlan.
+func TestDetectResumeState_ValidationNewerThanRejection(t *testing.T) {
+	base := time.Now()
+	ticket := Ticket{Comments: []Comment{
+		rejectionComment(base.Add(-2 * time.Hour)),                         // rejection is older
+		nightshiftCommentAt(CommentValidation, "ok", base.Add(-1*time.Hour)), // acceptance is newer
+	}}
+	rs := detectResumeState(ticket)
+	if rs.startPhase != PhasePlan {
+		t.Errorf("want PhasePlan (acceptance newer than rejection), got %s", rs.startPhase)
+	}
+}
+
+// TestDetectResumeState_RejectionWithStatusChange verifies that a done ticket
+// (CommentStatusChange present) is still treated as alreadyDone even with a rejection.
+func TestDetectResumeState_RejectionWithStatusChange(t *testing.T) {
+	ticket := Ticket{Comments: []Comment{
+		rejectionComment(time.Now().Add(-1 * time.Hour)),
+		nightshiftComment(CommentStatusChange, "complete"),
+	}}
+	rs := detectResumeState(ticket)
+	if !rs.alreadyDone {
+		t.Error("want alreadyDone=true; CommentStatusChange must win over rejection")
+	}
+}
+
+// TestDetectResumeState_RejectionOverridesOldPlan verifies that a rejection comment
+// newer than the last CommentValidation forces PhaseValidate even when CommentPlan
+// and CommentImplement exist from a prior partial run.
+func TestDetectResumeState_RejectionOverridesOldPlan(t *testing.T) {
+	base := time.Now()
+	ticket := Ticket{Comments: []Comment{
+		nightshiftCommentAt(CommentValidation, "ok", base.Add(-4*time.Hour)),
+		nightshiftCommentAt(CommentPlan, "the plan", base.Add(-3*time.Hour)),
+		nightshiftCommentAt(CommentImplement, "impl done", base.Add(-2*time.Hour)),
+		rejectionComment(base.Add(-1 * time.Hour)), // rejection is newest
+	}}
+	rs := detectResumeState(ticket)
+	if rs.startPhase != PhaseValidate {
+		t.Errorf("want PhaseValidate (rejection overrides old plan/impl), got %s", rs.startPhase)
+	}
+}
+
+// TestDetectResumeState_RejectionOverridesOldPR verifies that a rejection comment
+// forces PhaseValidate even when a CommentPR exists from a prior run.
+func TestDetectResumeState_RejectionOverridesOldPR(t *testing.T) {
+	base := time.Now()
+	ticket := Ticket{Comments: []Comment{
+		nightshiftCommentAt(CommentValidation, "ok", base.Add(-2*time.Hour)),
+		nightshiftCommentAt(CommentPR, "PRs created:\nhttps://github.com/org/repo/pull/1", base.Add(-90*time.Minute)),
+		rejectionComment(base.Add(-1 * time.Hour)), // rejection is newest
+	}}
+	rs := detectResumeState(ticket)
+	if rs.startPhase != PhaseValidate {
+		t.Errorf("want PhaseValidate (rejection overrides old PR), got %s", rs.startPhase)
+	}
+}
+
+// TestProcessTicket_ValidationRejects_PostsRejectionComment verifies that a rejection
+// posts a structured CommentRejection and calls HandleInvalidTicket.
+func TestProcessTicket_ValidationRejects_PostsRejectionComment(t *testing.T) {
+	sc := &stubJiraClient{}
+	va := &stubAgent{output: `{"valid": false, "score": 3, "issues": ["no AC"], "missing": [], "suggestions": []}`}
+	o := &Orchestrator{client: sc, cfg: JiraConfig{}, validationAgent: va, implAgent: &stubAgent{}}
+
+	result, err := o.ProcessTicket(context.Background(), Ticket{Key: "TEST-REJ"}, &Workspace{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Status != TicketRejected {
+		t.Errorf("Status = %q, want TicketRejected", result.Status)
+	}
+	var hasRejComment bool
+	for _, c := range sc.postCommentCalls {
+		if c.Type == CommentRejection {
+			hasRejComment = true
+		}
+	}
+	if !hasRejComment {
+		t.Error("want CommentRejection posted; none found in postCommentCalls")
+	}
+	if len(sc.handleInvalidCalls) != 1 {
+		t.Errorf("HandleInvalidTicket call count = %d, want 1", len(sc.handleInvalidCalls))
+	}
+}
+
+// TestProcessTicket_ValidationRejects_CommentPostFails verifies that when posting
+// the CommentRejection fails, ProcessTicket returns TicketFailed and does NOT call
+// HandleInvalidTicket (so the ticket is not transitioned without a durable marker).
+func TestProcessTicket_ValidationRejects_CommentPostFails(t *testing.T) {
+	sc := &stubJiraClient{postCommentErr: errors.New("jira unavailable")}
+	va := &stubAgent{output: `{"valid": false, "score": 3, "issues": ["bad"], "missing": [], "suggestions": []}`}
+	o := &Orchestrator{client: sc, cfg: JiraConfig{}, validationAgent: va, implAgent: &stubAgent{}}
+
+	result, err := o.ProcessTicket(context.Background(), Ticket{Key: "TEST-REJ-FAIL"}, &Workspace{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Status != TicketFailed {
+		t.Errorf("Status = %q, want TicketFailed when rejection comment post fails", result.Status)
+	}
+	if len(sc.handleInvalidCalls) != 0 {
+		t.Errorf("HandleInvalidTicket must NOT be called when comment post fails, got %v", sc.handleInvalidCalls)
 	}
 }
 
@@ -1869,7 +2006,7 @@ func (s *stubJiraClientSelectiveErr) PostComment(_ context.Context, _ string, co
 	return nil
 }
 
-func (s *stubJiraClientSelectiveErr) HandleInvalidTicket(_ context.Context, ticketKey string, _ *ValidationResult) error {
+func (s *stubJiraClientSelectiveErr) HandleInvalidTicket(_ context.Context, ticketKey string) error {
 	s.handleInvalidCalls = append(s.handleInvalidCalls, ticketKey)
 	return nil
 }

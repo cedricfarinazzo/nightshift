@@ -67,7 +67,7 @@ type TicketResult struct {
 // jiraClient defines the Jira operations needed by the orchestrator.
 type jiraClient interface {
 	PostComment(ctx context.Context, ticketKey string, comment NightshiftComment) error
-	HandleInvalidTicket(ctx context.Context, ticketKey string, result *ValidationResult) error
+	HandleInvalidTicket(ctx context.Context, ticketKey string) error
 	TransitionToInProgress(ctx context.Context, issueKey string) error
 	TransitionToReview(ctx context.Context, issueKey string) error
 }
@@ -218,17 +218,29 @@ func detectResumeState(ticket Ticket) resumeState {
 
 	// Walk the phase sequence from latest to earliest to find the furthest
 	// completed phase.
-	hasPR := GetLastCommentOfType(comments, CommentPR) != nil
-	lastImpl := GetLastCommentOfType(comments, CommentImplement)
-	hasPlan := GetLastCommentOfType(comments, CommentPlan) != nil
-	hasValidation := GetLastCommentOfType(comments, CommentValidation) != nil
-	hasStatus := GetLastCommentOfType(comments, CommentStatusChange) != nil
+	hasPR          := GetLastCommentOfType(comments, CommentPR) != nil
+	lastImpl        := GetLastCommentOfType(comments, CommentImplement)
+	hasPlan        := GetLastCommentOfType(comments, CommentPlan) != nil
+	hasStatus      := GetLastCommentOfType(comments, CommentStatusChange) != nil
+	lastAcceptance := GetLastCommentOfType(comments, CommentValidation)
+	lastRejection  := GetLastCommentOfType(comments, CommentRejection)
+
+	// hasValidation is true only when the latest acceptance is newer than any rejection.
+	// If rejection is the latest event, fall through to PhaseValidate for re-evaluation.
+	hasValidation := lastAcceptance != nil &&
+		(lastRejection == nil || lastAcceptance.Timestamp.After(lastRejection.Timestamp))
 
 	switch {
 	case hasStatus:
 		// Already fully completed; signal early exit so ProcessTicket skips all phases
 		// and avoids duplicate status comments/transitions.
 		return resumeState{alreadyDone: true}
+
+	case !hasValidation && lastRejection != nil:
+		// Rejection is the latest validation event. Force re-validation regardless of
+		// any plan/impl/PR comments left from a prior partial run — those comments must
+		// not allow a rejected ticket to skip straight to plan or commit.
+		return resumeState{startPhase: PhaseValidate}
 
 	case hasPR:
 		// PRs exist; only the status transition remains.
@@ -407,7 +419,24 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 			if !vr.Valid {
 				issues := strings.Join(vr.Issues, "; ")
 				o.savePhaseLog(ctx, ticket.Key, PhaseValidate, valCfg.Provider, valCfg.Model, validateStart, false, issues, fmt.Sprintf("score %.1f/10: %s", vr.Score, issues))
-				if hErr := o.client.HandleInvalidTicket(ctx, ticket.Key, vr); hErr != nil {
+				// Post the rejection marker first; without it detectResumeState cannot
+				// detect this rejection on subsequent runs. Treat failure as fatal so
+				// the ticket is not transitioned without the durable marker in place.
+				provider, model := o.providerForCommentType(CommentRejection)
+				rejComment := NightshiftComment{
+					Type: CommentRejection, Timestamp: time.Now(),
+					Provider: provider, Model: model,
+					Duration: time.Since(validateStart), Body: buildValidationComment(vr),
+				}
+				if err := o.client.PostComment(ctx, ticket.Key, rejComment); err != nil {
+					o.log.Errorf("ticket %s: post rejection comment: %v", ticket.Key, err)
+					result.Status = TicketFailed
+					result.Error = fmt.Errorf("post rejection comment: %w", err).Error()
+					result.Duration = time.Since(start)
+					o.notifyPhase(ticket.Key, PhaseValidate, true)
+					return result, nil
+				}
+				if hErr := o.client.HandleInvalidTicket(ctx, ticket.Key); hErr != nil {
 					o.log.Errorf("ticket %s: handle invalid: %v", ticket.Key, hErr)
 				}
 				result.Status = TicketRejected

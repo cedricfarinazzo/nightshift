@@ -581,7 +581,7 @@ type noMutationJiraClient struct {
 func (n *noMutationJiraClient) PostComment(_ context.Context, _ string, _ NightshiftComment) error {
 	return nil
 }
-func (n *noMutationJiraClient) HandleInvalidTicket(_ context.Context, _ string, _ *ValidationResult) error {
+func (n *noMutationJiraClient) HandleInvalidTicket(_ context.Context, _ string) error {
 	return nil
 }
 func (n *noMutationJiraClient) TransitionToInProgress(_ context.Context, _ string) error { return nil }
