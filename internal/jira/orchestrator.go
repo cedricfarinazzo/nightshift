@@ -218,11 +218,26 @@ func detectResumeState(ticket Ticket) resumeState {
 
 	// Walk the phase sequence from latest to earliest to find the furthest
 	// completed phase.
-	hasPR := GetLastCommentOfType(comments, CommentPR) != nil
-	lastImpl := GetLastCommentOfType(comments, CommentImplement)
-	hasPlan := GetLastCommentOfType(comments, CommentPlan) != nil
-	hasValidation := GetLastCommentOfType(comments, CommentValidation) != nil
+	hasPR     := GetLastCommentOfType(comments, CommentPR) != nil
+	lastImpl  := GetLastCommentOfType(comments, CommentImplement)
+	hasPlan   := GetLastCommentOfType(comments, CommentPlan) != nil
 	hasStatus := GetLastCommentOfType(comments, CommentStatusChange) != nil
+
+	// Determine whether the latest "validation event" is an acceptance or a rejection.
+	// HandleInvalidTicket posts a raw (non-structured) comment starting with
+	// "❌ Nightshift — Ticket Rejected". Compare its timestamp to the last structured
+	// CommentValidation to decide which is more recent.
+	lastAcceptance := GetLastCommentOfType(comments, CommentValidation)
+	var lastRejectedAt time.Time
+	for _, c := range ticket.Comments {
+		if strings.HasPrefix(c.Body, "❌ Nightshift — Ticket Rejected") && c.Created.After(lastRejectedAt) {
+			lastRejectedAt = c.Created
+		}
+	}
+	// hasValidation is true only when the latest acceptance is newer than any rejection.
+	// If rejection is the latest event, fall through to PhaseValidate for re-evaluation.
+	hasValidation := lastAcceptance != nil &&
+		(lastRejectedAt.IsZero() || lastAcceptance.Timestamp.After(lastRejectedAt))
 
 	switch {
 	case hasStatus:

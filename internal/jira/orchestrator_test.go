@@ -1289,6 +1289,66 @@ func TestDetectResumeState_AlreadyComplete(t *testing.T) {
 	}
 }
 
+func rejectionComment(ts time.Time) Comment {
+	return Comment{
+		Body:    "❌ Nightshift — Ticket Rejected\nReason: Not enough information.\nQuality score: 5.0/10",
+		Created: ts,
+	}
+}
+
+// TestDetectResumeState_RejectionOnly verifies that a lone rejection comment
+// forces re-validation on the next run.
+func TestDetectResumeState_RejectionOnly(t *testing.T) {
+	ticket := Ticket{Comments: []Comment{rejectionComment(time.Now())}}
+	rs := detectResumeState(ticket)
+	if rs.startPhase != PhaseValidate {
+		t.Errorf("want PhaseValidate after rejection, got %s", rs.startPhase)
+	}
+}
+
+// TestDetectResumeState_RejectionNewerThanValidation verifies that when the
+// rejection comment is more recent than the last CommentValidation, re-validation
+// is forced (acceptance from a prior partial run must not cause implementation).
+func TestDetectResumeState_RejectionNewerThanValidation(t *testing.T) {
+	base := time.Now()
+	ticket := Ticket{Comments: []Comment{
+		nightshiftCommentAt(CommentValidation, "ok", base.Add(-2*time.Hour)),
+		rejectionComment(base.Add(-1 * time.Hour)), // rejection is newer
+	}}
+	rs := detectResumeState(ticket)
+	if rs.startPhase != PhaseValidate {
+		t.Errorf("want PhaseValidate (rejection newer than acceptance), got %s", rs.startPhase)
+	}
+}
+
+// TestDetectResumeState_ValidationNewerThanRejection verifies that when the
+// user fixed the ticket and a later run accepted it, the acceptance wins and
+// the ticket resumes from PhasePlan.
+func TestDetectResumeState_ValidationNewerThanRejection(t *testing.T) {
+	base := time.Now()
+	ticket := Ticket{Comments: []Comment{
+		rejectionComment(base.Add(-2 * time.Hour)),                         // rejection is older
+		nightshiftCommentAt(CommentValidation, "ok", base.Add(-1*time.Hour)), // acceptance is newer
+	}}
+	rs := detectResumeState(ticket)
+	if rs.startPhase != PhasePlan {
+		t.Errorf("want PhasePlan (acceptance newer than rejection), got %s", rs.startPhase)
+	}
+}
+
+// TestDetectResumeState_RejectionWithStatusChange verifies that a done ticket
+// (CommentStatusChange present) is still treated as alreadyDone even with a rejection.
+func TestDetectResumeState_RejectionWithStatusChange(t *testing.T) {
+	ticket := Ticket{Comments: []Comment{
+		rejectionComment(time.Now().Add(-1 * time.Hour)),
+		nightshiftComment(CommentStatusChange, "complete"),
+	}}
+	rs := detectResumeState(ticket)
+	if !rs.alreadyDone {
+		t.Error("want alreadyDone=true; CommentStatusChange must win over rejection")
+	}
+}
+
 func TestProcessTicket_AlreadyComplete_EarlyExit(t *testing.T) {
 	client := &stubJiraClient{}
 	implAgent := &stubAgent{output: "plan"}
