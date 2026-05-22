@@ -466,27 +466,19 @@ func TestHandleInvalidTicket_Success(t *testing.T) {
 	client, srv := newMockJiraClient(t, defaultMockConfig())
 	defer srv.Close()
 
-	vr := &ValidationResult{
-		Valid:       false,
-		Score:       3,
-		Issues:      []string{"no objective"},
-		Missing:     []string{"acceptance criteria"},
-		Suggestions: []string{"add AC"},
-	}
-	if err := client.HandleInvalidTicket(testCtx(t), "VC-1", vr); err != nil {
+	if err := client.HandleInvalidTicket(testCtx(t), "VC-1"); err != nil {
 		t.Errorf("HandleInvalidTicket() error = %v", err)
 	}
 }
 
-func TestHandleInvalidTicket_CommentFails(t *testing.T) {
+func TestHandleInvalidTicket_TransitionFails(t *testing.T) {
 	cfg := defaultMockConfig()
-	cfg.commentStatus = http.StatusForbidden
+	cfg.transitionsPost = http.StatusForbidden
 	client, srv := newMockJiraClient(t, cfg)
 	defer srv.Close()
 
-	vr := &ValidationResult{Score: 2, Issues: []string{"bad"}}
-	if err := client.HandleInvalidTicket(testCtx(t), "VC-1", vr); err == nil {
-		t.Error("expected error when comment fails")
+	if err := client.HandleInvalidTicket(testCtx(t), "VC-1"); err == nil {
+		t.Error("expected error when transition fails")
 	}
 }
 

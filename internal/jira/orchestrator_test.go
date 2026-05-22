@@ -28,7 +28,7 @@ func (s *stubJiraClient) PostComment(_ context.Context, ticketKey string, commen
 	return s.postCommentErr
 }
 
-func (s *stubJiraClient) HandleInvalidTicket(_ context.Context, ticketKey string, _ *ValidationResult) error {
+func (s *stubJiraClient) HandleInvalidTicket(_ context.Context, ticketKey string) error {
 	s.handleInvalidCalls = append(s.handleInvalidCalls, ticketKey)
 	return s.handleInvalidErr
 }
@@ -1113,7 +1113,7 @@ func (s *stubJiraClientPerMethod) PostComment(_ context.Context, _ string, comme
 	s.postCommentCalls = append(s.postCommentCalls, comment)
 	return nil
 }
-func (s *stubJiraClientPerMethod) HandleInvalidTicket(_ context.Context, _ string, _ *ValidationResult) error {
+func (s *stubJiraClientPerMethod) HandleInvalidTicket(_ context.Context, _ string) error {
 	return nil
 }
 func (s *stubJiraClientPerMethod) TransitionToInProgress(_ context.Context, _ string) error {
@@ -1290,10 +1290,7 @@ func TestDetectResumeState_AlreadyComplete(t *testing.T) {
 }
 
 func rejectionComment(ts time.Time) Comment {
-	return Comment{
-		Body:    "❌ Nightshift — Ticket Rejected\nReason: Not enough information.\nQuality score: 5.0/10",
-		Created: ts,
-	}
+	return nightshiftCommentAt(CommentRejection, "❌ Nightshift — Ticket Rejected\nQuality score: 5.0/10", ts)
 }
 
 // TestDetectResumeState_RejectionOnly verifies that a lone rejection comment
@@ -1929,7 +1926,7 @@ func (s *stubJiraClientSelectiveErr) PostComment(_ context.Context, _ string, co
 	return nil
 }
 
-func (s *stubJiraClientSelectiveErr) HandleInvalidTicket(_ context.Context, ticketKey string, _ *ValidationResult) error {
+func (s *stubJiraClientSelectiveErr) HandleInvalidTicket(_ context.Context, ticketKey string) error {
 	s.handleInvalidCalls = append(s.handleInvalidCalls, ticketKey)
 	return nil
 }

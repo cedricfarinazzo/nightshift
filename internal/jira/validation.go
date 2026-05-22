@@ -156,12 +156,9 @@ func buildValidationComment(vr *ValidationResult) string {
 	return sb.String()
 }
 
-// HandleInvalidTicket posts a structured rejection comment and transitions
-// the ticket to the NEEDS INFO status.
-func (c *Client) HandleInvalidTicket(ctx context.Context, ticketKey string, result *ValidationResult) error {
-	if err := c.AddComment(ctx, ticketKey, buildValidationComment(result)); err != nil {
-		return fmt.Errorf("jira: handle invalid ticket %s: %w", ticketKey, err)
-	}
+// HandleInvalidTicket transitions the ticket to the NEEDS INFO status.
+// Comment posting is handled by the orchestrator via postPhaseComment(CommentRejection).
+func (c *Client) HandleInvalidTicket(ctx context.Context, ticketKey string) error {
 	if err := c.TransitionToNeedsInfo(ctx, ticketKey); err != nil {
 		return fmt.Errorf("jira: transition invalid ticket %s to needs-info: %w", ticketKey, err)
 	}
