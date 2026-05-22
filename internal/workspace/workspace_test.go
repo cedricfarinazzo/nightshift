@@ -104,14 +104,21 @@ func TestNormalizeName(t *testing.T) {
 func TestCleanupStaleWorkspaces(t *testing.T) {
 	root := t.TempDir()
 
-	writeMetaFile := func(dir string, createdAt time.Time) {
+	writeMetaFile := func(t *testing.T, dir string, createdAt time.Time) {
+		t.Helper()
 		meta := workspaceMeta{CreatedAt: createdAt, RunID: "test", URL: "git@github.com:org/repo.git"}
 		data, _ := json.Marshal(meta)
 		p := filepath.Join(dir, ".nightshift-workspace.json")
-		_ = os.WriteFile(p, data, 0o644)
+		if err := os.WriteFile(p, data, 0o644); err != nil {
+			t.Fatalf("writeMetaFile: WriteFile: %v", err)
+		}
 		// Set file mtime to match createdAt so WalkDir sees consistent timestamps.
-		_ = os.Chtimes(p, createdAt, createdAt)
-		_ = os.Chtimes(dir, createdAt, createdAt)
+		if err := os.Chtimes(p, createdAt, createdAt); err != nil {
+			t.Fatalf("writeMetaFile: Chtimes meta: %v", err)
+		}
+		if err := os.Chtimes(dir, createdAt, createdAt); err != nil {
+			t.Fatalf("writeMetaFile: Chtimes dir: %v", err)
+		}
 	}
 
 	staleTime := time.Now().AddDate(0, 0, -10)
@@ -120,12 +127,12 @@ func TestCleanupStaleWorkspaces(t *testing.T) {
 	// Create stale workspace (10 days ago)
 	staleDir := filepath.Join(root, "repo_stale")
 	_ = os.Mkdir(staleDir, 0o755)
-	writeMetaFile(staleDir, staleTime)
+	writeMetaFile(t, staleDir, staleTime)
 
 	// Create fresh workspace (1 day ago)
 	freshDir := filepath.Join(root, "repo_fresh")
 	_ = os.Mkdir(freshDir, 0o755)
-	writeMetaFile(freshDir, freshTime)
+	writeMetaFile(t, freshDir, freshTime)
 
 	// Create workspace without metadata (falls back to mtime; we set via Chtimes)
 	noMetaDir := filepath.Join(root, "repo_nometa")
