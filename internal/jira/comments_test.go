@@ -1,6 +1,8 @@
 package jira
 
 import (
+	"crypto/sha256"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -234,6 +236,121 @@ func TestFormatComment_TypeLineRoundTrip(t *testing.T) {
 	}
 	if meta["model"] != "claude-3/sonnet" {
 		t.Errorf("model = %q, want %q", meta["model"], "claude-3/sonnet")
+	}
+}
+
+func TestFormatComment_DeterministicMetadata(t *testing.T) {
+	c := NightshiftComment{
+		Type:      CommentPlan,
+		Timestamp: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+		Provider:  "claude",
+		Model:     "sonnet",
+		Duration:  time.Minute,
+		Body:      "body",
+		Metadata: map[string]string{
+			"alpha":   "1",
+			"bravo":   "2",
+			"charlie": "3",
+			"delta":   "4",
+		},
+	}
+	first := formatComment(c)
+	for i := 0; i < 20; i++ {
+		if got := formatComment(c); got != first {
+			t.Fatalf("iteration %d produced different output:\nwant: %s\ngot:  %s", i+1, first, got)
+		}
+	}
+}
+
+func TestFormatComment_ParseRoundTrip(t *testing.T) {
+	c := NightshiftComment{
+		Type:      CommentRework,
+		Timestamp: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+		Provider:  "claude",
+		Model:     "sonnet",
+		Duration:  2 * time.Minute,
+		Body:      "rework body",
+		Metadata: map[string]string{
+			"alpha":   "1",
+			"bravo":   "2",
+			"charlie": "3",
+		},
+	}
+	first := formatComment(c)
+	_, meta, ok := parseCommentMeta(first)
+	if !ok {
+		t.Fatal("parseCommentMeta failed on formatted output")
+	}
+	// parseCommentMeta merges type-line fields (provider/model/duration) into the
+	// returned map alongside true metadata keys. Strip them before reconstruction so
+	// c2.Metadata mirrors c.Metadata and the formatted output is byte-identical.
+	for _, structural := range []string{"provider", "model", "duration"} {
+		delete(meta, structural)
+	}
+	c2 := NightshiftComment{
+		Type:      c.Type,
+		Timestamp: c.Timestamp,
+		Provider:  c.Provider,
+		Model:     c.Model,
+		Duration:  c.Duration,
+		Body:      c.Body,
+		Metadata:  meta,
+	}
+	second := formatComment(c2)
+	if first != second {
+		t.Fatalf("parse-then-serialize round trip not byte-identical:\nwant: %s\ngot:  %s", first, second)
+	}
+}
+
+func TestFormatComment_SortedKeyOrder(t *testing.T) {
+	c := NightshiftComment{
+		Type:     CommentPlan,
+		Body:     "body",
+		Metadata: map[string]string{"zebra": "z", "alpha": "a", "mango": "m", "beta": "b"},
+	}
+	body := formatComment(c)
+	reMetaLine := regexp.MustCompile(`<!-- nightshift:meta((?:\s+\S+=\S+)+)\s*-->`)
+	reKVPair := regexp.MustCompile(`(\w+)=\S+`)
+	m := reMetaLine.FindStringSubmatch(body)
+	if m == nil {
+		t.Fatal("nightshift:meta line not found")
+	}
+	pairs := reKVPair.FindAllStringSubmatch(m[1], -1)
+	for i := 1; i < len(pairs); i++ {
+		if pairs[i][1] <= pairs[i-1][1] {
+			t.Errorf("keys not strictly ascending at position %d: %q after %q", i, pairs[i][1], pairs[i-1][1])
+		}
+	}
+}
+
+func TestFormatComment_IdempotentSerializationForResumeLogic(t *testing.T) {
+	ts := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	c := NightshiftComment{
+		Type:      CommentRework,
+		Timestamp: ts,
+		Provider:  "claude",
+		Model:     "sonnet",
+		Duration:  time.Minute,
+		Body:      "rework",
+		Metadata:  map[string]string{"alpha": "1", "bravo": "2", "charlie": "3"},
+	}
+	body1 := formatComment(c)
+	body2 := formatComment(c)
+	h1 := sha256.Sum256([]byte(body1))
+	h2 := sha256.Sum256([]byte(body2))
+	if h1 != h2 {
+		t.Fatal("two serializations of identical NightshiftComment produced different SHA-256 digests — idempotency assumption violated")
+	}
+	raw := []Comment{
+		{Body: body1, Created: ts},
+		{Body: body2, Created: ts},
+	}
+	parsed := ParseNightshiftComments(raw)
+	if len(parsed) != 2 {
+		t.Fatalf("expected 2 parsed comments, got %d", len(parsed))
+	}
+	if parsed[0].Type != parsed[1].Type || parsed[0].Provider != parsed[1].Provider {
+		t.Error("ParseNightshiftComments produced different results for identical serializations")
 	}
 }
 
