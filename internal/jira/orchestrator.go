@@ -236,6 +236,12 @@ func detectResumeState(ticket Ticket) resumeState {
 		// and avoids duplicate status comments/transitions.
 		return resumeState{alreadyDone: true}
 
+	case !hasValidation && lastRejection != nil:
+		// Rejection is the latest validation event. Force re-validation regardless of
+		// any plan/impl/PR comments left from a prior partial run — those comments must
+		// not allow a rejected ticket to skip straight to plan or commit.
+		return resumeState{startPhase: PhaseValidate}
+
 	case hasPR:
 		// PRs exist; only the status transition remains.
 		// Recover PR URLs from the comment body ("PRs created:\nurl1\nurl2\n...").
@@ -413,7 +419,23 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 			if !vr.Valid {
 				issues := strings.Join(vr.Issues, "; ")
 				o.savePhaseLog(ctx, ticket.Key, PhaseValidate, valCfg.Provider, valCfg.Model, validateStart, false, issues, fmt.Sprintf("score %.1f/10: %s", vr.Score, issues))
-				o.postPhaseComment(ctx, ticket.Key, CommentRejection, buildValidationComment(vr), time.Since(validateStart))
+				// Post the rejection marker first; without it detectResumeState cannot
+				// detect this rejection on subsequent runs. Treat failure as fatal so
+				// the ticket is not transitioned without the durable marker in place.
+				provider, model := o.providerForCommentType(CommentRejection)
+				rejComment := NightshiftComment{
+					Type: CommentRejection, Timestamp: time.Now(),
+					Provider: provider, Model: model,
+					Duration: time.Since(validateStart), Body: buildValidationComment(vr),
+				}
+				if err := o.client.PostComment(ctx, ticket.Key, rejComment); err != nil {
+					o.log.Errorf("ticket %s: post rejection comment: %v", ticket.Key, err)
+					result.Status = TicketFailed
+					result.Error = fmt.Errorf("post rejection comment: %w", err).Error()
+					result.Duration = time.Since(start)
+					o.notifyPhase(ticket.Key, PhaseValidate, true)
+					return result, nil
+				}
 				if hErr := o.client.HandleInvalidTicket(ctx, ticket.Key); hErr != nil {
 					o.log.Errorf("ticket %s: handle invalid: %v", ticket.Key, hErr)
 				}
