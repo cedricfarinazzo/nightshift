@@ -193,8 +193,10 @@ func runRun(cmd *cobra.Command, args []string) error {
 	}
 
 	// Clear stale assignments older than 2 hours
-	cleared := st.ClearStaleAssignments(2 * time.Hour)
-	if cleared > 0 {
+	cleared, err := st.ClearStaleAssignments(2 * time.Hour)
+	if err != nil {
+		log.Errorf("state: clear stale assignments: %v", err)
+	} else if cleared > 0 {
 		log.Infof("cleared %d stale assignments", cleared)
 	}
 
@@ -731,9 +733,13 @@ func runRepoTasks(ctx context.Context, p repoTasksParams) (int, int, int) {
 			Type:        scoredTask.Definition.Type,
 		}
 
-		p.st.MarkAssigned(taskInstance.ID, p.stateKey, string(scoredTask.Definition.Type))
+		if err := p.st.MarkAssigned(taskInstance.ID, p.stateKey, string(scoredTask.Definition.Type)); err != nil {
+			p.log.Errorf("state: mark assigned: %v", err)
+		}
 		result, runErr := p.orch.RunTask(ctx, taskInstance, p.repoPath)
-		p.st.ClearAssigned(taskInstance.ID)
+		if err := p.st.ClearAssigned(taskInstance.ID); err != nil {
+			p.log.Errorf("state: clear assigned: %v", err)
+		}
 
 		if runErr != nil {
 			failed++
@@ -756,7 +762,9 @@ func runRepoTasks(ctx context.Context, p repoTasksParams) (int, int, int) {
 		switch result.Status {
 		case orchestrator.StatusCompleted:
 			completed++
-			p.st.RecordTaskRun(p.stateKey, string(scoredTask.Definition.Type))
+			if err := p.st.RecordTaskRun(p.stateKey, string(scoredTask.Definition.Type)); err != nil {
+				p.log.Errorf("state: record task run: %v", err)
+			}
 			if p.verbose {
 				fmt.Printf("  COMPLETED in %d iteration(s) (%s)\n", result.Iterations, result.Duration)
 			}
@@ -809,7 +817,9 @@ func runRepoTasks(ctx context.Context, p repoTasksParams) (int, int, int) {
 	}
 
 	// Record project run using stateKey so cooldowns work across workspace clones.
-	p.st.RecordProjectRun(p.stateKey)
+	if err := p.st.RecordProjectRun(p.stateKey); err != nil {
+		p.log.Errorf("state: record project run: %v", err)
+	}
 	projectStatus := "partial"
 	if failed == 0 && completed > 0 {
 		projectStatus = "success"
@@ -817,7 +827,7 @@ func runRepoTasks(ctx context.Context, p repoTasksParams) (int, int, int) {
 	if completed == 0 && failed > 0 {
 		projectStatus = "failed"
 	}
-	p.st.AddRunRecord(state.RunRecord{
+	if err := p.st.AddRunRecord(state.RunRecord{
 		StartTime:  start,
 		EndTime:    time.Now(),
 		Provider:   p.choice.name,
@@ -826,7 +836,9 @@ func runRepoTasks(ctx context.Context, p repoTasksParams) (int, int, int) {
 		TokensUsed: projectTokensUsed,
 		Status:     projectStatus,
 		Branch:     p.branch,
-	})
+	}); err != nil {
+		p.log.Errorf("state: add run record: %v", err)
+	}
 
 	return tasksRun, completed, failed
 }
@@ -1112,7 +1124,9 @@ func executeRun(ctx context.Context, p executeRunParams) error {
 			}
 
 			// Mark as assigned
-			p.st.MarkAssigned(taskInstance.ID, projectPath, string(scoredTask.Definition.Type))
+			if err := p.st.MarkAssigned(taskInstance.ID, projectPath, string(scoredTask.Definition.Type)); err != nil {
+				p.log.Errorf("state: mark assigned: %v", err)
+			}
 
 			// Inject run metadata for PR traceability
 			orch.SetRunMetadata(&orchestrator.RunMetadata{
@@ -1128,7 +1142,9 @@ func executeRun(ctx context.Context, p executeRunParams) error {
 			result, err := orch.RunTask(ctx, taskInstance, projectPath)
 
 			// Clear assignment
-			p.st.ClearAssigned(taskInstance.ID)
+			if err := p.st.ClearAssigned(taskInstance.ID); err != nil {
+				p.log.Errorf("state: clear assigned: %v", err)
+			}
 
 			if err != nil {
 				tasksFailed++
@@ -1158,7 +1174,9 @@ func executeRun(ctx context.Context, p executeRunParams) error {
 				if !isInteractive() {
 					fmt.Printf("  COMPLETED in %d iteration(s) (%s)\n", result.Iterations, result.Duration)
 				}
-				p.st.RecordTaskRun(projectPath, string(scoredTask.Definition.Type))
+				if err := p.st.RecordTaskRun(projectPath, string(scoredTask.Definition.Type)); err != nil {
+					p.log.Errorf("state: record task run: %v", err)
+				}
 				_, maxTok := scoredTask.Definition.EstimatedTokens()
 				projectTokensUsed += maxTok
 				if p.report != nil {
@@ -1210,7 +1228,9 @@ func executeRun(ctx context.Context, p executeRunParams) error {
 		}
 
 		// Record project run
-		p.st.RecordProjectRun(projectPath)
+		if err := p.st.RecordProjectRun(projectPath); err != nil {
+			p.log.Errorf("state: record project run: %v", err)
+		}
 		projectStatus := "partial"
 		if projectFailed == 0 && projectCompleted > 0 {
 			projectStatus = "success"
@@ -1218,7 +1238,7 @@ func executeRun(ctx context.Context, p executeRunParams) error {
 		if projectCompleted == 0 && projectFailed > 0 {
 			projectStatus = "failed"
 		}
-		p.st.AddRunRecord(state.RunRecord{
+		if err := p.st.AddRunRecord(state.RunRecord{
 			StartTime:  projectStart,
 			EndTime:    time.Now(),
 			Provider:   choice.name,
@@ -1227,7 +1247,9 @@ func executeRun(ctx context.Context, p executeRunParams) error {
 			TokensUsed: projectTokensUsed,
 			Status:     projectStatus,
 			Branch:     p.branch,
-		})
+		}); err != nil {
+			p.log.Errorf("state: add run record: %v", err)
+		}
 	}
 
 	// Summary

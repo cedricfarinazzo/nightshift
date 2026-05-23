@@ -381,6 +381,7 @@ Agents MUST follow these rules:
 
 ## Gotchas
 
+- **`state` Record*/Add* return error** — `RecordProjectRun`, `RecordTaskRun`, `AddRunRecord`, `MarkAssigned`, `ClearAssigned`, `ClearAllAssigned` all return `error`; `ClearStaleAssignments` returns `(int, error)`. Callers log the error and continue — persistence failures must NOT abort a run. Never silently discard the returned error.
 - `modernc.org/sqlite` is pure Go — no CGO needed. Do not switch to `mattn/go-sqlite3`.
 - Agent binaries (`claude`, `codex`, `gh`) must be in PATH. Always use the `CommandRunner` interface for testability; never call `exec.Command` directly in agent code.
 - Credentials are **env-var only** — `CredentialManager` never reads from config files or disk.

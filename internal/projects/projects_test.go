@@ -84,7 +84,9 @@ func TestFilterProcessedToday(t *testing.T) {
 	}
 
 	// Mark one as processed
-	s.RecordProjectRun("/processed")
+	if err := s.RecordProjectRun("/processed"); err != nil {
+		t.Fatalf("RecordProjectRun: %v", err)
+	}
 
 	filtered := FilterProcessedToday(projects, s)
 	if len(filtered) != 1 {
@@ -104,7 +106,7 @@ func TestFilterNotProcessedSince(t *testing.T) {
 	}
 
 	// Mark /recent as processed
-	s.RecordProjectRun("/recent")
+	_ = s.RecordProjectRun("/recent")
 
 	// Filter for 1 hour threshold - /stale has never been processed
 	filtered := FilterNotProcessedSince(projects, s, 1*time.Hour)
@@ -192,7 +194,7 @@ func TestSelectNextAllProcessed(t *testing.T) {
 		{Path: "/proj1", Priority: 1},
 	}
 
-	s.RecordProjectRun("/proj1")
+	_ = s.RecordProjectRun("/proj1")
 
 	next := SelectNext(projects, s)
 	if next != nil {
@@ -304,7 +306,7 @@ func TestGetProjectSummaries(t *testing.T) {
 	}
 
 	// Record a run for proj1
-	s.RecordProjectRun("/proj1")
+	_ = s.RecordProjectRun("/proj1")
 
 	summaries := GetProjectSummaries(projects, s)
 	if len(summaries) != 2 {
