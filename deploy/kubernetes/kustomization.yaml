@@ -11,7 +11,10 @@ resources:
   - serviceaccount.yaml
   - pvc.yaml
   - configmap.yaml
-  - secrets.yaml
+  # secrets.yaml is a template only — it contains placeholder values.
+  # Create the Secret out-of-band (kubectl create secret / Sealed Secrets / External Secrets)
+  # before running apply, and do NOT include it here to avoid overwriting real credentials.
+  # See docs/operations/kubernetes-cronjob.md#authentication for options.
   - cronjob.yaml
 
 # Override the image tag for production pinning:

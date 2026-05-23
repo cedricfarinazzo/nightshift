@@ -7,12 +7,14 @@ metadata:
     app: nightshift
 spec:
   # Default: 02:00 UTC daily. Override via Kustomize patch or edit here.
+  # spec.timeZone requires Kubernetes ≥ 1.27 (GA). Remove if targeting older clusters.
+  timeZone: "Etc/UTC"
   schedule: "0 2 * * *"
   # Prevent concurrent runs — SQLite is ReadWriteOnce and concurrent agents would conflict.
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 3
-  # If the CronJob misses its window, skip rather than run late up to 10 minutes.
+  # Allow up to 10 minutes of late-start before skipping a missed run.
   startingDeadlineSeconds: 600
   jobTemplate:
     spec:
@@ -22,6 +24,8 @@ spec:
             app: nightshift
         spec:
           serviceAccountName: nightshift
+          # No Kubernetes API access needed; disable token mount to reduce credential exposure.
+          automountServiceAccountToken: false
           restartPolicy: OnFailure
           securityContext:
             runAsNonRoot: true

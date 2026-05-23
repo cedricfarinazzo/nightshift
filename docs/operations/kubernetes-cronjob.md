@@ -20,23 +20,26 @@ If you run nightshift on a single machine, the systemd approach (`docs/operation
 ## Quick Start
 
 ```bash
-# 1. Create namespace and secrets
+# 1. Create namespace
 kubectl create namespace nightshift
+
+# 2. Create the credentials Secret out-of-band (secrets.yaml is a template; do not apply it directly).
+#    Omit keys for disabled providers.
 kubectl create secret generic nightshift-secrets \
   --namespace nightshift \
   --from-literal=ANTHROPIC_API_KEY=sk-ant-... \
-  --from-literal=OPENAI_API_KEY=sk-...       \  # omit if Codex disabled
-  --from-literal=GITHUB_TOKEN=ghp_...         \  # omit if Copilot disabled
-  --from-literal=NIGHTSHIFT_JIRA_TOKEN=...       # omit if Jira disabled
+  --from-literal=OPENAI_API_KEY=sk-... \
+  --from-literal=GITHUB_TOKEN=ghp_... \
+  --from-literal=NIGHTSHIFT_JIRA_TOKEN=...
 
-# 2. Apply all manifests via Kustomize
+# 3. Apply all manifests via Kustomize (secrets.yaml is excluded from the default kustomization)
 kubectl apply -k deploy/kubernetes/
 
-# 3. Verify
+# 4. Verify
 kubectl -n nightshift get cronjob,pvc,configmap,secret
 ```
 
-The CronJob fires at 02:00 UTC every day by default. Trigger a manual run:
+The CronJob fires at 02:00 UTC every day by default (`spec.timeZone: "Etc/UTC"` in `cronjob.yaml`; requires Kubernetes ≥ 1.27). Trigger a manual run:
 
 ```bash
 kubectl -n nightshift create job --from=cronjob/nightshift nightshift-manual-$(date +%s)
@@ -77,7 +80,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     # curl -fsSL https://claude.ai/install.sh | sh && \
     rm -rf /var/lib/apt/lists/*
 
-FROM gcr.io/distroless/static-debian12:nonroot
+# Use distroless/base (not /static) — git and gh are dynamically linked and require glibc.
+FROM gcr.io/distroless/base-debian12:nonroot
 COPY --from=builder /nightshift /usr/local/bin/nightshift
 COPY --from=tools /usr/bin/git /usr/bin/git
 COPY --from=tools /usr/bin/gh /usr/bin/gh
