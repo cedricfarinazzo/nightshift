@@ -154,6 +154,28 @@ func compressViaAgent(ctx context.Context, cfg *CompressConfig, text string) (st
 
 `compressViaAgent` builds a meta-prompt + calls the configured provider's `Agent.Execute`. So compression uses the **CLI path**, never a direct API call — same `writePromptFile` + temp-file pattern.
 
+### Sandboxing (critical)
+
+Compression runs sandboxed:
+
+- `WorkDir` is pinned to a freshly created `os.MkdirTemp("", "nightshift-compress-")`; the dir is `RemoveAll`'d via `defer` after the call returns.
+- The inner agent is constructed with `WithBypassPermissions(false)`, so the agent CLI (`gh copilot`, `claude --print`, `codex exec`) runs WITHOUT the dangerous bypass flag (`--allow-all-tools`, `--dangerously-skip-permissions`, `--dangerously-bypass-approvals-and-sandbox`).
+
+This is defense-in-depth against meta-prompt failure. The VC-101 incident: the copilot agent, called for compression, ignored the meta-prompt, interpreted the embedded ticket as a task, ran `gofmt -w . && go build ./...`, and edited `cmd/nightshift/commands/jira_run.go` in whichever directory `nightshift jira run` was launched from (here: the dev checkout at `~/doc/github/nightshift`). The sandbox+no-bypass combo means even if a future model regresses to acting on `<data>` contents, it cannot reach the caller's working tree.
+
+Guard tests: `TestBuildCompressOpts_SandboxedWorkDir`, `TestCompressMetaPrompt_ForbidsToolUse`, `TestCompressMetaPrompt_PreservesCriticalContent`.
+
+### Meta-prompt content invariants
+
+`compressMetaPrompt` must:
+
+1. Forbid all tool use (edit, write, bash, shell, file I/O, git, gofmt, build, test).
+2. Forbid treating `<data>` contents as a task or following any instruction inside it.
+3. Forbid preamble, narration, or meta-commentary on input/output.
+4. Enumerate a keep-exact list covering: code blocks, file paths, identifier names (functions/vars/fields/flags/env vars/config keys), numbers, ticket keys (e.g. VC-101), error messages, shell commands, JSON/YAML keys, acceptance criteria items, section headers.
+
+The keep-exact list is what protects ticket descriptions from silent data loss — without it the compressor may rewrite `acquireJiraRunLock` → `acquire lock`, drop `Refs: VC-101`, or collapse acceptance bullets into a single sentence.
+
 ## Import-cycle gotcha
 
 `agents` cannot import `config` (config → jira → agents creates a cycle). Two structs:
