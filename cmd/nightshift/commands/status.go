@@ -167,7 +167,11 @@ func formatTokens(tokens int) string {
 func showSchedulerFailures(database *db.DB) {
 	ctx := context.Background()
 	names, err := db.DistinctSchedulerJobNames(ctx, database)
-	if err != nil || len(names) == 0 {
+	if err != nil {
+		fmt.Printf("\nScheduler failures: (query error: %v)\n", err)
+		return
+	}
+	if len(names) == 0 {
 		return
 	}
 

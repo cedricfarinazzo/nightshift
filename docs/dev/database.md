@@ -39,38 +39,31 @@ flowchart TD
     Loop -- all applied --> Ready(["DB ready"])
 ```
 
-`internal/db/migrations.go` — numbered functions `migration001`, `migration002`, ... `migration010` etc. Schema version stored in `schema_version` table; `Open()` runs each pending migration in order inside a transaction.
+`internal/db/migrations.go` — `[]Migration` slice of `Migration{Version, Description, SQL}` structs, each referencing a `migrationNNNSQL` constant. Schema version stored in `schema_version` table; `Open()` runs each pending migration in order inside a transaction via `tx.Exec(m.SQL)`.
 
 Migrations are **forward-only** — no downs. To revert, you write a new forward migration that reverses the change.
 
 ### Adding a migration
 
-1. Append `migrationNNN` function at the bottom of `migrations.go`
-2. Register it in the `migrations` slice
-3. Increment the version constant
-4. Add tests (`migrations_test.go`)
-5. Document in `CHANGELOG.md` if it's user-visible
+1. Add a `migrationNNNSQL` constant at the bottom of `migrations.go` with the DDL.
+2. Append a `Migration{Version: NNN, Description: "...", SQL: migrationNNNSQL}` entry to the `migrations` slice.
+3. Add tests (`migrations_test.go`)
+4. Document in `CHANGELOG.md` if it's user-visible
 
 Example skeleton:
 
 ```go
-func migration010(tx *sql.Tx) error {
-    _, err := tx.Exec(`
-        ALTER TABLE run_history
-        ADD COLUMN compression_savings_pct REAL DEFAULT 0;
-    `)
-    return err
-}
-```
+const migrationNNNSQL = `
+    ALTER TABLE run_history
+    ADD COLUMN compression_savings_pct REAL DEFAULT 0;
+`
 
-Then:
-
-```go
-var migrations = []migration{
-    {1, migration001},
-    ...
-    {10, migration010},
-}
+// in the migrations slice:
+{
+    Version:     NNN,
+    Description: "add compression_savings_pct to run_history",
+    SQL:         migrationNNNSQL,
+},
 ```
 
 ## Recent migration (009)

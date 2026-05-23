@@ -296,8 +296,11 @@ func checkSchedulerHealth(cfg *config.Config, database *db.DB, add func(string, 
 			allOK = false
 		} else {
 			// Check if any historical failure exists at all.
-			_, _, ok, _ := db.LastSchedulerFailure(ctx, database, name)
-			if ok {
+			_, _, ok, lastErr := db.LastSchedulerFailure(ctx, database, name)
+			if lastErr != nil {
+				add(fmt.Sprintf("scheduler.%s", name), statusWarn, fmt.Sprintf("query error: %v", lastErr))
+				allOK = false
+			} else if ok {
 				add(fmt.Sprintf("scheduler.%s", name), statusWarn, "past failure(s) recorded (outside current window)")
 				allOK = false
 			} else {

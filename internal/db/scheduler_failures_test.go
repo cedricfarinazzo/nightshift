@@ -89,10 +89,14 @@ func TestCountSchedulerFailuresSince(t *testing.T) {
 	base := time.Now().UTC().Truncate(time.Second)
 	// 3 recent + 2 old
 	for i := 0; i < 3; i++ {
-		_ = RecordSchedulerFailure(ctx, database, "job-c", base.Add(time.Duration(i)*time.Minute), "err")
+		if err := RecordSchedulerFailure(ctx, database, "job-c", base.Add(time.Duration(i)*time.Minute), "err"); err != nil {
+			t.Fatalf("insert recent: %v", err)
+		}
 	}
 	for i := 0; i < 2; i++ {
-		_ = RecordSchedulerFailure(ctx, database, "job-c", base.Add(-time.Duration(i+1)*time.Hour), "old err")
+		if err := RecordSchedulerFailure(ctx, database, "job-c", base.Add(-time.Duration(i+1)*time.Hour), "old err"); err != nil {
+			t.Fatalf("insert old: %v", err)
+		}
 	}
 
 	count, err := CountSchedulerFailuresSince(ctx, database, "job-c", base.Add(-30*time.Minute))
@@ -109,9 +113,15 @@ func TestDistinctSchedulerJobNames(t *testing.T) {
 	ctx := context.Background()
 
 	ts := time.Now().UTC()
-	_ = RecordSchedulerFailure(ctx, database, "alpha", ts, "e")
-	_ = RecordSchedulerFailure(ctx, database, "beta", ts, "e")
-	_ = RecordSchedulerFailure(ctx, database, "alpha", ts.Add(time.Second), "e")
+	if err := RecordSchedulerFailure(ctx, database, "alpha", ts, "e"); err != nil {
+		t.Fatalf("insert alpha: %v", err)
+	}
+	if err := RecordSchedulerFailure(ctx, database, "beta", ts, "e"); err != nil {
+		t.Fatalf("insert beta: %v", err)
+	}
+	if err := RecordSchedulerFailure(ctx, database, "alpha", ts.Add(time.Second), "e"); err != nil {
+		t.Fatalf("insert alpha2: %v", err)
+	}
 
 	names, err := DistinctSchedulerJobNames(ctx, database)
 	if err != nil {

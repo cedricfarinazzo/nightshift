@@ -745,7 +745,7 @@ func TestFailureCount_Concurrent(t *testing.T) {
 	}
 }
 
-func TestAddNamedJob_AutoName(t *testing.T) {
+func TestAddJob_AutoName(t *testing.T) {
 	s := New()
 	s.AddJob(func(_ context.Context) error { return nil })
 	s.AddJob(func(_ context.Context) error { return nil })
