@@ -6,7 +6,18 @@ import (
 	"time"
 )
 
+// fakeGitRunner is a test double for GitRunner.
+type fakeGitRunner struct {
+	out []byte
+	err error
+}
+
+func (f fakeGitRunner) Run(_ string, _ ...string) ([]byte, error) {
+	return f.out, f.err
+}
+
 func TestParseAuthorsEmpty(t *testing.T) {
+	t.Parallel()
 	parser := NewGitParser("/nonexistent")
 	_, err := parser.ParseAuthors(ParseOptions{})
 	if err == nil {
@@ -15,6 +26,7 @@ func TestParseAuthorsEmpty(t *testing.T) {
 }
 
 func TestCalculateMetricsEmpty(t *testing.T) {
+	t.Parallel()
 	metrics := CalculateMetrics([]CommitAuthor{})
 	if metrics.TotalContributors != 0 {
 		t.Errorf("expected 0 contributors, got %d", metrics.TotalContributors)
@@ -25,6 +37,7 @@ func TestCalculateMetricsEmpty(t *testing.T) {
 }
 
 func TestCalculateMetricsSingleAuthor(t *testing.T) {
+	t.Parallel()
 	authors := []CommitAuthor{
 		{Name: "Alice", Email: "alice@example.com", Commits: 100},
 	}
@@ -46,6 +59,7 @@ func TestCalculateMetricsSingleAuthor(t *testing.T) {
 }
 
 func TestCalculateMetricsMultipleAuthors(t *testing.T) {
+	t.Parallel()
 	authors := []CommitAuthor{
 		{Name: "Alice", Email: "alice@example.com", Commits: 50},
 		{Name: "Bob", Email: "bob@example.com", Commits: 30},
@@ -73,6 +87,7 @@ func TestCalculateMetricsMultipleAuthors(t *testing.T) {
 }
 
 func TestCalculateMetricsEvenDistribution(t *testing.T) {
+	t.Parallel()
 	authors := []CommitAuthor{
 		{Name: "A", Email: "a@example.com", Commits: 25},
 		{Name: "B", Email: "b@example.com", Commits: 25},
@@ -93,6 +108,7 @@ func TestCalculateMetricsEvenDistribution(t *testing.T) {
 }
 
 func TestHerfindahlCalculation(t *testing.T) {
+	t.Parallel()
 	// Test single author (should be 1 when normalized)
 	authors1 := []CommitAuthor{
 		{Name: "A", Email: "a@example.com", Commits: 100},
@@ -116,6 +132,7 @@ func TestHerfindahlCalculation(t *testing.T) {
 }
 
 func TestGiniCalculation(t *testing.T) {
+	t.Parallel()
 	// Equal distribution should have Gini ~0
 	authors := []CommitAuthor{
 		{Name: "A", Email: "a@example.com", Commits: 25},
@@ -130,6 +147,7 @@ func TestGiniCalculation(t *testing.T) {
 }
 
 func TestRepositoryExistsFalse(t *testing.T) {
+	t.Parallel()
 	exists := RepositoryExists("/nonexistent/path")
 	if exists {
 		t.Errorf("nonexistent path should not exist")
@@ -137,6 +155,7 @@ func TestRepositoryExistsFalse(t *testing.T) {
 }
 
 func TestRiskLevelScore(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		level string
 		want  int
@@ -149,14 +168,19 @@ func TestRiskLevelScore(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		got := RiskLevelScore(tt.level)
-		if got != tt.want {
-			t.Errorf("RiskLevelScore(%q) = %d, want %d", tt.level, got, tt.want)
-		}
+		tt := tt
+		t.Run(tt.level, func(t *testing.T) {
+			t.Parallel()
+			got := RiskLevelScore(tt.level)
+			if got != tt.want {
+				t.Errorf("RiskLevelScore(%q) = %d, want %d", tt.level, got, tt.want)
+			}
+		})
 	}
 }
 
 func TestParseOptionsWithFilters(t *testing.T) {
+	t.Parallel()
 	since := time.Now().AddDate(0, -1, 0)
 	until := time.Now()
 
@@ -177,17 +201,10 @@ func TestParseOptionsWithFilters(t *testing.T) {
 	}
 }
 
-// --- gitExecFn injectable var tests ---
-
 func TestParseAuthors_Success(t *testing.T) {
-	orig := gitExecFn
-	defer func() { gitExecFn = orig }()
-
-	gitExecFn = func(_ string, _ ...string) ([]byte, error) {
-		return []byte("Alice|alice@a.com\nBob|bob@b.com\n"), nil
-	}
-
-	parser := NewGitParser("/fake")
+	t.Parallel()
+	fake := fakeGitRunner{out: []byte("Alice|alice@a.com\nBob|bob@b.com\n")}
+	parser := NewGitParser("/fake", WithGitRunner(fake))
 	authors, err := parser.ParseAuthors(ParseOptions{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -203,29 +220,19 @@ func TestParseAuthors_Success(t *testing.T) {
 }
 
 func TestParseAuthors_GitError(t *testing.T) {
-	orig := gitExecFn
-	defer func() { gitExecFn = orig }()
-
-	gitExecFn = func(_ string, _ ...string) ([]byte, error) {
-		return nil, errors.New("git not found")
-	}
-
-	parser := NewGitParser("/fake")
+	t.Parallel()
+	fake := fakeGitRunner{err: errors.New("git not found")}
+	parser := NewGitParser("/fake", WithGitRunner(fake))
 	_, err := parser.ParseAuthors(ParseOptions{})
 	if err == nil {
-		t.Error("expected error from gitExecFn failure")
+		t.Error("expected error from GitRunner failure")
 	}
 }
 
 func TestParseAuthors_MalformedLines(t *testing.T) {
-	orig := gitExecFn
-	defer func() { gitExecFn = orig }()
-
-	gitExecFn = func(_ string, _ ...string) ([]byte, error) {
-		return []byte("no-separator\nalice@a.com\n\n"), nil
-	}
-
-	parser := NewGitParser("/fake")
+	t.Parallel()
+	fake := fakeGitRunner{out: []byte("no-separator\nalice@a.com\n\n")}
+	parser := NewGitParser("/fake", WithGitRunner(fake))
 	authors, err := parser.ParseAuthors(ParseOptions{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)

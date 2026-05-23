@@ -2,6 +2,7 @@ package jira
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -139,6 +140,122 @@ func TestCommitAndPush_SubsequentPush(t *testing.T) {
 	err := CommitAndPush(context.Background(), workDir, "feat: VC-99: second commit")
 	if err != nil {
 		t.Fatalf("CommitAndPush (subsequent push) failed: %v", err)
+	}
+}
+
+func TestSetupBranch_PullNewBranch(t *testing.T) {
+	origExec := gitExecFn
+	origRaw := gitExecRawFn
+	defer func() {
+		gitExecFn = origExec
+		gitExecRawFn = origRaw
+	}()
+
+	gitExecFn = func(_ context.Context, _ string, args ...string) (string, error) {
+		switch args[0] {
+		case "fetch", "checkout":
+			return "", nil
+		default:
+			return "", fmt.Errorf("unexpected git %s", strings.Join(args, " "))
+		}
+	}
+	gitExecRawFn = func(_ context.Context, _ string, args ...string) (string, int, error) {
+		out := "fatal: couldn't find remote ref feature/X"
+		return out, 128, fmt.Errorf("exit status 128")
+	}
+
+	isNew, err := setupBranch(context.Background(), "/tmp/fake", "feature/X", "main")
+	if err != nil {
+		t.Fatalf("expected nil error for new-branch case, got: %v", err)
+	}
+	if isNew {
+		t.Fatal("expected isNew=false")
+	}
+}
+
+func TestSetupBranch_PullConflict(t *testing.T) {
+	origExec := gitExecFn
+	origRaw := gitExecRawFn
+	defer func() {
+		gitExecFn = origExec
+		gitExecRawFn = origRaw
+	}()
+
+	var gitCalls [][]string
+	gitExecFn = func(_ context.Context, _ string, args ...string) (string, error) {
+		gitCalls = append(gitCalls, append([]string{}, args...))
+		switch args[0] {
+		case "fetch", "checkout", "rebase":
+			return "", nil
+		default:
+			return "", fmt.Errorf("unexpected git %s", strings.Join(args, " "))
+		}
+	}
+	conflictOut := "CONFLICT (content): Merge conflict in internal/jira/branch.go\nCONFLICT (content): Merge conflict in README.md"
+	gitExecRawFn = func(_ context.Context, _ string, args ...string) (string, int, error) {
+		return conflictOut, 1, fmt.Errorf("exit status 1")
+	}
+
+	_, err := setupBranch(context.Background(), "/tmp/fake", "feature/X", "main")
+	if err == nil {
+		t.Fatal("expected error for conflict case, got nil")
+	}
+	if !strings.Contains(err.Error(), "conflicts in") {
+		t.Errorf("error should mention conflicts, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "branch.go") {
+		t.Errorf("error should contain conflicting path, got: %v", err)
+	}
+
+	// Verify rebase --abort was called.
+	abortCalled := false
+	for _, call := range gitCalls {
+		if len(call) >= 2 && call[0] == "rebase" && call[1] == "--abort" {
+			abortCalled = true
+			break
+		}
+	}
+	if !abortCalled {
+		t.Errorf("expected git rebase --abort to be called, git calls: %v", gitCalls)
+	}
+}
+
+func TestSetupBranch_PullNetworkFail(t *testing.T) {
+	origExec := gitExecFn
+	origRaw := gitExecRawFn
+	defer func() {
+		gitExecFn = origExec
+		gitExecRawFn = origRaw
+	}()
+
+	var gitCalls [][]string
+	gitExecFn = func(_ context.Context, _ string, args ...string) (string, error) {
+		gitCalls = append(gitCalls, append([]string{}, args...))
+		switch args[0] {
+		case "fetch", "checkout":
+			return "", nil
+		default:
+			return "", fmt.Errorf("unexpected git %s", strings.Join(args, " "))
+		}
+	}
+	networkOut := "ssh: connect to host github.com port 22: Connection refused\nfatal: Could not read from remote repository."
+	gitExecRawFn = func(_ context.Context, _ string, args ...string) (string, int, error) {
+		return networkOut, 128, fmt.Errorf("exit status 128")
+	}
+
+	_, err := setupBranch(context.Background(), "/tmp/fake", "feature/X", "main")
+	if err == nil {
+		t.Fatal("expected error for network-fail case, got nil")
+	}
+	if !strings.Contains(err.Error(), "exit 128") {
+		t.Errorf("error should contain exit code, got: %v", err)
+	}
+
+	// Verify rebase --abort was NOT called.
+	for _, call := range gitCalls {
+		if len(call) >= 2 && call[0] == "rebase" && call[1] == "--abort" {
+			t.Errorf("rebase --abort should not be called on network failure, calls: %v", gitCalls)
+		}
 	}
 }
 

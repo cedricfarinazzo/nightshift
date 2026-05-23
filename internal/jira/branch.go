@@ -7,7 +7,94 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+
+	"github.com/cedricfarinazzo/nightshift/internal/logging"
 )
+
+// gitExecFn executes a git command and returns trimmed combined output. Replaced in tests.
+var gitExecFn = func(ctx context.Context, repoPath string, args ...string) (string, error) {
+	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd.Dir = repoPath
+	out, err := cmd.CombinedOutput()
+	trimmed := strings.TrimSpace(string(out))
+	if err != nil {
+		subcommand := strings.Join(args, " ")
+		if trimmed != "" {
+			return "", fmt.Errorf("git %s failed: %s: %w", subcommand, trimmed, err)
+		}
+		return "", fmt.Errorf("git %s failed: %w", subcommand, err)
+	}
+	return trimmed, nil
+}
+
+// gitExecRawFn executes a git command and returns combined output + exit code even on failure.
+// Replaced in tests.
+var gitExecRawFn = func(ctx context.Context, repoPath string, args ...string) (out string, exitCode int, err error) {
+	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd.Dir = repoPath
+	combined, runErr := cmd.CombinedOutput()
+	out = strings.TrimSpace(string(combined))
+	if runErr != nil {
+		var exitErr *exec.ExitError
+		if errors.As(runErr, &exitErr) {
+			return out, exitErr.ExitCode(), runErr
+		}
+		return out, -1, runErr
+	}
+	return out, 0, nil
+}
+
+// pullErrClass classifies git pull --rebase failure modes.
+type pullErrClass int
+
+const (
+	pullErrNewBranch pullErrClass = iota // remote ref does not exist yet (first push)
+	pullErrConflict                      // rebase conflict
+	pullErrOther                         // network/auth/unknown
+)
+
+// classifyPullError inspects combined git output to determine which failure class applies.
+func classifyPullError(out string) pullErrClass {
+	lower := strings.ToLower(out)
+	if strings.Contains(lower, "couldn't find remote ref") {
+		return pullErrNewBranch
+	}
+	if strings.Contains(out, "CONFLICT") || strings.Contains(lower, "could not apply") || strings.Contains(lower, "merge conflict") {
+		return pullErrConflict
+	}
+	return pullErrOther
+}
+
+// parseConflictPaths extracts conflicting file paths from git rebase output.
+// Matches lines of the form "CONFLICT (...): ... in <path>".
+func parseConflictPaths(out string) []string {
+	var paths []string
+	seen := map[string]bool{}
+	for _, line := range strings.Split(out, "\n") {
+		if !strings.HasPrefix(line, "CONFLICT") {
+			continue
+		}
+		idx := strings.LastIndex(line, " in ")
+		if idx < 0 {
+			continue
+		}
+		path := strings.TrimSpace(line[idx+4:])
+		if path != "" && !seen[path] {
+			seen[path] = true
+			paths = append(paths, path)
+		}
+	}
+	return paths
+}
+
+// tailLines returns the last n lines of out joined by newline.
+func tailLines(out string, n int) string {
+	lines := strings.Split(out, "\n")
+	if len(lines) <= n {
+		return out
+	}
+	return strings.Join(lines[len(lines)-n:], "\n")
+}
 
 // BranchName returns the feature branch name for a Jira ticket.
 func BranchName(ticketKey string) string {
@@ -89,10 +176,20 @@ func setupBranch(ctx context.Context, repoPath, branchName, baseBranch string) (
 
 	// Case 1: local branch already exists — checkout and sync.
 	if _, err = gitExec(ctx, repoPath, "checkout", branchName); err == nil {
-		// Pull remote changes so we don't push-reject on the next commit.
-		if _, pullErr := gitExec(ctx, repoPath, "pull", "--rebase", "origin", branchName); pullErr != nil {
-			// No-op if remote branch doesn't exist yet (first run, not yet pushed).
-			_ = pullErr
+		pullOut, exitCode, pullErr := gitExecRawFn(ctx, repoPath, "pull", "--rebase", "origin", branchName)
+		if pullErr != nil {
+			switch classifyPullError(pullOut) {
+			case pullErrNewBranch:
+				logging.Component("jira").Debugf("setupBranch %s: remote branch missing, skipping pull", branchName)
+			case pullErrConflict:
+				paths := parseConflictPaths(pullOut)
+				if _, abortErr := gitExec(ctx, repoPath, "rebase", "--abort"); abortErr != nil {
+					logging.Component("jira").Debugf("setupBranch %s: rebase --abort: %v", branchName, abortErr)
+				}
+				return false, fmt.Errorf("git pull --rebase %s: conflicts in %v: %w", branchName, paths, pullErr)
+			default:
+				return false, fmt.Errorf("git pull --rebase %s (exit %d): %s: %w", branchName, exitCode, tailLines(pullOut, 5), pullErr)
+			}
 		}
 		return false, nil
 	}
@@ -196,16 +293,5 @@ func remoteRefExists(ctx context.Context, repoPath, ref string) (bool, error) {
 
 // gitExec runs a git command in repoPath and returns trimmed combined output.
 func gitExec(ctx context.Context, repoPath string, args ...string) (string, error) {
-	cmd := exec.CommandContext(ctx, "git", args...)
-	cmd.Dir = repoPath
-	out, err := cmd.CombinedOutput()
-	trimmed := strings.TrimSpace(string(out))
-	if err != nil {
-		subcommand := strings.Join(args, " ")
-		if trimmed != "" {
-			return "", fmt.Errorf("git %s failed: %s: %w", subcommand, trimmed, err)
-		}
-		return "", fmt.Errorf("git %s failed: %w", subcommand, err)
-	}
-	return trimmed, nil
+	return gitExecFn(ctx, repoPath, args...)
 }

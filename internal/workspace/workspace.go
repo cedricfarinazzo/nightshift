@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -201,14 +202,35 @@ func NormalizeName(url string) string {
 }
 
 func workspaceAge(dirPath string, e os.DirEntry) (time.Time, error) {
-	metaPath := filepath.Join(dirPath, ".nightshift-workspace.json")
-	data, err := os.ReadFile(metaPath)
-	if err == nil {
-		var meta workspaceMeta
-		if json.Unmarshal(data, &meta) == nil && !meta.CreatedAt.IsZero() {
-			return meta.CreatedAt, nil
+	// Walk all entries to find newest mtime. On Linux, git operations update
+	// file mtimes inside a directory but not the directory entry's own mtime,
+	// so relying on dir mtime alone causes active workspaces to be reaped (VC-83).
+	var newest time.Time
+	walkErr := filepath.WalkDir(dirPath, func(_ string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil // skip unreadable entries
 		}
+		info, err := d.Info()
+		if err != nil {
+			return nil
+		}
+		if mt := info.ModTime(); mt.After(newest) {
+			newest = mt
+		}
+		return nil
+	})
+	if walkErr == nil && !newest.IsZero() {
+		// Floor by meta.CreatedAt so a brand-new empty clone isn't reaped.
+		metaPath := filepath.Join(dirPath, ".nightshift-workspace.json")
+		if data, err := os.ReadFile(metaPath); err == nil {
+			var meta workspaceMeta
+			if json.Unmarshal(data, &meta) == nil && meta.CreatedAt.After(newest) {
+				newest = meta.CreatedAt
+			}
+		}
+		return newest, nil
 	}
+	// Walk failed; fall back to dir-entry mtime.
 	info, err := e.Info()
 	if err != nil {
 		return time.Time{}, err

@@ -104,26 +104,39 @@ func TestNormalizeName(t *testing.T) {
 func TestCleanupStaleWorkspaces(t *testing.T) {
 	root := t.TempDir()
 
-	writeMetaFile := func(dir string, createdAt time.Time) {
+	writeMetaFile := func(t *testing.T, dir string, createdAt time.Time) {
+		t.Helper()
 		meta := workspaceMeta{CreatedAt: createdAt, RunID: "test", URL: "git@github.com:org/repo.git"}
 		data, _ := json.Marshal(meta)
-		_ = os.WriteFile(filepath.Join(dir, ".nightshift-workspace.json"), data, 0o644)
+		p := filepath.Join(dir, ".nightshift-workspace.json")
+		if err := os.WriteFile(p, data, 0o644); err != nil {
+			t.Fatalf("writeMetaFile: WriteFile: %v", err)
+		}
+		// Set file mtime to match createdAt so WalkDir sees consistent timestamps.
+		if err := os.Chtimes(p, createdAt, createdAt); err != nil {
+			t.Fatalf("writeMetaFile: Chtimes meta: %v", err)
+		}
+		if err := os.Chtimes(dir, createdAt, createdAt); err != nil {
+			t.Fatalf("writeMetaFile: Chtimes dir: %v", err)
+		}
 	}
+
+	staleTime := time.Now().AddDate(0, 0, -10)
+	freshTime := time.Now().AddDate(0, 0, -1)
 
 	// Create stale workspace (10 days ago)
 	staleDir := filepath.Join(root, "repo_stale")
 	_ = os.Mkdir(staleDir, 0o755)
-	writeMetaFile(staleDir, time.Now().AddDate(0, 0, -10))
+	writeMetaFile(t, staleDir, staleTime)
 
 	// Create fresh workspace (1 day ago)
 	freshDir := filepath.Join(root, "repo_fresh")
 	_ = os.Mkdir(freshDir, 0o755)
-	writeMetaFile(freshDir, time.Now().AddDate(0, 0, -1))
+	writeMetaFile(t, freshDir, freshTime)
 
 	// Create workspace without metadata (falls back to mtime; we set via Chtimes)
 	noMetaDir := filepath.Join(root, "repo_nometa")
 	_ = os.Mkdir(noMetaDir, 0o755)
-	staleTime := time.Now().AddDate(0, 0, -10)
 	_ = os.Chtimes(noMetaDir, staleTime, staleTime)
 
 	cfg := Config{Root: root, TTLDays: 7}
@@ -151,6 +164,107 @@ func TestCleanupStaleWorkspaces_NonexistentRoot(t *testing.T) {
 	}
 	if n != 0 {
 		t.Errorf("expected 0 removed, got %d", n)
+	}
+}
+
+// TestCleanupStaleWorkspaces_RecentFileActivity verifies that a workspace whose
+// directory entry mtime is old (> TTL) but has a recently modified file inside
+// is NOT reaped. This is the VC-83 regression case.
+func TestCleanupStaleWorkspaces_RecentFileActivity(t *testing.T) {
+	root := t.TempDir()
+	wsDir := filepath.Join(root, "repo_active")
+	if err := os.Mkdir(wsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Write meta file with stale CreatedAt.
+	staleTime := time.Now().AddDate(0, 0, -10)
+	meta := workspaceMeta{CreatedAt: staleTime, RunID: "test", URL: "git@github.com:org/repo.git"}
+	data, _ := json.Marshal(meta)
+	metaPath := filepath.Join(wsDir, ".nightshift-workspace.json")
+	if err := os.WriteFile(metaPath, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Make both dir and meta file appear old.
+	if err := os.Chtimes(metaPath, staleTime, staleTime); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(wsDir, staleTime, staleTime); err != nil {
+		t.Fatal(err)
+	}
+
+	// Write a fresh file inside (simulates recent git activity).
+	freshFile := filepath.Join(wsDir, "recent.txt")
+	if err := os.WriteFile(freshFile, []byte("activity"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// (os.WriteFile bumps wsDir mtime — but we already set it stale before writing,
+	// so the dir entry mtime is now fresh from this WriteFile. Re-apply stale on dir
+	// to simulate the Linux case where git updates files but not dir entry mtime.)
+	if err := os.Chtimes(wsDir, staleTime, staleTime); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := Config{Root: root, TTLDays: 7}
+	n, err := CleanupStaleWorkspaces(cfg)
+	if err != nil {
+		t.Fatalf("CleanupStaleWorkspaces: %v", err)
+	}
+	if n != 0 {
+		t.Errorf("removed %d workspaces, want 0 (active workspace should be kept)", n)
+	}
+	if _, err := os.Stat(wsDir); os.IsNotExist(err) {
+		t.Error("active workspace with recent file was incorrectly reaped")
+	}
+}
+
+// TestCleanupStaleWorkspaces_AllOld verifies that a workspace where ALL entries
+// (dir, meta, files) have old mtimes IS reaped past TTL.
+func TestCleanupStaleWorkspaces_AllOld(t *testing.T) {
+	root := t.TempDir()
+	wsDir := filepath.Join(root, "repo_stale")
+	if err := os.Mkdir(wsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	staleTime := time.Now().AddDate(0, 0, -10)
+
+	// Write meta with stale CreatedAt and force mtime old.
+	meta := workspaceMeta{CreatedAt: staleTime, RunID: "test", URL: "git@github.com:org/repo.git"}
+	data, _ := json.Marshal(meta)
+	metaPath := filepath.Join(wsDir, ".nightshift-workspace.json")
+	if err := os.WriteFile(metaPath, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(metaPath, staleTime, staleTime); err != nil {
+		t.Fatal(err)
+	}
+
+	// Write an inner file and make it stale too.
+	innerFile := filepath.Join(wsDir, "old.txt")
+	if err := os.WriteFile(innerFile, []byte("old content"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(innerFile, staleTime, staleTime); err != nil {
+		t.Fatal(err)
+	}
+
+	// Make dir entry stale last (after all writes).
+	if err := os.Chtimes(wsDir, staleTime, staleTime); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := Config{Root: root, TTLDays: 7}
+	n, err := CleanupStaleWorkspaces(cfg)
+	if err != nil {
+		t.Fatalf("CleanupStaleWorkspaces: %v", err)
+	}
+	if n != 1 {
+		t.Errorf("removed %d workspaces, want 1", n)
+	}
+	if _, err := os.Stat(wsDir); !os.IsNotExist(err) {
+		t.Error("stale workspace was not removed")
 	}
 }
 
