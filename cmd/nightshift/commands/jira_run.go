@@ -33,6 +33,7 @@ ON REVIEW tickets: fetch PR feedback → re-work → push`,
 func init() {
 	jiraCmd.AddCommand(jiraRunCmd)
 
+	addProjectFlag(jiraRunCmd)
 	jiraRunCmd.Flags().String("label", "", "Jira label filter (overrides config, default \"nightshift\")")
 	jiraRunCmd.Flags().Int("max-tickets", 0, "Override max tickets per run (0 = use config)")
 	jiraRunCmd.Flags().String("ticket", "", "Process a single ticket by key (e.g., VC-123)")
@@ -87,6 +88,15 @@ func runJira(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("init logging: %w", err)
 	}
 	cfg.Jira.Defaults()
+
+	if projectFilter, _ := cmd.Flags().GetString("project"); projectFilter != "" {
+		filtered, ferr := filterProjectsByKey(cfg.Jira.Projects, projectFilter)
+		if ferr != nil {
+			return ferr
+		}
+		cfg.Jira.Projects = filtered
+	}
+
 	if err := cfg.Jira.Validate(); err != nil {
 		return fmt.Errorf("jira config: %w", err)
 	}

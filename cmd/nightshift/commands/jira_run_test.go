@@ -294,3 +294,96 @@ func TestRunJira_MissingConfig(t *testing.T) {
 		t.Errorf("expected error containing %q, got: %v", expected, err)
 	}
 }
+
+func TestFilterProjectsByKey(t *testing.T) {
+	projects := []jira.ProjectConfig{
+		{Key: "VC"},
+		{Key: "FIN"},
+	}
+
+	tests := []struct {
+		name       string
+		projects   []jira.ProjectConfig
+		key        string
+		wantLen    int
+		wantErr    bool
+		errSubstrs []string
+	}{
+		{
+			name:    "match exact",
+			key:     "VC",
+			wantLen: 1,
+		},
+		{
+			name:    "match case-insensitive lowercase",
+			key:     "vc",
+			wantLen: 1,
+		},
+		{
+			name:    "match case-insensitive mixed",
+			key:     "Fin",
+			wantLen: 1,
+		},
+		{
+			name:    "empty key returns all",
+			key:     "",
+			wantLen: 2,
+		},
+		{
+			name:       "no match returns error with key",
+			key:        "ZZ",
+			wantErr:    true,
+			errSubstrs: []string{"ZZ"},
+		},
+		{
+			name:       "no match error lists configured keys",
+			key:        "ZZ",
+			wantErr:    true,
+			errSubstrs: []string{"VC", "FIN", "configured:"},
+		},
+		{
+			name:       "empty config returns error",
+			projects:   []jira.ProjectConfig{},
+			key:        "VC",
+			wantErr:    true,
+			errSubstrs: []string{"no Jira projects configured"},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			input := tc.projects
+			if input == nil {
+				input = projects
+			}
+			got, err := filterProjectsByKey(input, tc.key)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatal("expected error, got nil")
+				}
+				for _, sub := range tc.errSubstrs {
+					if !strings.Contains(err.Error(), sub) {
+						t.Fatalf("error %q does not contain %q", err.Error(), sub)
+					}
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if len(got) != tc.wantLen {
+				t.Fatalf("got %d projects, want %d", len(got), tc.wantLen)
+			}
+		})
+	}
+}
+
+func TestRunJiraCmd_ProjectFlagRegistered(t *testing.T) {
+	f := jiraRunCmd.Flags().Lookup("project")
+	if f == nil {
+		t.Fatal("--project flag not registered on jira run command")
+	}
+	if f.Shorthand != "p" {
+		t.Errorf("--project shorthand = %q, want %q", f.Shorthand, "p")
+	}
+}

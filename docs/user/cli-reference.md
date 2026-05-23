@@ -90,6 +90,8 @@ PID file at `~/.local/share/nightshift/nightshift.pid` (atomic — only one daem
 
 ```bash
 nightshift jira run                          # process all labeled tickets
+nightshift jira run --project VC             # only this project (mirrors jira preview)
+nightshift jira run -p VC                    # short form
 nightshift jira run --ticket VC-42           # one ticket
 nightshift jira run --max-tickets 5
 nightshift jira run --skip-validation

@@ -179,6 +179,8 @@ Status names from the Jira API are checked by substring keyword. Examples:
 ```bash
 # Run
 nightshift jira run                          # all labeled tickets, all projects
+nightshift jira run --project VC             # only the VC project (mirrors jira preview -p)
+nightshift jira run -p VC                    # short form
 nightshift jira run --ticket VC-42           # one ticket
 nightshift jira run --max-tickets 5
 nightshift jira run --label other-label

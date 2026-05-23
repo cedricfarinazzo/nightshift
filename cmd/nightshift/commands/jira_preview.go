@@ -26,7 +26,7 @@ execution order, and budget without executing anything.`,
 }
 
 func init() {
-	jiraPreviewCmd.Flags().StringP("project", "p", "", "Jira project key (overrides config)")
+	addProjectFlag(jiraPreviewCmd)
 	jiraPreviewCmd.Flags().String("label", "", "Jira label filter (overrides config, default \"nightshift\")")
 	jiraPreviewCmd.Flags().Bool("json", false, "Output as JSON")
 	jiraPreviewCmd.Flags().Bool("plain", false, "Disable TUI pager")
@@ -123,18 +123,9 @@ func runJiraPreview(cmd *cobra.Command, _ []string) error {
 	}
 
 	// Filter projects with --project flag.
-	projects := cfg.Jira.Projects
-	if projectFilter != "" {
-		var filtered []jira.ProjectConfig
-		for _, p := range projects {
-			if strings.EqualFold(p.Key, projectFilter) {
-				filtered = append(filtered, p)
-			}
-		}
-		if len(filtered) == 0 {
-			return fmt.Errorf("no project with key %q found in config", projectFilter)
-		}
-		projects = filtered
+	projects, err := filterProjectsByKey(cfg.Jira.Projects, projectFilter)
+	if err != nil {
+		return err
 	}
 
 	// Validate the (potentially filtered) config.
