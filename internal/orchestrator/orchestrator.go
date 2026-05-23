@@ -375,12 +375,7 @@ func (o *Orchestrator) RunTask(ctx context.Context, task *tasks.Task, workDir st
 		o.emit(Event{Type: EventPhaseEnd, Phase: StatusReviewing, TaskID: task.ID, Duration: time.Since(phaseStart), Iteration: iteration})
 
 		if review.Passed {
-			// Success - commit and return
 			o.log(result, "info", "review passed", map[string]any{"iteration": iteration})
-			if err := o.commit(ctx, task, impl, workDir); err != nil {
-				o.log(result, "warn", "commit failed", map[string]any{"error": err.Error()})
-				// Don't fail the task if commit fails, just log it
-			}
 			result.Status = StatusCompleted
 			result.Duration = time.Since(start)
 
@@ -772,17 +767,6 @@ func (o *Orchestrator) review(ctx context.Context, task *tasks.Task, impl *Imple
 	}
 
 	return review, nil
-}
-
-// commit finalizes successful task completion.
-func (o *Orchestrator) commit(_ context.Context, task *tasks.Task, impl *ImplementOutput, _ string) error {
-	// For now, commit is a no-op. In full implementation:
-	// - Create git commit with changes
-	// - Include a commit message with https://github.com/cedricfarinazzo/nightshift
-	// - Update task state
-	// - Send notifications
-	o.logger.Infof("commit: task=%s files=%d", task.ID, len(impl.FilesModified))
-	return nil
 }
 
 // Prompt builders
