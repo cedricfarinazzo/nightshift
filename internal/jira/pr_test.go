@@ -359,8 +359,7 @@ func TestFindExistingPR_StateOpenFlagPassed(t *testing.T) {
 // ── FetchPRReviewComments ─────────────────────────────────────────────────────
 
 func TestFetchPRReviewComments_ReviewThreadsError(t *testing.T) {
-	t.Parallel()
-
+	// Not parallel: captures os.Stderr (global) to assert warning log output.
 	prViewJSON := `{
 		"url": "https://github.com/org/repo/pull/7",
 		"state": "OPEN",
