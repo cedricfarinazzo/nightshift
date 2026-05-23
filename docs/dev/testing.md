@@ -88,7 +88,62 @@ Required for full coverage but skipped by default — CI runs them only on tagge
 go test -cover -run 'Test[^E]' ./internal/jira/...
 ```
 
-## ghExec substitution
+## Exec runner injection
+
+Preferred pattern for injecting external-command dependencies. `internal/analysis` is the reference implementation.
+
+Define a narrow interface in the package that uses it:
+
+```go
+type GitRunner interface {
+    Run(repoPath string, args ...string) ([]byte, error)
+}
+```
+
+Default production impl:
+
+```go
+type execGitRunner struct{}
+func (execGitRunner) Run(repoPath string, args ...string) ([]byte, error) {
+    cmd := exec.Command("git", args...)
+    cmd.Dir = repoPath
+    return cmd.Output()
+}
+```
+
+Wire via functional option so existing callers keep compiling:
+
+```go
+type Option func(*GitParser)
+
+func WithGitRunner(r GitRunner) Option {
+    return func(gp *GitParser) { gp.runner = r }
+}
+
+func NewGitParser(repoPath string, opts ...Option) *GitParser {
+    gp := &GitParser{repoPath: repoPath, runner: execGitRunner{}}
+    for _, o := range opts { o(gp) }
+    return gp
+}
+```
+
+In tests — no global mutation, safe for `t.Parallel()`:
+
+```go
+type fakeGitRunner struct{ out []byte; err error }
+func (f fakeGitRunner) Run(_ string, _ ...string) ([]byte, error) { return f.out, f.err }
+
+func TestSomething(t *testing.T) {
+    t.Parallel()
+    fake := fakeGitRunner{out: []byte("Alice|alice@a.com\n")}
+    parser := analysis.NewGitParser("/fake", analysis.WithGitRunner(fake))
+    ...
+}
+```
+
+Packages still using package-level vars (`ghExec` in `internal/jira/pr.go`, `gitExec` in `internal/orchestrator`, `gitExecFn`/`SetGitExecFn` in `internal/workspace`) are tracked for migration — see follow-up ticket VC-101.
+
+### Legacy: ghExec (internal/jira/pr.go — not yet migrated)
 
 PR creation tests stub the `gh` CLI:
 
@@ -100,7 +155,7 @@ ghExec = func(ctx context.Context, args ...string) (string, error) {
 }
 ```
 
-`ghExec` is a package-level var in `internal/jira/pr.go` for this purpose.
+**Do not add `t.Parallel()` to tests using this pattern** — they race on the shared global. Migrate to interface injection (see above) before parallelising.
 
 ## Time control
 
