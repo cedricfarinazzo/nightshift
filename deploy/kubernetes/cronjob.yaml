@@ -1,0 +1,77 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: nightshift
+  namespace: nightshift
+  labels:
+    app: nightshift
+spec:
+  # Default: 02:00 UTC daily. Override via Kustomize patch or edit here.
+  # spec.timeZone requires Kubernetes ≥ 1.27 (GA). Remove if targeting older clusters.
+  timeZone: "Etc/UTC"
+  schedule: "0 2 * * *"
+  # Prevent concurrent runs — SQLite is ReadWriteOnce and concurrent agents would conflict.
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  # Allow up to 10 minutes of late-start before skipping a missed run.
+  startingDeadlineSeconds: 600
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          labels:
+            app: nightshift
+        spec:
+          serviceAccountName: nightshift
+          # No Kubernetes API access needed; disable token mount to reduce credential exposure.
+          automountServiceAccountToken: false
+          restartPolicy: OnFailure
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            fsGroup: 1000
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: nightshift
+              # Override via Kustomize images: field for production image pinning.
+              image: ghcr.io/cedricfarinazzo/nightshift:latest
+              command: ["nightshift", "run", "--yes"]
+              env:
+                - name: NIGHTSHIFT_CONFIG
+                  value: /etc/nightshift/config.yaml
+                - name: HOME
+                  # Agent CLIs (claude, gh) write to $HOME/.config; use emptyDir-backed /data/home.
+                  value: /data/home
+              envFrom:
+                - secretRef:
+                    name: nightshift-secrets
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 256Mi
+                limits:
+                  cpu: 1000m
+                  memory: 1Gi
+              volumeMounts:
+                - name: data
+                  mountPath: /data
+                - name: config
+                  mountPath: /etc/nightshift
+                  readOnly: true
+                # /tmp must be writable: nightshift uses os.CreateTemp for agent prompt files.
+                - name: tmp
+                  mountPath: /tmp
+          volumes:
+            - name: data
+              persistentVolumeClaim:
+                claimName: nightshift-data
+            - name: config
+              configMap:
+                name: nightshift-config
+            - name: tmp
+              emptyDir: {}

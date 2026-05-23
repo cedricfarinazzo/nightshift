@@ -4,6 +4,10 @@ All notable changes to nightshift are documented in this file.
 
 ## [Unreleased]
 
+### Features
+
+- **feat(deploy): Kubernetes CronJob manifests + deployment guide (VC-1)** — added `deploy/kubernetes/` with Kustomize-driven manifests (CronJob, ConfigMap, PVC, Secret template, Namespace, ServiceAccount) and `docs/operations/kubernetes-cronjob.md` covering container image, auth, Git credentials, repo mounting strategies, and production tips.
+
 ### Refactoring
 
 - **agents: deduplicate option constructors (VC-92)** — extracted shared `agentConfig` struct and

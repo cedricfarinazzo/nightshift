@@ -1,0 +1,63 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nightshift-config
+  namespace: nightshift
+  labels:
+    app: nightshift
+data:
+  config.yaml: |
+    # Nightshift configuration for Kubernetes CronJob deployment.
+    # Mount this ConfigMap at /etc/nightshift/config.yaml.
+    # Set NIGHTSHIFT_CONFIG=/etc/nightshift/config.yaml in the container environment,
+    # or place it at ~/.config/nightshift/config.yaml.
+
+    # SQLite database and logs stored on the PVC mounted at /data.
+    db_path: /data/nightshift.db
+
+    logging:
+      level: info
+      # Write logs to the PVC so they persist across pod restarts.
+      path: /data/logs
+
+    reporting:
+      output_dir: /data/reports
+
+    schedule:
+      # CronJob schedule is controlled by the CronJob spec, not this field.
+      # Set this to match the CronJob schedule for budget calculations.
+      cron: "0 2 * * *"
+
+    budget:
+      daily_limit: 1000000   # tokens
+      reserve_percent: 10
+
+    providers:
+      claude:
+        # API key injected from the nightshift-secrets Secret.
+        # Subscription CLI auth is not supported in Kubernetes (no interactive TTY).
+        model: claude-opus-4-5
+        enabled: true
+      codex:
+        model: gpt-4o
+        enabled: false
+      copilot:
+        enabled: false
+
+    # Workspace root for ephemeral per-run repo clones inside the pod.
+    # Repos are cloned into /data/workspaces/<name>_<runID>/ each run.
+    workspace:
+      root: /data/workspaces
+      ttl_days: 7
+
+    # Jira integration — populate via environment variables or edit below.
+    # integrations:
+    #   jira:
+    #     url: https://your-org.atlassian.net
+    #     email: your-email@example.com
+    #     # Token injected from Secret: NIGHTSHIFT_JIRA_TOKEN
+    #     projects:
+    #       - key: YOUR_PROJECT
+    #         repos:
+    #           - name: your-repo
+    #             url: git@github.com:your-org/your-repo.git

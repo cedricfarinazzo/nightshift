@@ -135,6 +135,26 @@ Full reference: [`docs/user/cli-reference.md`](docs/user/cli-reference.md).
 
 ---
 
+## Kubernetes / Cloud Deployment
+
+Run nightshift as a Kubernetes CronJob using the included manifests:
+
+```bash
+# Create the Secret out-of-band first (secrets.yaml is a template; applying it would overwrite credentials)
+kubectl create namespace nightshift
+kubectl create secret generic nightshift-secrets \
+  --namespace nightshift \
+  --from-literal=ANTHROPIC_API_KEY=sk-ant-... \
+  --from-literal=NIGHTSHIFT_JIRA_TOKEN=...
+
+# Apply all manifests (Kustomize; secrets.yaml excluded from defaults)
+kubectl apply -k deploy/kubernetes/
+```
+
+Fires at 02:00 UTC daily (`spec.timeZone: "Etc/UTC"`, requires Kubernetes ≥ 1.27). Override the schedule, image tag, or resource limits via a Kustomize overlay. Full guide: [`docs/operations/kubernetes-cronjob.md`](docs/operations/kubernetes-cronjob.md).
+
+---
+
 ## Minimal Configuration
 
 `~/.config/nightshift/config.yaml`:

@@ -1,0 +1,33 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: nightshift
+
+commonLabels:
+  app: nightshift
+
+resources:
+  - namespace.yaml
+  - serviceaccount.yaml
+  - pvc.yaml
+  - configmap.yaml
+  # secrets.yaml is a template only — it contains placeholder values.
+  # Create the Secret out-of-band (kubectl create secret / Sealed Secrets / External Secrets)
+  # before running apply, and do NOT include it here to avoid overwriting real credentials.
+  # See docs/operations/kubernetes-cronjob.md#authentication for options.
+  - cronjob.yaml
+
+# Override the image tag for production pinning:
+# images:
+#   - name: ghcr.io/cedricfarinazzo/nightshift
+#     newTag: v0.3.4
+
+# Example schedule patch (uncomment and adjust):
+# patches:
+#   - patch: |-
+#       - op: replace
+#         path: /spec/schedule
+#         value: "0 3 * * *"
+#     target:
+#       kind: CronJob
+#       name: nightshift
