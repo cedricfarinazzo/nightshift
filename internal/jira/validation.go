@@ -55,17 +55,37 @@ func ValidateTicket(ctx context.Context, agent agents.Agent, ticket Ticket, comp
 // so the compressor cannot strip the agent's role definition.
 const validationRolePrefix = `Ticket quality validator. Assess if ticket has enough info for autonomous AI implementation.
 
-Criteria: CLEAR OBJECTIVE, SUFFICIENT CONTEXT, ACCEPTANCE CRITERIA, SCOPE, NO AMBIGUITY
+Score the ticket 1-10 on these criteria (deduct points where any are weak or missing):
+- CLEAR OBJECTIVE: stated goal, expected outcome
+- SUFFICIENT CONTEXT: enough background, file/component pointers, prior art
+- ACCEPTANCE CRITERIA: explicit, testable, bounded
+- SCOPE: bounded — no open-ended "improve X"
+- NO AMBIGUITY: terms defined, no contradictions, decisions made not deferred
+
+Scoring guide:
+- 9-10: ready to implement with no clarification
+- 7-8: minor gaps, agent can fill via reasonable assumption
+- 6: threshold — implementable but rough; flag concerns
+- 4-5: missing critical info; agent would guess on key decisions
+- 1-3: not actionable
 
 `
 
 // validationFormatInstructions is the output-format spec appended after
 // compression so the compressor cannot mangle the JSON schema.
+//
+// NOTE: the "valid" boolean field is derived from "score" by parseValidationResponse;
+// agents may include it but its value is ignored. Threshold lives in code, not prompt.
 const validationFormatInstructions = `
-Respond in JSON only (no markdown, no code fences):
-{"valid": bool, "score": 1-10, "issues": [...], "missing": [...], "suggestions": [...]}
+Respond in JSON only (no markdown, no code fences, no preamble, no trailing text):
+{
+  "score": <integer 1-10>,
+  "issues": ["<critical problem 1>", "<critical problem 2>"],
+  "missing": ["<info that should be in the ticket but isn't>"],
+  "suggestions": ["<concrete edit to ticket text>"]
+}
 
-Valid if score >= 6 and no critical issues.`
+Each array element is a single-sentence string. Use [] for empty arrays — never null. Lists may be empty when the ticket is good.`
 
 // buildValidationContent returns only the compressible ticket data portion.
 // validationRolePrefix and validationFormatInstructions are delivered via

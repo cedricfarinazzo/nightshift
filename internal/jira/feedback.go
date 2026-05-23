@@ -173,6 +173,7 @@ func (o *Orchestrator) ProcessFeedback(ctx context.Context, ticket Ticket, ws *W
 			rfStart := time.Now()
 			agentResult, err := agent.Execute(ctx, agents.ExecuteOptions{
 				Prompt:       buildReworkContent(ticket),
+				PromptPrefix: jiraReworkRolePrefix,
 				PromptSuffix: buildReworkSuffix(reviewState, repo),
 				WorkDir:      repo.Path,
 				Timeout:      timeout,
@@ -272,6 +273,11 @@ func hasActionableComments(rs *PRReviewState) bool {
 	return false
 }
 
+// jiraReworkRolePrefix is the role/task context prepended after compression so
+// the compressor cannot strip the agent's role definition. Mirrors
+// jiraPlanRolePrefix / jiraImplementRolePrefix.
+const jiraReworkRolePrefix = "Review-fix agent. Address PR review feedback for the ticket below.\n\n"
+
 // buildReworkPrompt constructs the agent prompt from PR review comments.
 // Ticket context prepended so agent can cross-reference original intent.
 // buildReworkContent returns only the compressible ticket data (description,
@@ -326,20 +332,28 @@ func buildReworkSuffix(review *PRReviewState, repo RepoWorkspace) string {
 	if review.HasConflict {
 		b.WriteString("### Merge Conflict\nResolve conflicts with base branch before push.\n\n")
 	}
+	if repo.Path != "" {
+		b.WriteString("### WORKSPACE RESTRICTION (MANDATORY — DO NOT IGNORE)\n")
+		b.WriteString("You MUST ONLY edit, create, or delete files within:\n")
+		fmt.Fprintf(&b, "  - %s\n", repo.Path)
+		b.WriteString("Never edit, create, or delete files outside this path under any circumstances.\n")
+		b.WriteString("Never run `git init` under any circumstances.\n\n")
+	}
 	b.WriteString("### Instructions\n")
 	b.WriteString("Address ALL reviewer feedback. For each comment:\n")
-	b.WriteString("1. Make requested change\n")
-	b.WriteString("2. On disagreement, explain in code comment\n")
-	b.WriteString("3. Don't modify code unrelated to review feedback\n")
+	b.WriteString("1. Make requested change inside the workspace path above.\n")
+	b.WriteString("2. On disagreement, explain in a code comment prefixed `// TODO(nightshift):` (or language equivalent). Do NOT post Jira comments.\n")
+	b.WriteString("3. Do not modify code unrelated to review feedback or failing checks.\n")
+	b.WriteString("4. Do not commit or push — handled separately.\n")
 	b.WriteString("\n### Quality Checks (REQUIRED before finishing)\n")
 	b.WriteString("Detect the project language/toolchain and run the appropriate lint and test commands.\n")
-	b.WriteString("Fix ALL failures. Do not finish until lint and tests pass. Do not commit or push — handled separately.\n")
+	b.WriteString("Fix ALL failures. Do not finish until lint and tests pass.\n")
 	return b.String()
 }
 
 // buildReworkPrompt returns the full prompt (for tests/callers without compression).
 func buildReworkPrompt(ticket Ticket, review *PRReviewState, repo RepoWorkspace) string {
-	return buildReworkContent(ticket) + buildReworkSuffix(review, repo)
+	return jiraReworkRolePrefix + buildReworkContent(ticket) + buildReworkSuffix(review, repo)
 }
 
 // filterNewComments returns only comments created after lastSeen.
