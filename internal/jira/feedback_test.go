@@ -101,6 +101,35 @@ func TestBuildReworkPrompt(t *testing.T) {
 	}
 }
 
+// TestBuildReworkPrompt_HasSafetyDirectives locks in the safety scaffolding the
+// rework prompt is required to carry: agent role, workspace restriction, no-git-init,
+// no Jira comments, no commit/push. Mirrors what buildImplementSuffix provides.
+func TestBuildReworkPrompt_HasSafetyDirectives(t *testing.T) {
+	ticket := Ticket{Key: "VC-10", Summary: "x", Description: "y"}
+	review := &PRReviewState{
+		URL:     "https://github.com/org/repo/pull/1",
+		Reviews: []Review{{Author: "a", State: "CHANGES_REQUESTED", Body: "fix"}},
+	}
+	repo := RepoWorkspace{Name: "nightshift", Branch: "feature/VC-10", Path: "/tmp/ws/nightshift"}
+
+	prompt := buildReworkPrompt(ticket, review, repo)
+
+	required := []string{
+		"Review-fix agent",                                // role prefix
+		"WORKSPACE RESTRICTION (MANDATORY — DO NOT IGNORE)", // restriction header
+		"/tmp/ws/nightshift",                              // permitted path listed
+		"Never run `git init`",                            // git-init block
+		"TODO(nightshift)",                                // code-comment marker
+		"Do not commit or push",                           // commit/push gate
+		"Do not finish until lint and tests pass",         // quality gate
+	}
+	for _, want := range required {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("rework prompt missing safety directive: %q", want)
+		}
+	}
+}
+
 func TestBuildReworkPrompt_NoAcceptanceCriteria(t *testing.T) {
 	ticket := Ticket{
 		Key:         "VC-10",

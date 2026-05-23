@@ -882,11 +882,12 @@ const jiraPlanRolePrefix = "Planning agent. Create implementation plan for ticke
 func (o *Orchestrator) buildPlanSuffix(ws *Workspace) string {
 	var b strings.Builder
 	b.WriteString("\n## Instructions\n")
-	b.WriteString("1. Break work into ordered steps\n")
-	b.WriteString("2. Identify files to create or modify\n")
-	b.WriteString("3. Note dependencies and risks\n")
-	b.WriteString("4. Output plan as plain text\n")
-	b.WriteString("5. Do NOT edit, create, or delete any files — output plan text only\n")
+	b.WriteString("1. Break work into ordered, numbered steps. Each step: one concrete action.\n")
+	b.WriteString("2. Identify files to create or modify (list paths). Note new packages or modules.\n")
+	b.WriteString("3. Note dependencies (what must land first), risks, and any assumptions you're making.\n")
+	b.WriteString("4. Output plan as markdown (it will be posted as a Jira comment and re-fed to the implement phase). Headings, lists, fenced code are fine.\n")
+	b.WriteString("5. Keep the plan tight: enough detail to implement without ambiguity, but no prose padding.\n")
+	b.WriteString("6. Do NOT edit, create, or delete any files — output plan text only.\n")
 	if ws != nil && len(ws.Repos) > 0 {
 		b.WriteString("\n## WORKSPACE RESTRICTION (MANDATORY — DO NOT IGNORE)\n")
 		b.WriteString("If you need to read files to understand context, you may ONLY read files within:\n")
@@ -959,7 +960,7 @@ func (o *Orchestrator) buildImplementSuffix(plan string, ws *Workspace) string {
 	b.WriteString("2. Make all necessary code changes\n")
 	b.WriteString("3. Verify ALL acceptance criteria are met\n")
 	b.WriteString("4. Do not commit or push — handled separately\n")
-	b.WriteString("5. On ambiguity, make reasonable assumption and document in comment\n")
+	b.WriteString("5. On ambiguity, make reasonable assumption and document in a code comment prefixed `// TODO(nightshift):` (or language equivalent). Do NOT post Jira comments.\n")
 	b.WriteString("6. Do NOT stop early — continue until plan implemented, lint passes, tests pass\n")
 	b.WriteString("7. Never run `git init` under any circumstances\n")
 	if ws != nil && len(ws.Repos) > 0 {
