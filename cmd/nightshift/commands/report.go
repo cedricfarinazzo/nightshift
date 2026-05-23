@@ -63,7 +63,10 @@ By default, shows a polished overview of what happened during the last night.`,
 			lipgloss.SetColorProfile(termenv.Ascii)
 		}
 
-		cfg, _ := config.Load()
+		cfg, err := config.Load()
+		if err != nil {
+			return fmt.Errorf("loading config: %w", err)
+		}
 
 		now := time.Now()
 		rng, err := resolveReportRange(opts, cfg, now)

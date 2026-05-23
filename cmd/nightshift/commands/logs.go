@@ -111,10 +111,11 @@ func resolveLogDir(override string) string {
 	if override != "" {
 		return override
 	}
-	if cfg, err := config.Load(); err == nil && cfg != nil {
-		if cfg.ExpandedLogPath() != "" {
-			return cfg.ExpandedLogPath()
-		}
+	cfg, err := config.Load()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "warning: config load failed: %v; using default log path\n", err)
+	} else if cfg != nil && cfg.ExpandedLogPath() != "" {
+		return cfg.ExpandedLogPath()
 	}
 	return defaultLogPath()
 }

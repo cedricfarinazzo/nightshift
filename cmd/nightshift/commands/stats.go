@@ -57,7 +57,10 @@ func runStats(jsonOutput bool, period string) error {
 
 	// Apply period filter if not "all"
 	if period != "all" {
-		result = filterStatsByPeriod(result, s, reportsDir, period)
+		result, err = filterStatsByPeriod(result, s, reportsDir, period)
+		if err != nil {
+			return fmt.Errorf("filtering stats: %w", err)
+		}
 	}
 
 	if jsonOutput {
@@ -68,12 +71,12 @@ func runStats(jsonOutput bool, period string) error {
 
 // filterStatsByPeriod recomputes stats from reports filtered by the given period.
 // For period filtering we reload reports, filter by date, and recompute.
-func filterStatsByPeriod(original *stats.StatsResult, s *stats.Stats, reportsDir string, period string) *stats.StatsResult {
+func filterStatsByPeriod(original *stats.StatsResult, s *stats.Stats, reportsDir string, period string) (*stats.StatsResult, error) {
 	_ = s // stats.Stats doesn't expose period filtering; we do it here
 
 	runs, err := loadRunReports(reportsDir)
 	if err != nil || len(runs) == 0 {
-		return original
+		return original, nil
 	}
 
 	now := time.Now()
@@ -94,22 +97,25 @@ func filterStatsByPeriod(original *stats.StatsResult, s *stats.Stats, reportsDir
 			}
 		}
 	case "last-night":
-		cfg, _ := config.Load()
+		cfg, err := config.Load()
+		if err != nil {
+			return nil, fmt.Errorf("loading config: %w", err)
+		}
 		rng, err := resolveReportRange(reportOptions{period: "last-night"}, cfg, now)
 		if err != nil {
-			return original
+			return nil, fmt.Errorf("resolving last-night range: %w", err)
 		}
 		filtered = filterReportRuns(runs, rng, reportOptions{})
 	default:
-		return original
+		return original, nil
 	}
 
 	if len(filtered) == 0 {
-		return &stats.StatsResult{TaskTypeBreakdown: make(map[string]int)}
+		return &stats.StatsResult{TaskTypeBreakdown: make(map[string]int)}, nil
 	}
 
 	// Recompute stats from filtered runs
-	return computeStatsFromRuns(filtered)
+	return computeStatsFromRuns(filtered), nil
 }
 
 // computeStatsFromRuns builds a StatsResult from a set of report runs.
