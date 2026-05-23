@@ -123,18 +123,9 @@ func runJiraPreview(cmd *cobra.Command, _ []string) error {
 	}
 
 	// Filter projects with --project flag.
-	projects := cfg.Jira.Projects
-	if projectFilter != "" {
-		var filtered []jira.ProjectConfig
-		for _, p := range projects {
-			if strings.EqualFold(p.Key, projectFilter) {
-				filtered = append(filtered, p)
-			}
-		}
-		if len(filtered) == 0 {
-			return fmt.Errorf("no project with key %q found in config", projectFilter)
-		}
-		projects = filtered
+	projects, err := filterProjectsByKey(cfg.Jira.Projects, projectFilter)
+	if err != nil {
+		return err
 	}
 
 	// Validate the (potentially filtered) config.
