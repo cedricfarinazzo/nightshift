@@ -7,6 +7,7 @@ All notable changes to nightshift are documented in this file.
 ### Features
 
 - **feat(deploy): Kubernetes CronJob manifests + deployment guide (VC-1)** — added `deploy/kubernetes/` with Kustomize-driven manifests (CronJob, ConfigMap, PVC, Secret template, Namespace, ServiceAccount) and `docs/operations/kubernetes-cronjob.md` covering container image, auth, Git credentials, repo mounting strategies, and production tips.
+- **feat(jira): single-instance lock prevents concurrent jira run on same host (VC-101)** — atomic PID lock at `~/.local/share/nightshift/jira-run.lock`; second invocation exits non-zero with "another jira run in progress, PID N, started at T"; `--wait <duration>` blocks with exponential backoff; stale locks (dead PID) auto-reclaimed; shared `PidLock` helper also used by daemon.
 
 ### Refactoring
 

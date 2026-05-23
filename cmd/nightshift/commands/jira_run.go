@@ -3,7 +3,9 @@ package commands
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -39,9 +41,42 @@ func init() {
 	jiraRunCmd.Flags().Bool("review-only", false, "Only process ON REVIEW feedback (skip TODO)")
 	jiraRunCmd.Flags().String("type", "", "Filter tickets by issue type (e.g. Bug, Story)")
 	jiraRunCmd.Flags().Bool("ignore-budget", false, "Bypass budget checks (use with caution)")
+	jiraRunCmd.Flags().Duration("wait", 0, "wait up to duration for an in-progress jira run to finish (0 = fail fast)")
+}
+
+// jiraRunLockPath returns the path to the jira-run single-instance lock file.
+// Returns an error if the home directory cannot be resolved.
+func jiraRunLockPath() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("resolve home dir: %w", err)
+	}
+	return filepath.Join(home, ".local", "share", "nightshift", "jira-run.lock"), nil
 }
 
 func runJira(cmd *cobra.Command, _ []string) error {
+	// Signal handling first so SIGINT/SIGTERM cancels any lock wait.
+	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer cancel()
+
+	// Acquire single-instance lock before any I/O to avoid concurrent runs.
+	lockPath, err := jiraRunLockPath()
+	if err != nil {
+		return err
+	}
+	waitDur, _ := cmd.Flags().GetDuration("wait")
+	var jiraLock *PidLock
+	var lockErr error
+	if waitDur > 0 {
+		jiraLock, lockErr = acquirePidLockWait(ctx, lockPath, waitDur, "jira run")
+	} else {
+		jiraLock, lockErr = acquirePidLock(lockPath, "jira run")
+	}
+	if lockErr != nil {
+		return lockErr
+	}
+	defer func() { _ = jiraLock.Release() }()
+
 	log := logging.Component("jira")
 
 	cfg, err := loadConfig("")
@@ -75,9 +110,6 @@ func runJira(cmd *cobra.Command, _ []string) error {
 	if todoOnly && reviewOnly {
 		return fmt.Errorf("--todo-only and --review-only are mutually exclusive")
 	}
-
-	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer cancel()
 
 	runID := uuid.New().String()
 	runDB, dbErr := openDB()

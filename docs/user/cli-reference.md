@@ -96,6 +96,7 @@ nightshift jira run --skip-validation
 nightshift jira run --todo-only
 nightshift jira run --review-only
 nightshift jira run --label other-label
+nightshift jira run --wait 5m               # wait up to 5m for a running instance to finish
 
 nightshift jira preview                      # dry-run summary
 nightshift jira preview --validate           # also run LLM validation

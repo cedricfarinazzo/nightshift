@@ -242,6 +242,40 @@ Don't like a PR? Close it. The Jira ticket can be moved back to Todo to retry. W
 
 ---
 
+## Single-Instance Lock
+
+`nightshift jira run` enforces one running instance per host using an atomic PID lock file at:
+
+```
+~/.local/share/nightshift/jira-run.lock
+```
+
+If a second invocation tries to run while one is active, it exits non-zero immediately:
+
+```
+Error: lock held by another process: another jira run in progress, PID 12345, started at 2026-05-23T22:00:00+02:00
+```
+
+### `--wait`
+
+Pass `--wait <duration>` to block instead of failing:
+
+```bash
+nightshift jira run --wait 10m   # wait up to 10 minutes for the running instance to finish
+```
+
+The wait uses exponential backoff (500ms → 10s cap). SIGINT/SIGTERM cancels the wait.
+
+### Stale lock recovery
+
+If the process that held the lock died without releasing it (e.g. `kill -9`), the next `jira run` detects the dead PID, logs a warning, reclaims the file, and proceeds normally.
+
+### NFS / shared HOME
+
+`O_EXCL` is not atomic across NFS mounts. The lock is per-host only — do not run Nightshift against a shared `$HOME` from multiple hosts simultaneously.
+
+---
+
 ## See Also
 
 - [Quick Start](quick-start.md) — basic Nightshift setup before adding Jira
