@@ -45,9 +45,13 @@ func init() {
 }
 
 // jiraRunLockPath returns the path to the jira-run single-instance lock file.
-func jiraRunLockPath() string {
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".local", "share", "nightshift", "jira-run.lock")
+// Returns an error if the home directory cannot be resolved.
+func jiraRunLockPath() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("resolve home dir: %w", err)
+	}
+	return filepath.Join(home, ".local", "share", "nightshift", "jira-run.lock"), nil
 }
 
 func runJira(cmd *cobra.Command, _ []string) error {
@@ -56,13 +60,17 @@ func runJira(cmd *cobra.Command, _ []string) error {
 	defer cancel()
 
 	// Acquire single-instance lock before any I/O to avoid concurrent runs.
+	lockPath, err := jiraRunLockPath()
+	if err != nil {
+		return err
+	}
 	waitDur, _ := cmd.Flags().GetDuration("wait")
 	var jiraLock *PidLock
 	var lockErr error
 	if waitDur > 0 {
-		jiraLock, lockErr = acquirePidLockWait(ctx, jiraRunLockPath(), waitDur)
+		jiraLock, lockErr = acquirePidLockWait(ctx, lockPath, waitDur, "jira run")
 	} else {
-		jiraLock, lockErr = acquirePidLock(jiraRunLockPath())
+		jiraLock, lockErr = acquirePidLock(lockPath, "jira run")
 	}
 	if lockErr != nil {
 		return lockErr

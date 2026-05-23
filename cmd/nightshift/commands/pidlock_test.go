@@ -3,7 +3,9 @@ package commands
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -25,7 +27,7 @@ func TestAcquirePidLock_Exclusive(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			lock, err := acquirePidLock(path)
+			lock, err := acquirePidLock(path, "test")
 			results <- result{lock, err}
 		}()
 	}
@@ -51,12 +53,20 @@ func TestAcquirePidLock_StaleReclaim(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "stale.lock")
 
-	// PID 999999 is almost certainly dead.
-	if err := os.WriteFile(path, []byte("999999\n2020-01-01T00:00:00Z\n"), 0644); err != nil {
+	// Start a short-lived subprocess and wait for it to exit so we have a
+	// guaranteed-dead PID (avoids flakiness from large PID ranges).
+	cmd := exec.Command("true")
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("subprocess: %v", err)
+	}
+	deadPID := cmd.ProcessState.Pid()
+
+	content := fmt.Sprintf("%d\n2020-01-01T00:00:00Z\n", deadPID)
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
 		t.Fatal(err)
 	}
 
-	lock, err := acquirePidLock(path)
+	lock, err := acquirePidLock(path, "test")
 	if err != nil {
 		t.Fatalf("expected stale reclaim to succeed, got: %v", err)
 	}
@@ -67,7 +77,7 @@ func TestAcquirePidLock_Release(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "release.lock")
 
-	lock, err := acquirePidLock(path)
+	lock, err := acquirePidLock(path, "test")
 	if err != nil {
 		t.Fatalf("first acquire: %v", err)
 	}
@@ -79,7 +89,7 @@ func TestAcquirePidLock_Release(t *testing.T) {
 	}
 
 	// Re-acquire after release must succeed.
-	lock2, err := acquirePidLock(path)
+	lock2, err := acquirePidLock(path, "test")
 	if err != nil {
 		t.Fatalf("re-acquire after release: %v", err)
 	}
@@ -90,7 +100,7 @@ func TestAcquirePidLockWait_Timeout(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "wait_timeout.lock")
 
-	lock, err := acquirePidLock(path)
+	lock, err := acquirePidLock(path, "test")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,7 +108,7 @@ func TestAcquirePidLockWait_Timeout(t *testing.T) {
 
 	ctx := context.Background()
 	start := time.Now()
-	_, err = acquirePidLockWait(ctx, path, 200*time.Millisecond)
+	_, err = acquirePidLockWait(ctx, path, 200*time.Millisecond, "test")
 	elapsed := time.Since(start)
 
 	if !errors.Is(err, ErrLockHeld) {
@@ -113,7 +123,7 @@ func TestAcquirePidLockWait_Succeeds(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "wait_succeeds.lock")
 
-	lock, err := acquirePidLock(path)
+	lock, err := acquirePidLock(path, "test")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -123,7 +133,7 @@ func TestAcquirePidLockWait_Succeeds(t *testing.T) {
 	}()
 
 	ctx := context.Background()
-	lock2, err := acquirePidLockWait(ctx, path, 2*time.Second)
+	lock2, err := acquirePidLockWait(ctx, path, 2*time.Second, "test")
 	if err != nil {
 		t.Fatalf("expected success after lock release, got: %v", err)
 	}

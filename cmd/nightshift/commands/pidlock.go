@@ -33,16 +33,18 @@ func (l *PidLock) Release() error {
 }
 
 // acquirePidLock atomically creates path as a PID lock file using O_CREATE|O_EXCL.
+// name describes what is being locked (e.g. "jira run", "daemon") and appears
+// in the ErrLockHeld error message.
 // Returns ErrLockHeld if a live process already holds the lock.
 // Stale lock files (dead PID) are logged, removed, and retried once.
-func acquirePidLock(path string) (*PidLock, error) {
+func acquirePidLock(path, name string) (*PidLock, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return nil, fmt.Errorf("create lock dir: %w", err)
 	}
-	return tryAcquireLock(path, time.Now())
+	return tryAcquireLock(path, name, time.Now())
 }
 
-func tryAcquireLock(path string, now time.Time) (*PidLock, error) {
+func tryAcquireLock(path, name string, now time.Time) (*PidLock, error) {
 	pid := os.Getpid()
 	content := fmt.Sprintf("%d\n%s\n", pid, now.UTC().Format(time.RFC3339))
 
@@ -63,8 +65,12 @@ func tryAcquireLock(path string, now time.Time) (*PidLock, error) {
 	// File exists — check if the recorded PID is alive.
 	existingPID, existingStart, readErr := readPidLock(path)
 	if readErr == nil && isProcessRunning(existingPID) {
-		return nil, fmt.Errorf("%w: another jira run in progress, PID %d, started at %s",
-			ErrLockHeld, existingPID, existingStart.Local().Format(time.RFC3339))
+		if existingStart.IsZero() {
+			return nil, fmt.Errorf("%w: another %s in progress, PID %d",
+				ErrLockHeld, name, existingPID)
+		}
+		return nil, fmt.Errorf("%w: another %s in progress, PID %d, started at %s",
+			ErrLockHeld, name, existingPID, existingStart.Local().Format(time.RFC3339))
 	}
 
 	// Stale lock: remove and retry once.
@@ -87,9 +93,10 @@ func tryAcquireLock(path string, now time.Time) (*PidLock, error) {
 // acquirePidLockWait loops acquirePidLock with exponential backoff until
 // success, context cancellation, or timeout expiry.
 // timeout==0 behaves identically to acquirePidLock (single attempt).
-func acquirePidLockWait(ctx context.Context, path string, timeout time.Duration) (*PidLock, error) {
+// name is passed through to acquirePidLock for error messages.
+func acquirePidLockWait(ctx context.Context, path string, timeout time.Duration, name string) (*PidLock, error) {
 	if timeout == 0 {
-		return acquirePidLock(path)
+		return acquirePidLock(path, name)
 	}
 
 	deadline := time.Now().Add(timeout)
@@ -97,7 +104,7 @@ func acquirePidLockWait(ctx context.Context, path string, timeout time.Duration)
 	const maxDelay = 10 * time.Second
 
 	for {
-		lock, err := acquirePidLock(path)
+		lock, err := acquirePidLock(path, name)
 		if err == nil {
 			return lock, nil
 		}
@@ -147,10 +154,16 @@ func readPidLock(path string) (pid int, start time.Time, err error) {
 
 // isProcessRunning returns true if the process with the given PID is alive.
 // On Unix, os.FindProcess always succeeds; signal 0 checks liveness.
+// ESRCH means no such process (dead); EPERM means process exists but we
+// lack permission to signal it — still running, so we return true.
 func isProcessRunning(pid int) bool {
 	process, err := os.FindProcess(pid)
 	if err != nil {
 		return false
 	}
-	return process.Signal(syscall.Signal(0)) == nil
+	sigErr := process.Signal(syscall.Signal(0))
+	if sigErr == nil {
+		return true
+	}
+	return errors.Is(sigErr, syscall.EPERM)
 }

@@ -145,7 +145,7 @@ func runDaemonLoop(cfg *config.Config) error {
 	log := logging.Component("daemon")
 
 	// Write PID file
-	pidLock, err := acquirePidLock(pidFilePath())
+	pidLock, err := acquirePidLock(pidFilePath(), "daemon")
 	if err != nil {
 		return fmt.Errorf("write pid file: %w", err)
 	}
