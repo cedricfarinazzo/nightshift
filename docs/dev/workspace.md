@@ -130,6 +130,6 @@ In workspace mode, the **repo name** (`workspace.repos[*].name`) is used as the 
 
 `workspace.repos[*].tasks` lists allowed task types for that repo. When set, `runRepoTasks` filters out tasks not in the list before execution. Empty/nil means no filter (all enabled tasks are eligible).
 
-### Exported test helper
+### Test injection
 
-`workspace.SetGitExecFn(fn)` replaces the internal git executor and returns the previous function for `defer`-based restoration. Used in tests to avoid real git clones.
+`workspace.WithGitRunner(r)` is a functional option passed to `SetupWorkspace` to inject a fake `GitRunner` in tests, avoiding real git clones. Implement the `GitRunner` interface (`Run(ctx, dir, args...) (string, error)`) and pass `WithGitRunner(fake)` as the last argument. Tests are `t.Parallel()`-safe because there is no package-level state to race on.

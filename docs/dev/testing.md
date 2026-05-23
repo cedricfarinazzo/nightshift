@@ -144,8 +144,9 @@ func TestSomething(t *testing.T) {
 Packages migrated to this pattern:
 - `internal/analysis` — `GitRunner` / `WithGitRunner` (VC-100, reference implementation)
 - `internal/jira` — `GHRunner` / `WithGHRunner` / `PRClient` (VC-106); `t.Parallel()` is safe in most PR tests. Exception: `TestFetchPRReviewComments_ReviewThreadsError` captures `os.Stderr` to assert warning log output and must remain non-parallel.
+- `internal/workspace` — `GitRunner` / `WithGitRunner` as a `SetupWorkspace` option (VC-107); `t.Parallel()` is safe.
 
-Packages still using package-level vars (`gitExec` in `internal/orchestrator`, `gitExecFn`/`SetGitExecFn` in `internal/workspace`) are tracked for migration — see VC-107, VC-108.
+Packages still using package-level vars (`gitExec` in `internal/orchestrator`) are tracked for migration — see VC-108.
 
 ### internal/jira PR tests
 
