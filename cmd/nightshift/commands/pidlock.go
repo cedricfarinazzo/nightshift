@@ -64,7 +64,14 @@ func tryAcquireLock(path, name string, now time.Time) (*PidLock, error) {
 
 	// File exists — check if the recorded PID is alive.
 	existingPID, existingStart, readErr := readPidLock(path)
-	if readErr == nil && isProcessRunning(existingPID) {
+	if readErr != nil {
+		// Unreadable / partial content — another acquirer wrote the file with
+		// O_EXCL but has not yet finished writing the PID line. Treating this
+		// as stale would clobber the winner's lock. Surface as held instead.
+		return nil, fmt.Errorf("%w: another %s acquiring lock (file content unreadable: %v)",
+			ErrLockHeld, name, readErr)
+	}
+	if isProcessRunning(existingPID) {
 		if existingStart.IsZero() {
 			return nil, fmt.Errorf("%w: another %s in progress, PID %d",
 				ErrLockHeld, name, existingPID)

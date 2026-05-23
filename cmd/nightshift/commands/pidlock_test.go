@@ -48,6 +48,31 @@ func TestAcquirePidLock_Exclusive(t *testing.T) {
 	}
 }
 
+// TestAcquirePidLock_EmptyFileHeldNotStale guards against a race where one
+// acquirer wins O_EXCL but hasn't yet written the PID line; a second acquirer
+// reading mid-write must see ErrLockHeld (not "stale, reclaim"). Pre-fix this
+// caused intermittent CI failures in TestAcquirePidLock_Exclusive (issue
+// surfaced rebasing VC-103 onto VC-101).
+func TestAcquirePidLock_EmptyFileHeldNotStale(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "empty.lock")
+
+	// Simulate the race: O_EXCL succeeded, file is empty, write has not yet
+	// landed. acquirePidLock from another contender must NOT reclaim.
+	if err := os.WriteFile(path, []byte(""), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := acquirePidLock(path, "test")
+	if !errors.Is(err, ErrLockHeld) {
+		t.Errorf("expected ErrLockHeld for empty lock file (acquire in progress), got: %v", err)
+	}
+	// Lock file must still exist — must not have been reclaimed.
+	if _, statErr := os.Stat(path); statErr != nil {
+		t.Errorf("lock file was reclaimed despite empty content: %v", statErr)
+	}
+}
+
 func TestAcquirePidLock_StaleReclaim(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
