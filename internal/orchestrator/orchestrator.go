@@ -248,9 +248,10 @@ func WithGitValidator(fn func(ctx context.Context, workDir string) error) Option
 // Used in tests to inject a fake runner without touching global state.
 func WithGitRunner(r GitRunner) Option {
 	return func(o *Orchestrator) {
+		if r == nil {
+			return
+		}
 		o.git = r
-		// Re-bind gitValidator to use the new runner so validateGitRepo picks it up.
-		o.gitValidator = o.validateGitRepo
 	}
 }
 
@@ -1088,7 +1089,7 @@ func (o *Orchestrator) validateGitRepo(ctx context.Context, workDir string) erro
 		return fmt.Errorf("not a git repository: %w", err)
 	}
 
-	// Ensure the repo root is not $HOME or any parent of it.
+	// Ensure the repo root is not exactly $HOME.
 	home, err := os.UserHomeDir()
 	if err == nil {
 		absRoot, _ := filepath.Abs(repoRoot)

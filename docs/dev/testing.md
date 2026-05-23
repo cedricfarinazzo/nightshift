@@ -147,7 +147,7 @@ Packages migrated to this pattern:
 - `internal/workspace` — `GitRunner` / `WithGitRunner` as a `SetupWorkspace` option (VC-107); `t.Parallel()` is safe.
 - `internal/orchestrator` — `GitRunner` / `WithGitRunner` + `GhRunner` / `WithGhRunner` on the `Orchestrator` struct (VC-108); `t.Parallel()` is safe. `validateGitRepo`, `checkoutBranch`, `currentBranch` are unexported methods using `o.git`. The exported `CurrentBranch` package function uses a local `execGitRunner{}` for `cmd/` callers.
 
-All `internal/*` packages above are now seam-free — no package-level func-valued exec vars remain.
+All `internal/*` packages above are now seam-free — no package-level func-valued vars used as test seams remain.
 
 ### internal/jira PR tests
 

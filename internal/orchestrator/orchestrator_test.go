@@ -16,7 +16,7 @@ import (
 
 // noopGitValidator is a git validator that always succeeds, used in tests
 // where the workDir is a fake path that isn't a real git repository.
-var noopGitValidator = func(_ context.Context, _ string) error { return nil }
+func noopGitValidator(_ context.Context, _ string) error { return nil }
 
 // fakeGitRunner is a test double for GitRunner.
 type fakeGitRunner struct {
@@ -338,9 +338,13 @@ func TestInferReviewPassed(t *testing.T) {
 		{"", false}, // empty defaults to fail
 	}
 
-	for _, tt := range tests {
+	for i, tt := range tests {
 		tt := tt
-		t.Run(tt.output, func(t *testing.T) {
+		name := tt.output
+		if name == "" {
+			name = fmt.Sprintf("case%d_empty", i)
+		}
+		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			got := o.inferReviewPassed(tt.output)
 			if got != tt.want {
