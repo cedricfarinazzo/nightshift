@@ -8,7 +8,6 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
-	"strconv"
 	"syscall"
 	"time"
 
@@ -77,78 +76,9 @@ func pidFilePath() string {
 	return filepath.Join(home, ".local", "share", "nightshift", pidFileName)
 }
 
-// ensurePidDir ensures the PID file directory exists.
-func ensurePidDir() error {
-	dir := filepath.Dir(pidFilePath())
-	return os.MkdirAll(dir, 0755)
-}
-
-// writePidFile atomically creates the PID file using O_EXCL to prevent two
-// daemon instances starting simultaneously. If the file already exists and the
-// recorded PID is still alive, returns an error. Stale files (dead PID) are
-// removed and the write is retried once.
-func writePidFile() error {
-	if err := ensurePidDir(); err != nil {
-		return fmt.Errorf("creating pid dir: %w", err)
-	}
-	path := pidFilePath()
-	pid := []byte(strconv.Itoa(os.Getpid()))
-
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0644)
-	if err == nil {
-		_, werr := f.Write(pid)
-		_ = f.Close()
-		return werr
-	}
-	if !errors.Is(err, os.ErrExist) {
-		return fmt.Errorf("create pid file: %w", err)
-	}
-
-	// File exists — check if the recorded PID is alive.
-	existing, readErr := readPidFile()
-	if readErr == nil && isProcessRunning(existing) {
-		return fmt.Errorf("daemon already running (pid %d)", existing)
-	}
-
-	// Stale file: remove and retry once.
-	_ = os.Remove(path)
-	f, err = os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0644)
-	if err != nil {
-		return fmt.Errorf("create pid file after stale removal: %w", err)
-	}
-	_, werr := f.Write(pid)
-	_ = f.Close()
-	return werr
-}
-
-// readPidFile reads the PID from the PID file.
-func readPidFile() (int, error) {
-	data, err := os.ReadFile(pidFilePath())
-	if err != nil {
-		return 0, err
-	}
-	return strconv.Atoi(string(data))
-}
-
-// removePidFile removes the PID file.
-func removePidFile() error {
-	return os.Remove(pidFilePath())
-}
-
-// isProcessRunning checks if a process with the given PID is running.
-func isProcessRunning(pid int) bool {
-	process, err := os.FindProcess(pid)
-	if err != nil {
-		return false
-	}
-	// On Unix, FindProcess always succeeds; send signal 0 to check if alive
-	err = process.Signal(syscall.Signal(0))
-	return err == nil
-}
-
 // isDaemonRunning checks if the daemon is currently running.
 func isDaemonRunning() (bool, int) {
-	pid, err := readPidFile()
+	pid, _, err := readPidLock(pidFilePath())
 	if err != nil {
 		return false, 0
 	}
@@ -215,10 +145,11 @@ func runDaemonLoop(cfg *config.Config) error {
 	log := logging.Component("daemon")
 
 	// Write PID file
-	if err := writePidFile(); err != nil {
+	pidLock, err := acquirePidLock(pidFilePath())
+	if err != nil {
 		return fmt.Errorf("write pid file: %w", err)
 	}
-	defer func() { _ = removePidFile() }()
+	defer func() { _ = pidLock.Release() }()
 
 	log.Info("daemon starting")
 
@@ -659,9 +590,9 @@ func runScheduledWorkspacedTasks(
 func runDaemonStop(cmd *cobra.Command, args []string) error {
 	running, pid := isDaemonRunning()
 	if !running {
-		// Check if PID file exists but process is dead
-		if _, err := readPidFile(); err == nil {
-			_ = removePidFile()
+		// Check if PID file exists but process is dead.
+		if _, _, err := readPidLock(pidFilePath()); err == nil {
+			_ = os.Remove(pidFilePath())
 			fmt.Println("daemon not running (stale pid file removed)")
 			return nil
 		}
@@ -692,12 +623,12 @@ func runDaemonStop(cmd *cobra.Command, args []string) error {
 			// Force kill if still running
 			fmt.Println("daemon did not stop, sending SIGKILL")
 			_ = process.Signal(syscall.SIGKILL)
-			_ = removePidFile()
+			_ = os.Remove(pidFilePath())
 			return nil
 		case <-tick.C:
 			if !isProcessRunning(pid) {
 				fmt.Println("daemon stopped")
-				_ = removePidFile()
+				_ = os.Remove(pidFilePath())
 				return nil
 			}
 		}

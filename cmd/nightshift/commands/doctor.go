@@ -193,7 +193,7 @@ func checkService(add func(string, checkStatus, string)) {
 }
 
 func checkDaemon(add func(string, checkStatus, string)) {
-	pid, err := readPidFile()
+	pid, _, err := readPidLock(pidFilePath())
 	if err != nil {
 		add("daemon", statusWarn, "not running (pid file missing)")
 		return

@@ -2,6 +2,10 @@
 
 `internal/jira/` — autonomous ticket lifecycle.
 
+## Single-Instance Lock
+
+`cmd/nightshift/commands/jira_run.go` acquires a PID lock via `acquirePidLock` (or `acquirePidLockWait` when `--wait` > 0) at the very start of `runJira`, before config loading. The shared `PidLock` helper lives in `cmd/nightshift/commands/pidlock.go` and is also used by the daemon (`daemon.go`). Lock path: `~/.local/share/nightshift/jira-run.lock`.
+
 ## Components
 
 | File | Purpose |
