@@ -16,22 +16,41 @@ type CommitAuthor struct {
 	Commits int
 }
 
-// gitExecFn runs git with the given args in repoPath and returns raw output.
-// Substitutable in tests.
-var gitExecFn = func(repoPath string, args ...string) ([]byte, error) {
+// GitRunner executes git commands in a repository directory.
+type GitRunner interface {
+	Run(repoPath string, args ...string) ([]byte, error)
+}
+
+// execGitRunner is the default GitRunner using os/exec.
+type execGitRunner struct{}
+
+func (execGitRunner) Run(repoPath string, args ...string) ([]byte, error) {
 	cmd := exec.Command("git", args...)
 	cmd.Dir = repoPath
 	return cmd.Output()
 }
 
+// Option configures a GitParser.
+type Option func(*GitParser)
+
+// WithGitRunner overrides the GitRunner used by the parser.
+func WithGitRunner(r GitRunner) Option {
+	return func(gp *GitParser) { gp.runner = r }
+}
+
 // GitParser extracts commit history from a git repository.
 type GitParser struct {
 	repoPath string
+	runner   GitRunner
 }
 
 // NewGitParser creates a new git parser for the given repository path.
-func NewGitParser(repoPath string) *GitParser {
-	return &GitParser{repoPath: repoPath}
+func NewGitParser(repoPath string, opts ...Option) *GitParser {
+	gp := &GitParser{repoPath: repoPath, runner: execGitRunner{}}
+	for _, o := range opts {
+		o(gp)
+	}
+	return gp
 }
 
 // ParseAuthors extracts authors and their commit counts from git history.
@@ -52,7 +71,7 @@ func (gp *GitParser) ParseAuthors(opts ParseOptions) ([]CommitAuthor, error) {
 		args = append(args, "--", opts.FilePath)
 	}
 
-	output, err := gitExecFn(gp.repoPath, args...)
+	output, err := gp.runner.Run(gp.repoPath, args...)
 	if err != nil {
 		return nil, fmt.Errorf("running git log: %w", err)
 	}
