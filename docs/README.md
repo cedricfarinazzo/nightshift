@@ -33,6 +33,7 @@ For running Nightshift as a long-lived service.
 
 - [Daemon Mode](operations/daemon.md) — start/stop/status, PID files
 - [Systemd Install](operations/systemd-install.md) — install unit, autostart
+- [Kubernetes CronJob](operations/kubernetes-cronjob.md) — deploy as a K8s CronJob with Kustomize manifests
 - [Logs & Reports](operations/logs-and-reports.md) — where output lives, retention
 - [Data & Backup](operations/data-and-backup.md) — DB layout, what to back up
 - [Security Model](operations/security.md) — credentials, audit log, sandbox

@@ -209,6 +209,16 @@ docs/                   # All documentation (plain markdown, no static-site gene
     contributing.md            # Dev setup, git conventions, PR checklist
     debugging.md               # Log locations, common errors + fixes
 
+deploy/
+  kubernetes/           # Kustomize manifests for running nightshift as a Kubernetes CronJob
+    namespace.yaml      # Dedicated nightshift namespace
+    serviceaccount.yaml # Dedicated ServiceAccount (no RBAC beyond pod-local FS + network)
+    pvc.yaml            # 1Gi ReadWriteOnce PVC for SQLite DB and logs mounted at /data
+    configmap.yaml      # Annotated config template with db_path/logging.path pointing at PVC
+    secrets.yaml        # Secret template only (placeholder values); never commit real keys
+    cronjob.yaml        # CronJob: schedule 0 2 * * *, concurrencyPolicy Forbid, readOnlyRootFilesystem
+    kustomization.yaml  # Kustomize entry-point; kubectl apply -k deploy/kubernetes/
+
 scripts/
   pre-commit.sh         # Runs gofmt, go vet, go build on staged .go files
 
@@ -417,4 +427,6 @@ Agents MUST follow these rules:
 - **Daemon workspace mode (VC-87)** — when `workspace.root` is set, `runScheduledTasks` routes to `runScheduledWorkspacedTasks` instead of the project-path loop. Both `nightshift run` and daemon share `runRepoTasks()` for per-repo task execution. State key is always `rw.Name` (not `rw.Path`) in workspace mode. First daemon run after upgrading from a pre-VC-87 release will re-process all workspace repos once (old cooldowns were keyed on paths, new ones on names — safe, one extra run).
 - **`runRepoTasks` allowedTasks filter** — when `workspace.repos[*].tasks` is set, `runRepoTasks` filters selected tasks to only those types before execution. Empty/nil means no filter. Filter applied after selector, so cooldown/staleness scoring still runs on all tasks but only matching types are executed.
 - **Rejection forces re-validation on next run** — Rejection is posted by the orchestrator as a structured `CommentRejection` NightshiftComment (via `postPhaseComment`); `HandleInvalidTicket` only does the status transition. `detectResumeState` compares `GetLastCommentOfType(CommentRejection).Timestamp` against `GetLastCommentOfType(CommentValidation).Timestamp`: if rejection is newer, `hasValidation` is false and the ticket falls to `PhaseValidate` for re-evaluation. If acceptance is newer (user fixed ticket, later run passed), rejection is ignored. Root cause of FIN-31: prior `CommentValidation` from an older partial run caused `detectResumeState` to skip validation despite a newer rejection.
-- **`internal/analysis` uses functional-option exec injection (`WithGitRunner`)** — `gitExecFn` package-level var removed (VC-100). `NewGitParser(repoPath, analysis.WithGitRunner(fake))` pattern for tests; `t.Parallel()` safe. Remaining packages (`internal/jira/pr.go` `ghExec`, `internal/orchestrator` `ghExec`/`gitExec`, `internal/workspace` `gitExecFn`/`SetGitExecFn`) still use the old global-var pattern — tracked in follow-up ticket VC-101. Do NOT add `t.Parallel()` to tests in those packages until they are migrated.
+- **`internal/analysis` uses functional-option exec injection (`WithGitRunner`)** — `gitExecFn` package-level var removed (VC-100). `NewGitParser(repoPath, analysis.WithGitRunner(fake))` pattern for tests; `t.Parallel()` safe. Remaining packages (`internal/jira/pr.go` `ghExec`, `internal/orchestrator` `ghExec`/`gitExec`, `internal/workspace` `gitExecFn`/`SetGitExecFn`) still use the old global-var pattern — tracked in follow-up tickets VC-106, VC-107, VC-108. Do NOT add `t.Parallel()` to tests in those packages until they are migrated.
+- **K8s pod uses `readOnlyRootFilesystem: true`** — `/tmp` must be an `emptyDir` volume mount in the CronJob spec. Nightshift uses `os.CreateTemp("", "nightshift-prompt-*.md")` (the Prompt temp-file pattern) to write agent prompts; without a writable `/tmp` this fails at runtime. The provided `deploy/kubernetes/cronjob.yaml` already includes the `emptyDir` mount. Also set `HOME=/data/home` so agent CLIs (`claude`, `gh`) that write to `$HOME/.config` use the PVC-backed writable directory instead of the read-only rootfs.
+- **K8s subscription CLI auth not supported** — `claude` / `codex` CLI subscription mode (non-API) reads credentials interactively from `~/.config` and may trigger browser OAuth. Neither is available inside a Kubernetes pod (no TTY, no browser). Use API key mode (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`) for all providers when running in Kubernetes. See `docs/operations/kubernetes-cronjob.md`.
