@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/url"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 )
@@ -182,9 +183,14 @@ func formatComment(c NightshiftComment) string {
 		url.QueryEscape(c.Model),
 		url.QueryEscape(c.Duration.Round(time.Second).String()))
 	if len(c.Metadata) > 0 {
+		keys := make([]string, 0, len(c.Metadata))
+		for k := range c.Metadata {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
 		b.WriteString("<!-- nightshift:meta")
-		for k, v := range c.Metadata {
-			fmt.Fprintf(&b, " %s=%s", k, url.QueryEscape(v))
+		for _, k := range keys {
+			fmt.Fprintf(&b, " %s=%s", k, url.QueryEscape(c.Metadata[k]))
 		}
 		b.WriteString(" -->\n")
 	}
