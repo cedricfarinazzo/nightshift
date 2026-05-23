@@ -288,17 +288,22 @@ func TestParsePRReviewState_MissingFields(t *testing.T) {
 	}
 }
 
+// fakeGHRunner is a function-typed adapter satisfying GHRunner, for use in tests.
+type fakeGHRunner func(ctx context.Context, repoPath string, args ...string) (string, error)
+
+func (f fakeGHRunner) Run(ctx context.Context, repoPath string, args ...string) (string, error) {
+	return f(ctx, repoPath, args...)
+}
+
 // ── findExistingPR ────────────────────────────────────────────────────────────
 
 func TestFindExistingPR_OpenPR(t *testing.T) {
-	orig := ghExec
-	defer func() { ghExec = orig }()
-
-	ghExec = func(_ context.Context, _ string, args ...string) (string, error) {
+	t.Parallel()
+	pc := NewPRClient(WithGHRunner(fakeGHRunner(func(_ context.Context, _ string, _ ...string) (string, error) {
 		return `[{"number":42,"url":"https://github.com/org/repo/pull/42"}]`, nil
-	}
+	})))
 
-	pr, err := findExistingPR(context.Background(), "/repo", "feature/VC-44")
+	pr, err := pc.findExistingPR(context.Background(), "/repo", "feature/VC-44")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -315,14 +320,12 @@ func TestFindExistingPR_OpenPR(t *testing.T) {
 }
 
 func TestFindExistingPR_NoPR(t *testing.T) {
-	orig := ghExec
-	defer func() { ghExec = orig }()
-
-	ghExec = func(_ context.Context, _ string, args ...string) (string, error) {
+	t.Parallel()
+	pc := NewPRClient(WithGHRunner(fakeGHRunner(func(_ context.Context, _ string, _ ...string) (string, error) {
 		return `[]`, nil
-	}
+	})))
 
-	pr, err := findExistingPR(context.Background(), "/repo", "feature/VC-44")
+	pr, err := pc.findExistingPR(context.Background(), "/repo", "feature/VC-44")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -332,16 +335,14 @@ func TestFindExistingPR_NoPR(t *testing.T) {
 }
 
 func TestFindExistingPR_StateOpenFlagPassed(t *testing.T) {
-	orig := ghExec
-	defer func() { ghExec = orig }()
-
+	t.Parallel()
 	var capturedArgs []string
-	ghExec = func(_ context.Context, _ string, args ...string) (string, error) {
+	pc := NewPRClient(WithGHRunner(fakeGHRunner(func(_ context.Context, _ string, args ...string) (string, error) {
 		capturedArgs = args
 		return `[]`, nil
-	}
+	})))
 
-	_, _ = findExistingPR(context.Background(), "/repo", "feature/VC-44")
+	_, _ = pc.findExistingPR(context.Background(), "/repo", "feature/VC-44")
 
 	found := false
 	for i, a := range capturedArgs {
@@ -358,9 +359,7 @@ func TestFindExistingPR_StateOpenFlagPassed(t *testing.T) {
 // ── FetchPRReviewComments ─────────────────────────────────────────────────────
 
 func TestFetchPRReviewComments_ReviewThreadsError(t *testing.T) {
-	orig := ghExec
-	defer func() { ghExec = orig }()
-
+	// Not parallel: captures os.Stderr (global) to assert warning log output.
 	prViewJSON := `{
 		"url": "https://github.com/org/repo/pull/7",
 		"state": "OPEN",
@@ -374,13 +373,13 @@ func TestFetchPRReviewComments_ReviewThreadsError(t *testing.T) {
 	}`
 
 	call := 0
-	ghExec = func(_ context.Context, _ string, args ...string) (string, error) {
+	pc := NewPRClient(WithGHRunner(fakeGHRunner(func(_ context.Context, _ string, args ...string) (string, error) {
 		call++
 		if call == 1 {
 			return prViewJSON, nil
 		}
 		return "", fmt.Errorf("graphql unavailable")
-	}
+	})))
 
 	// Capture stderr so we can assert the warning is logged.
 	// logging.Get() with no global logger creates a default logger writing to os.Stderr.
@@ -391,7 +390,7 @@ func TestFetchPRReviewComments_ReviewThreadsError(t *testing.T) {
 	origStderr := os.Stderr
 	os.Stderr = w
 
-	rs, fetchErr := FetchPRReviewComments(context.Background(), "/repo", "https://github.com/org/repo/pull/7")
+	rs, fetchErr := pc.FetchPRReviewComments(context.Background(), "/repo", "https://github.com/org/repo/pull/7")
 
 	_ = w.Close()
 	os.Stderr = origStderr
@@ -568,6 +567,7 @@ func TestParseCheckRuns_PreservesURLs(t *testing.T) {
 // ── HasMergeConflict ──────────────────────────────────────────────────────────
 
 func TestHasMergeConflict(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		ghOutput string
@@ -582,14 +582,14 @@ func TestHasMergeConflict(t *testing.T) {
 		{"api error", "", fmt.Errorf("gh failed"), false, true},
 	}
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-			orig := ghExec
-			ghExec = func(_ context.Context, _ string, args ...string) (string, error) {
+			t.Parallel()
+			pc := NewPRClient(WithGHRunner(fakeGHRunner(func(_ context.Context, _ string, _ ...string) (string, error) {
 				return tt.ghOutput, tt.ghErr
-			}
-			defer func() { ghExec = orig }()
+			})))
 
-			got, err := HasMergeConflict(context.Background(), "/repo", 42)
+			got, err := pc.HasMergeConflict(context.Background(), "/repo", 42)
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("HasMergeConflict() err=%v, wantErr=%v", err, tt.wantErr)
 			}
@@ -601,8 +601,8 @@ func TestHasMergeConflict(t *testing.T) {
 }
 
 func TestFetchPRReviewComments_SetsHasConflict(t *testing.T) {
-	orig := ghExec
-	ghExec = func(_ context.Context, _ string, args ...string) (string, error) {
+	t.Parallel()
+	pc := NewPRClient(WithGHRunner(fakeGHRunner(func(_ context.Context, _ string, args ...string) (string, error) {
 		// GraphQL review threads call
 		if contains(args, "graphql") {
 			return `{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[]}}}}}`, nil
@@ -620,10 +620,9 @@ func TestFetchPRReviewComments_SetsHasConflict(t *testing.T) {
 			return `{"url":"https://github.com/org/repo/pull/1","number":1,"state":"OPEN","reviewDecision":"","headRefOid":"abc123","reviews":[],"comments":[]}`, nil
 		}
 		return "", fmt.Errorf("unexpected gh call: %v", args)
-	}
-	defer func() { ghExec = orig }()
+	})))
 
-	rs, err := FetchPRReviewComments(context.Background(), "/repo", "https://github.com/org/repo/pull/1")
+	rs, err := pc.FetchPRReviewComments(context.Background(), "/repo", "https://github.com/org/repo/pull/1")
 	if err != nil {
 		t.Fatalf("FetchPRReviewComments: %v", err)
 	}

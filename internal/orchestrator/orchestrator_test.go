@@ -16,7 +16,39 @@ import (
 
 // noopGitValidator is a git validator that always succeeds, used in tests
 // where the workDir is a fake path that isn't a real git repository.
-var noopGitValidator = func(_ context.Context, _ string) error { return nil }
+func noopGitValidator(_ context.Context, _ string) error { return nil }
+
+// fakeGitRunner is a test double for GitRunner.
+type fakeGitRunner struct {
+	runFn func(ctx context.Context, repoPath string, args ...string) (string, error)
+}
+
+func (f *fakeGitRunner) Run(ctx context.Context, repoPath string, args ...string) (string, error) {
+	if f.runFn != nil {
+		return f.runFn(ctx, repoPath, args...)
+	}
+	return "", nil
+}
+
+// fakeGhRunner is a test double for GhRunner.
+type fakeGhRunner struct {
+	runFn  func(ctx context.Context, repoPath string, args ...string) (string, error)
+	bodyFn func(ctx context.Context, repoPath, prURL string) (string, error)
+}
+
+func (f *fakeGhRunner) Run(ctx context.Context, repoPath string, args ...string) (string, error) {
+	if f.runFn != nil {
+		return f.runFn(ctx, repoPath, args...)
+	}
+	return "", nil
+}
+
+func (f *fakeGhRunner) PRBody(ctx context.Context, repoPath, prURL string) (string, error) {
+	if f.bodyFn != nil {
+		return f.bodyFn(ctx, repoPath, prURL)
+	}
+	return "", nil
+}
 
 // mockAgent implements agents.Agent for testing.
 type mockAgent struct {
@@ -64,6 +96,7 @@ func jsonResponse(v any) agents.ExecuteResult {
 }
 
 func TestNew(t *testing.T) {
+	t.Parallel()
 	o := New()
 	if o == nil {
 		t.Fatal("New() returned nil")
@@ -78,6 +111,7 @@ func TestNew(t *testing.T) {
 }
 
 func TestNewWithOptions(t *testing.T) {
+	t.Parallel()
 	agent := newMockAgent()
 	cfg := Config{
 		MaxIterations: 5,
@@ -105,6 +139,7 @@ func TestNewWithOptions(t *testing.T) {
 }
 
 func TestRunTaskNoAgent(t *testing.T) {
+	t.Parallel()
 	o := New()
 	task := &tasks.Task{
 		ID:          "test-1",
@@ -125,6 +160,7 @@ func TestRunTaskNoAgent(t *testing.T) {
 }
 
 func TestRunTaskSuccessFirstIteration(t *testing.T) {
+	t.Parallel()
 	// Setup mock responses: plan, implement, review (pass)
 	planResp := jsonResponse(PlanOutput{
 		Steps:       []string{"step1", "step2"},
@@ -169,6 +205,7 @@ func TestRunTaskSuccessFirstIteration(t *testing.T) {
 }
 
 func TestRunTaskReviewFailsThenPasses(t *testing.T) {
+	t.Parallel()
 	// Setup: plan, implement, review (fail), implement, review (pass)
 	planResp := jsonResponse(PlanOutput{
 		Steps:       []string{"step1"},
@@ -212,6 +249,7 @@ func TestRunTaskReviewFailsThenPasses(t *testing.T) {
 }
 
 func TestRunTaskMaxIterationsAbandoned(t *testing.T) {
+	t.Parallel()
 	// All reviews fail
 	planResp := jsonResponse(PlanOutput{
 		Steps: []string{"step1"},
@@ -255,6 +293,7 @@ func TestRunTaskMaxIterationsAbandoned(t *testing.T) {
 }
 
 func TestRunTaskPlanFails(t *testing.T) {
+	t.Parallel()
 	// Agent returns error during planning
 	agent := newMockAgent(agents.ExecuteResult{
 		Output:   "failed to plan",
@@ -278,6 +317,7 @@ func TestRunTaskPlanFails(t *testing.T) {
 }
 
 func TestInferReviewPassed(t *testing.T) {
+	t.Parallel()
 	o := New()
 
 	tests := []struct {
@@ -298,15 +338,24 @@ func TestInferReviewPassed(t *testing.T) {
 		{"", false}, // empty defaults to fail
 	}
 
-	for _, tt := range tests {
-		got := o.inferReviewPassed(tt.output)
-		if got != tt.want {
-			t.Errorf("inferReviewPassed(%q) = %v, want %v", tt.output, got, tt.want)
+	for i, tt := range tests {
+		tt := tt
+		name := tt.output
+		if name == "" {
+			name = fmt.Sprintf("case%d_empty", i)
 		}
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			got := o.inferReviewPassed(tt.output)
+			if got != tt.want {
+				t.Errorf("inferReviewPassed(%q) = %v, want %v", tt.output, got, tt.want)
+			}
+		})
 	}
 }
 
 func TestContainsIgnoreCase(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		s, substr string
 		want      bool
@@ -321,14 +370,19 @@ func TestContainsIgnoreCase(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		got := containsIgnoreCase(tt.s, tt.substr)
-		if got != tt.want {
-			t.Errorf("containsIgnoreCase(%q, %q) = %v, want %v", tt.s, tt.substr, got, tt.want)
-		}
+		tt := tt
+		t.Run(tt.s+"/"+tt.substr, func(t *testing.T) {
+			t.Parallel()
+			got := containsIgnoreCase(tt.s, tt.substr)
+			if got != tt.want {
+				t.Errorf("containsIgnoreCase(%q, %q) = %v, want %v", tt.s, tt.substr, got, tt.want)
+			}
+		})
 	}
 }
 
 func TestRunContextCancellation(t *testing.T) {
+	t.Parallel()
 	// Create a slow mock that checks context
 	agent := &slowMockAgent{delay: 100 * time.Millisecond}
 	o := New(WithAgent(agent))
@@ -372,6 +426,7 @@ func (m *slowMockAgent) Execute(ctx context.Context, opts agents.ExecuteOptions)
 }
 
 func TestTaskResultLogs(t *testing.T) {
+	t.Parallel()
 	planResp := jsonResponse(PlanOutput{Steps: []string{"s1"}, Files: []string{"f.go"}})
 	implResp := jsonResponse(ImplementOutput{FilesModified: []string{"f.go"}, Summary: "done"})
 	reviewResp := jsonResponse(ReviewOutput{Passed: true})
@@ -406,6 +461,7 @@ func TestTaskResultLogs(t *testing.T) {
 }
 
 func TestDefaultConfig(t *testing.T) {
+	t.Parallel()
 	cfg := DefaultConfig()
 	if cfg.MaxIterations != 3 {
 		t.Errorf("MaxIterations = %d, want 3", cfg.MaxIterations)
@@ -415,8 +471,8 @@ func TestDefaultConfig(t *testing.T) {
 	}
 }
 
-
 func TestBuildPrompts(t *testing.T) {
+	t.Parallel()
 	o := New()
 	task := &tasks.Task{
 		ID:          "prompt-test",
@@ -461,6 +517,7 @@ func TestBuildPrompts(t *testing.T) {
 }
 
 func TestExtractPRURL(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name  string
 		input string
@@ -509,7 +566,9 @@ func TestExtractPRURL(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			got := ExtractPRURL(tt.input)
 			if got != tt.want {
 				t.Errorf("ExtractPRURL() = %q, want %q", got, tt.want)
@@ -519,6 +578,7 @@ func TestExtractPRURL(t *testing.T) {
 }
 
 func TestRunTaskExtractsPRURL(t *testing.T) {
+	t.Parallel()
 	// Setup mock: plan, implement (with PR URL in raw output), review (pass)
 	planResp := jsonResponse(PlanOutput{
 		Steps:       []string{"step1"},
@@ -543,7 +603,13 @@ func TestRunTaskExtractsPRURL(t *testing.T) {
 	})
 
 	agent := newMockAgent(planResp, implResp, reviewResp)
-	o := New(WithAgent(agent), WithGitValidator(noopGitValidator))
+	o := New(
+		WithAgent(agent),
+		WithGitValidator(noopGitValidator),
+		WithGhRunner(&fakeGhRunner{
+			bodyFn: func(_ context.Context, _, _ string) (string, error) { return "", nil },
+		}),
+	)
 
 	task := &tasks.Task{
 		ID:          "pr-test",
@@ -568,6 +634,7 @@ func TestRunTaskExtractsPRURL(t *testing.T) {
 }
 
 func TestBuildMetadataBlock(t *testing.T) {
+	t.Parallel()
 	o := New()
 	o.SetRunMetadata(&RunMetadata{
 		Provider:  "claude",
@@ -610,6 +677,7 @@ func TestBuildMetadataBlock(t *testing.T) {
 }
 
 func TestBuildMetadataBlock_NoRunMeta(t *testing.T) {
+	t.Parallel()
 	o := New() // runMeta is nil
 
 	task := &tasks.Task{
@@ -651,6 +719,7 @@ func TestBuildMetadataBlock_NoRunMeta(t *testing.T) {
 }
 
 func TestParseMetadataBlock(t *testing.T) {
+	t.Parallel()
 	o := New()
 	o.SetRunMetadata(&RunMetadata{
 		Provider:  "codex",
@@ -701,6 +770,7 @@ func TestParseMetadataBlock(t *testing.T) {
 }
 
 func TestParseMetadataBlock_NoBlock(t *testing.T) {
+	t.Parallel()
 	result := ParseMetadataBlock("Just a regular PR body with no metadata.")
 	if result != nil {
 		t.Errorf("expected nil, got %v", result)
@@ -708,6 +778,7 @@ func TestParseMetadataBlock_NoBlock(t *testing.T) {
 }
 
 func TestParseMetadataBlock_Partial(t *testing.T) {
+	t.Parallel()
 	// Only start marker, no end marker
 	result := ParseMetadataBlock("body\n<!-- nightshift:metadata\ntask-id: x\n")
 	if result != nil {
@@ -716,6 +787,7 @@ func TestParseMetadataBlock_Partial(t *testing.T) {
 }
 
 func TestBuildPlanPrompt_WithBranch(t *testing.T) {
+	t.Parallel()
 	o := New()
 	o.SetRunMetadata(&RunMetadata{Branch: "develop"})
 
@@ -732,6 +804,7 @@ func TestBuildPlanPrompt_WithBranch(t *testing.T) {
 }
 
 func TestBuildPlanPrompt_WithoutBranch(t *testing.T) {
+	t.Parallel()
 	o := New() // no runMeta
 
 	task := &tasks.Task{
@@ -747,6 +820,7 @@ func TestBuildPlanPrompt_WithoutBranch(t *testing.T) {
 }
 
 func TestBuildPlanPrompt_EmptyBranch(t *testing.T) {
+	t.Parallel()
 	o := New()
 	o.SetRunMetadata(&RunMetadata{Branch: ""})
 
@@ -763,6 +837,7 @@ func TestBuildPlanPrompt_EmptyBranch(t *testing.T) {
 }
 
 func TestBuildImplementPrompt_WithBranch(t *testing.T) {
+	t.Parallel()
 	o := New()
 	o.SetRunMetadata(&RunMetadata{Branch: "staging"})
 
@@ -783,6 +858,7 @@ func TestBuildImplementPrompt_WithBranch(t *testing.T) {
 }
 
 func TestBuildImplementPrompt_WithoutBranch(t *testing.T) {
+	t.Parallel()
 	o := New() // no runMeta
 
 	task := &tasks.Task{
@@ -802,6 +878,7 @@ func TestBuildImplementPrompt_WithoutBranch(t *testing.T) {
 }
 
 func TestBuildMetadataBlock_WithBranch(t *testing.T) {
+	t.Parallel()
 	o := New()
 	o.SetRunMetadata(&RunMetadata{
 		Provider:  "claude",
@@ -829,6 +906,7 @@ func TestBuildMetadataBlock_WithBranch(t *testing.T) {
 }
 
 func TestBuildMetadataBlock_NoBranch(t *testing.T) {
+	t.Parallel()
 	o := New()
 	o.SetRunMetadata(&RunMetadata{
 		Provider: "claude",
@@ -853,6 +931,7 @@ func TestBuildMetadataBlock_NoBranch(t *testing.T) {
 }
 
 func TestCurrentBranch(t *testing.T) {
+	t.Parallel()
 	// Create a temp git repo
 	dir := t.TempDir()
 	for _, args := range [][]string{
@@ -879,6 +958,7 @@ func TestCurrentBranch(t *testing.T) {
 }
 
 func TestCurrentBranch_InvalidDir(t *testing.T) {
+	t.Parallel()
 	_, err := CurrentBranch(context.Background(), t.TempDir())
 	if err == nil {
 		t.Fatal("expected error for non-git directory")
@@ -886,6 +966,7 @@ func TestCurrentBranch_InvalidDir(t *testing.T) {
 }
 
 func TestRunTaskNoPRURL(t *testing.T) {
+	t.Parallel()
 	// Setup mock: plan, implement (no PR URL), review (pass)
 	planResp := jsonResponse(PlanOutput{
 		Steps:       []string{"step1"},
@@ -923,26 +1004,22 @@ func TestRunTaskNoPRURL(t *testing.T) {
 	}
 }
 
-// --- ghExec / gitExec injectable var tests ---
+// --- GhRunner / GitRunner injection tests ---
 
 func TestAnnotatePR_SkipsWhenMetadataPresent(t *testing.T) {
-	origGh := ghExec
-	origGetBody := getPRBodyVerbatim
-	defer func() {
-		ghExec = origGh
-		getPRBodyVerbatim = origGetBody
-	}()
-
+	t.Parallel()
 	editCalled := false
-	ghExec = func(_ context.Context, _ string, args ...string) (string, error) {
-		editCalled = true
-		return "", nil
-	}
-	getPRBodyVerbatim = func(_ context.Context, _ string, _ string) (string, error) {
-		return "existing body\n<!-- nightshift:metadata\nkey: val\nnightshift:metadata -->", nil
+	gh := &fakeGhRunner{
+		runFn: func(_ context.Context, _ string, args ...string) (string, error) {
+			editCalled = true
+			return "", nil
+		},
+		bodyFn: func(_ context.Context, _, _ string) (string, error) {
+			return "existing body\n<!-- nightshift:metadata\nkey: val\nnightshift:metadata -->", nil
+		},
 	}
 
-	o := New(WithAgent(newMockAgent()))
+	o := New(WithAgent(newMockAgent()), WithGhRunner(gh))
 	task := &tasks.Task{ID: "t1", Title: "T"}
 	result := &TaskResult{}
 	err := o.annotatePR(context.Background(), "https://github.com/o/r/pull/1", task, result, "/work")
@@ -955,28 +1032,24 @@ func TestAnnotatePR_SkipsWhenMetadataPresent(t *testing.T) {
 }
 
 func TestAnnotatePR_AppendsMetadataBlock(t *testing.T) {
-	origGh := ghExec
-	origGetBody := getPRBodyVerbatim
-	defer func() {
-		ghExec = origGh
-		getPRBodyVerbatim = origGetBody
-	}()
-
+	t.Parallel()
 	var editBody string
-	ghExec = func(_ context.Context, _ string, args ...string) (string, error) {
-		// pr edit — capture --body value
-		for i, a := range args {
-			if a == "--body" && i+1 < len(args) {
-				editBody = args[i+1]
+	gh := &fakeGhRunner{
+		runFn: func(_ context.Context, _ string, args ...string) (string, error) {
+			// pr edit — capture --body value
+			for i, a := range args {
+				if a == "--body" && i+1 < len(args) {
+					editBody = args[i+1]
+				}
 			}
-		}
-		return "", nil
-	}
-	getPRBodyVerbatim = func(_ context.Context, _ string, _ string) (string, error) {
-		return "existing body", nil
+			return "", nil
+		},
+		bodyFn: func(_ context.Context, _, _ string) (string, error) {
+			return "existing body", nil
+		},
 	}
 
-	o := New(WithAgent(newMockAgent()))
+	o := New(WithAgent(newMockAgent()), WithGhRunner(gh))
 	task := &tasks.Task{ID: "t1", Title: "MyTask"}
 	result := &TaskResult{Status: StatusCompleted}
 	err := o.annotatePR(context.Background(), "https://github.com/o/r/pull/1", task, result, "/work")
@@ -992,29 +1065,30 @@ func TestAnnotatePR_AppendsMetadataBlock(t *testing.T) {
 }
 
 func TestAnnotatePR_ViewError(t *testing.T) {
-	origGetBody := getPRBodyVerbatim
-	defer func() { getPRBodyVerbatim = origGetBody }()
-
-	getPRBodyVerbatim = func(_ context.Context, _ string, _ string) (string, error) {
-		return "", fmt.Errorf("auth error")
+	t.Parallel()
+	gh := &fakeGhRunner{
+		bodyFn: func(_ context.Context, _, _ string) (string, error) {
+			return "", fmt.Errorf("auth error")
+		},
 	}
 
-	o := New(WithAgent(newMockAgent()))
+	o := New(WithAgent(newMockAgent()), WithGhRunner(gh))
 	err := o.annotatePR(context.Background(), "https://github.com/o/r/pull/1", &tasks.Task{}, &TaskResult{}, "/work")
 	if err == nil {
-		t.Error("expected error from getPRBodyVerbatim failure")
+		t.Error("expected error from PRBody failure")
 	}
 }
 
 func TestCurrentBranch_OK(t *testing.T) {
-	origGit := gitExec
-	defer func() { gitExec = origGit }()
-
-	gitExec = func(_ context.Context, _ string, args ...string) (string, error) {
-		return "main", nil
+	t.Parallel()
+	git := &fakeGitRunner{
+		runFn: func(_ context.Context, _ string, args ...string) (string, error) {
+			return "main", nil
+		},
 	}
 
-	branch, err := CurrentBranch(context.Background(), "/work")
+	o := New(WithGitRunner(git))
+	branch, err := o.currentBranch(context.Background(), "/work")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1024,43 +1098,46 @@ func TestCurrentBranch_OK(t *testing.T) {
 }
 
 func TestCurrentBranch_Error(t *testing.T) {
-	origGit := gitExec
-	defer func() { gitExec = origGit }()
-
-	gitExec = func(_ context.Context, _ string, args ...string) (string, error) {
-		return "", fmt.Errorf("not a repo")
+	t.Parallel()
+	git := &fakeGitRunner{
+		runFn: func(_ context.Context, _ string, args ...string) (string, error) {
+			return "", fmt.Errorf("not a repo")
+		},
 	}
 
-	_, err := CurrentBranch(context.Background(), "/work")
+	o := New(WithGitRunner(git))
+	_, err := o.currentBranch(context.Background(), "/work")
 	if err == nil {
 		t.Error("expected error")
 	}
 }
 
 func TestValidateGitRepo_OK(t *testing.T) {
-	origGit := gitExec
-	defer func() { gitExec = origGit }()
-
-	gitExec = func(_ context.Context, _ string, args ...string) (string, error) {
-		return "/some/project", nil
+	t.Parallel()
+	git := &fakeGitRunner{
+		runFn: func(_ context.Context, _ string, args ...string) (string, error) {
+			return "/some/project", nil
+		},
 	}
 
-	err := validateGitRepo(context.Background(), "/some/project")
+	o := New(WithGitRunner(git))
+	err := o.validateGitRepo(context.Background(), "/some/project")
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
 }
 
 func TestValidateGitRepo_RejectsHome(t *testing.T) {
-	origGit := gitExec
-	defer func() { gitExec = origGit }()
-
+	t.Parallel()
 	home, _ := os.UserHomeDir()
-	gitExec = func(_ context.Context, _ string, args ...string) (string, error) {
-		return home, nil
+	git := &fakeGitRunner{
+		runFn: func(_ context.Context, _ string, args ...string) (string, error) {
+			return home, nil
+		},
 	}
 
-	err := validateGitRepo(context.Background(), home)
+	o := New(WithGitRunner(git))
+	err := o.validateGitRepo(context.Background(), home)
 	if err == nil {
 		t.Error("expected error for HOME as repo root")
 	}
@@ -1070,28 +1147,30 @@ func TestValidateGitRepo_RejectsHome(t *testing.T) {
 }
 
 func TestCheckoutBranch_OK(t *testing.T) {
-	origGit := gitExec
-	defer func() { gitExec = origGit }()
-
-	gitExec = func(_ context.Context, _ string, args ...string) (string, error) {
-		return "", nil
+	t.Parallel()
+	git := &fakeGitRunner{
+		runFn: func(_ context.Context, _ string, args ...string) (string, error) {
+			return "", nil
+		},
 	}
 
-	err := checkoutBranch(context.Background(), "/work", "feature/x")
+	o := New(WithGitRunner(git))
+	err := o.checkoutBranch(context.Background(), "/work", "feature/x")
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
 }
 
 func TestCheckoutBranch_Error(t *testing.T) {
-	origGit := gitExec
-	defer func() { gitExec = origGit }()
-
-	gitExec = func(_ context.Context, _ string, args ...string) (string, error) {
-		return "", fmt.Errorf("branch not found")
+	t.Parallel()
+	git := &fakeGitRunner{
+		runFn: func(_ context.Context, _ string, args ...string) (string, error) {
+			return "", fmt.Errorf("branch not found")
+		},
 	}
 
-	err := checkoutBranch(context.Background(), "/work", "feature/x")
+	o := New(WithGitRunner(git))
+	err := o.checkoutBranch(context.Background(), "/work", "feature/x")
 	if err == nil {
 		t.Error("expected error")
 	}

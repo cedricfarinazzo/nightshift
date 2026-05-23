@@ -25,9 +25,40 @@ const (
 	DefaultAgentTimeout  = 30 * time.Minute
 )
 
-// ghExec runs a gh subcommand in repoPath and returns trimmed stdout+stderr.
-// Substitutable in tests.
-var ghExec = func(ctx context.Context, repoPath string, args ...string) (string, error) {
+// GitRunner runs git commands in a repository directory.
+type GitRunner interface {
+	Run(ctx context.Context, repoPath string, args ...string) (string, error)
+}
+
+// GhRunner runs gh commands in a repository directory.
+// PRBody reads a PR body verbatim, preserving trailing whitespace.
+type GhRunner interface {
+	Run(ctx context.Context, repoPath string, args ...string) (string, error)
+	PRBody(ctx context.Context, repoPath, prURL string) (string, error)
+}
+
+// execGitRunner is the default GitRunner backed by os/exec.
+type execGitRunner struct{}
+
+func (execGitRunner) Run(ctx context.Context, repoPath string, args ...string) (string, error) {
+	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd.Dir = repoPath
+	out, err := cmd.CombinedOutput()
+	trimmed := strings.TrimSpace(string(out))
+	if err != nil {
+		sanitized := strings.Join(args, " ")
+		if trimmed != "" {
+			return "", fmt.Errorf("git %s failed: %s: %w", sanitized, trimmed, err)
+		}
+		return "", fmt.Errorf("git %s failed: %w", sanitized, err)
+	}
+	return trimmed, nil
+}
+
+// execGhRunner is the default GhRunner backed by os/exec.
+type execGhRunner struct{}
+
+func (execGhRunner) Run(ctx context.Context, repoPath string, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, "gh", args...)
 	cmd.Dir = repoPath
 	out, err := cmd.CombinedOutput()
@@ -43,21 +74,23 @@ var ghExec = func(ctx context.Context, repoPath string, args ...string) (string,
 	return trimmed, nil
 }
 
-// gitExec runs a git subcommand in repoPath and returns trimmed stdout+stderr.
-// Substitutable in tests.
-var gitExec = func(ctx context.Context, repoPath string, args ...string) (string, error) {
-	cmd := exec.CommandContext(ctx, "git", args...)
+func (execGhRunner) PRBody(ctx context.Context, repoPath, prURL string) (string, error) {
+	cmd := exec.CommandContext(ctx, "gh", "pr", "view", prURL, "--json", "body", "-q", ".body")
 	cmd.Dir = repoPath
 	out, err := cmd.CombinedOutput()
-	trimmed := strings.TrimSpace(string(out))
 	if err != nil {
-		sanitized := strings.Join(args, " ")
+		trimmed := strings.TrimSpace(string(out))
 		if trimmed != "" {
-			return "", fmt.Errorf("git %s failed: %s: %w", sanitized, trimmed, err)
+			return "", fmt.Errorf("gh pr view failed: %s: %w", trimmed, err)
 		}
-		return "", fmt.Errorf("git %s failed: %w", sanitized, err)
+		return "", fmt.Errorf("gh pr view failed: %w", err)
 	}
-	return trimmed, nil
+	// Only trim the trailing newline gh adds, preserve other trailing whitespace
+	body := string(out)
+	if len(body) > 0 && body[len(body)-1] == '\n' {
+		body = body[:len(body)-1]
+	}
+	return body, nil
 }
 
 // sanitizeArgs redacts large/sensitive argument values to prevent leaking them in error messages.
@@ -168,6 +201,8 @@ type Orchestrator struct {
 	eventHandler EventHandler // optional callback for real-time events
 	runMeta      *RunMetadata
 	gitValidator func(ctx context.Context, workDir string) error // injectable for tests
+	git          GitRunner
+	gh           GhRunner
 }
 
 // Option configures an Orchestrator.
@@ -209,6 +244,25 @@ func WithGitValidator(fn func(ctx context.Context, workDir string) error) Option
 	}
 }
 
+// WithGitRunner overrides the GitRunner used for git operations.
+// Used in tests to inject a fake runner without touching global state.
+func WithGitRunner(r GitRunner) Option {
+	return func(o *Orchestrator) {
+		if r == nil {
+			return
+		}
+		o.git = r
+	}
+}
+
+// WithGhRunner overrides the GhRunner used for gh CLI operations.
+// Used in tests to inject a fake runner without touching global state.
+func WithGhRunner(r GhRunner) Option {
+	return func(o *Orchestrator) {
+		o.gh = r
+	}
+}
+
 // emit sends an event to the registered handler, if any.
 func (o *Orchestrator) emit(e Event) {
 	if o.eventHandler != nil {
@@ -240,10 +294,13 @@ func (o *Orchestrator) emitCompression(result *TaskResult, phase TaskStatus, s *
 // New creates an orchestrator with the given options.
 func New(opts ...Option) *Orchestrator {
 	o := &Orchestrator{
-		config:       DefaultConfig(),
-		logger:       logging.Component("orchestrator"),
-		gitValidator: validateGitRepo,
+		config: DefaultConfig(),
+		logger: logging.Component("orchestrator"),
+		git:    execGitRunner{},
+		gh:     execGhRunner{},
 	}
+	// Default gitValidator uses the bound git runner so WithGitRunner overrides it.
+	o.gitValidator = o.validateGitRepo
 	for _, opt := range opts {
 		opt(o)
 	}
@@ -298,9 +355,9 @@ func (o *Orchestrator) RunTask(ctx context.Context, task *tasks.Task, workDir st
 	// Save current branch and restore it when the task exits, regardless of outcome.
 	// This prevents stacked branches when multiple tasks run sequentially on the same repo.
 	if workDir != "" {
-		if savedBranch, err := CurrentBranch(ctx, workDir); err == nil && savedBranch != "" && savedBranch != "HEAD" {
+		if savedBranch, err := o.currentBranch(ctx, workDir); err == nil && savedBranch != "" && savedBranch != "HEAD" {
 			defer func() {
-				if restoreErr := checkoutBranch(context.Background(), workDir, savedBranch); restoreErr != nil {
+				if restoreErr := o.checkoutBranch(context.Background(), workDir, savedBranch); restoreErr != nil {
 					o.logger.WarnCtx("branch restore failed", map[string]any{
 						"branch": savedBranch,
 						"error":  restoreErr.Error(),
@@ -375,12 +432,7 @@ func (o *Orchestrator) RunTask(ctx context.Context, task *tasks.Task, workDir st
 		o.emit(Event{Type: EventPhaseEnd, Phase: StatusReviewing, TaskID: task.ID, Duration: time.Since(phaseStart), Iteration: iteration})
 
 		if review.Passed {
-			// Success - commit and return
 			o.log(result, "info", "review passed", map[string]any{"iteration": iteration})
-			if err := o.commit(ctx, task, impl, workDir); err != nil {
-				o.log(result, "warn", "commit failed", map[string]any{"error": err.Error()})
-				// Don't fail the task if commit fails, just log it
-			}
 			result.Status = StatusCompleted
 			result.Duration = time.Since(start)
 
@@ -499,7 +551,7 @@ func ParseMetadataBlock(body string) map[string]string {
 // Idempotent: skips if a metadata block already exists.
 func (o *Orchestrator) annotatePR(ctx context.Context, prURL string, task *tasks.Task, result *TaskResult, workDir string) error {
 	// Read current PR body (preserving trailing whitespace for Markdown preservation)
-	currentBody, err := getPRBodyVerbatim(ctx, workDir, prURL)
+	currentBody, err := o.gh.PRBody(ctx, workDir, prURL)
 	if err != nil {
 		return fmt.Errorf("gh pr view: %w", err)
 	}
@@ -513,31 +565,10 @@ func (o *Orchestrator) annotatePR(ctx context.Context, prURL string, task *tasks
 	newBody := strings.TrimRight(currentBody, "\n") + "\n\n" + metaBlock
 
 	// Update PR body
-	if _, err = ghExec(ctx, workDir, "pr", "edit", prURL, "--body", newBody); err != nil {
+	if _, err = o.gh.Run(ctx, workDir, "pr", "edit", prURL, "--body", newBody); err != nil {
 		return fmt.Errorf("gh pr edit: %w", err)
 	}
 	return nil
-}
-
-// getPRBodyVerbatim fetches the PR body while preserving trailing whitespace (Markdown-significant).
-// Only trims the single trailing newline added by gh output. Substitutable in tests.
-var getPRBodyVerbatim = func(ctx context.Context, repoPath string, prURL string) (string, error) {
-	cmd := exec.CommandContext(ctx, "gh", "pr", "view", prURL, "--json", "body", "-q", ".body")
-	cmd.Dir = repoPath
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		trimmed := strings.TrimSpace(string(out))
-		if trimmed != "" {
-			return "", fmt.Errorf("gh pr view failed: %s: %w", trimmed, err)
-		}
-		return "", fmt.Errorf("gh pr view failed: %w", err)
-	}
-	// Only trim the trailing newline gh adds, preserve other trailing whitespace
-	body := string(out)
-	if len(body) > 0 && body[len(body)-1] == '\n' {
-		body = body[:len(body)-1]
-	}
-	return body, nil
 }
 
 // plan spawns the plan agent to create an execution plan.
@@ -772,17 +803,6 @@ func (o *Orchestrator) review(ctx context.Context, task *tasks.Task, impl *Imple
 	}
 
 	return review, nil
-}
-
-// commit finalizes successful task completion.
-func (o *Orchestrator) commit(_ context.Context, task *tasks.Task, impl *ImplementOutput, _ string) error {
-	// For now, commit is a no-op. In full implementation:
-	// - Create git commit with changes
-	// - Include a commit message with https://github.com/cedricfarinazzo/nightshift
-	// - Update task state
-	// - Send notifications
-	o.logger.Infof("commit: task=%s files=%d", task.ID, len(impl.FilesModified))
-	return nil
 }
 
 // Prompt builders
@@ -1044,8 +1064,18 @@ func (o *Orchestrator) log(result *TaskResult, level, msg string, fields map[str
 
 // CurrentBranch resolves the current git branch in the given directory.
 // Returns an error if the directory is not inside a git repository.
+// Uses a local execGitRunner — no package-level state.
 func CurrentBranch(ctx context.Context, workDir string) (string, error) {
-	out, err := gitExec(ctx, workDir, "rev-parse", "--abbrev-ref", "HEAD")
+	out, err := execGitRunner{}.Run(ctx, workDir, "rev-parse", "--abbrev-ref", "HEAD")
+	if err != nil {
+		return "", fmt.Errorf("git rev-parse --abbrev-ref HEAD: %w", err)
+	}
+	return out, nil
+}
+
+// currentBranch resolves the current git branch using the orchestrator's git runner.
+func (o *Orchestrator) currentBranch(ctx context.Context, workDir string) (string, error) {
+	out, err := o.git.Run(ctx, workDir, "rev-parse", "--abbrev-ref", "HEAD")
 	if err != nil {
 		return "", fmt.Errorf("git rev-parse --abbrev-ref HEAD: %w", err)
 	}
@@ -1053,13 +1083,13 @@ func CurrentBranch(ctx context.Context, workDir string) (string, error) {
 }
 
 // validateGitRepo verifies that workDir is inside an existing git repository.
-func validateGitRepo(ctx context.Context, workDir string) error {
-	repoRoot, err := gitExec(ctx, workDir, "rev-parse", "--show-toplevel")
+func (o *Orchestrator) validateGitRepo(ctx context.Context, workDir string) error {
+	repoRoot, err := o.git.Run(ctx, workDir, "rev-parse", "--show-toplevel")
 	if err != nil {
 		return fmt.Errorf("not a git repository: %w", err)
 	}
 
-	// Ensure the repo root is not $HOME or any parent of it.
+	// Ensure the repo root is not exactly $HOME.
 	home, err := os.UserHomeDir()
 	if err == nil {
 		absRoot, _ := filepath.Abs(repoRoot)
@@ -1072,8 +1102,8 @@ func validateGitRepo(ctx context.Context, workDir string) error {
 }
 
 // checkoutBranch runs git checkout to restore a branch in the given directory.
-func checkoutBranch(ctx context.Context, workDir, branch string) error {
-	_, err := gitExec(ctx, workDir, "checkout", branch)
+func (o *Orchestrator) checkoutBranch(ctx context.Context, workDir, branch string) error {
+	_, err := o.git.Run(ctx, workDir, "checkout", branch)
 	return err
 }
 

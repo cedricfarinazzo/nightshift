@@ -141,21 +141,34 @@ func TestSomething(t *testing.T) {
 }
 ```
 
-Packages still using package-level vars (`ghExec` in `internal/jira/pr.go`, `gitExec` in `internal/orchestrator`, `gitExecFn`/`SetGitExecFn` in `internal/workspace`) are tracked for migration — see follow-up ticket VC-101.
+Packages migrated to this pattern:
+- `internal/analysis` — `GitRunner` / `WithGitRunner` (VC-100, reference implementation)
+- `internal/jira` — `GHRunner` / `WithGHRunner` / `PRClient` (VC-106); `t.Parallel()` is safe in most PR tests. Exception: `TestFetchPRReviewComments_ReviewThreadsError` captures `os.Stderr` to assert warning log output and must remain non-parallel.
+- `internal/workspace` — `GitRunner` / `WithGitRunner` as a `SetupWorkspace` option (VC-107); `t.Parallel()` is safe.
+- `internal/orchestrator` — `GitRunner` / `WithGitRunner` + `GhRunner` / `WithGhRunner` on the `Orchestrator` struct (VC-108); `t.Parallel()` is safe. `validateGitRepo`, `checkoutBranch`, `currentBranch` are unexported methods using `o.git`. The exported `CurrentBranch` package function uses a local `execGitRunner{}` for `cmd/` callers.
 
-### Legacy: ghExec (internal/jira/pr.go — not yet migrated)
+All `internal/*` packages above are now seam-free — no package-level func-valued vars used as test seams remain.
 
-PR creation tests stub the `gh` CLI:
+### internal/jira PR tests
+
+Use `NewPRClient(WithGHRunner(fakeGHRunner(...)))` and call the method under test:
 
 ```go
-oldExec := ghExec
-defer func() { ghExec = oldExec }()
-ghExec = func(ctx context.Context, args ...string) (string, error) {
-    return `{"url":"https://github.com/x/y/pull/1"}`, nil
+type fakeGHRunner func(ctx context.Context, repoPath string, args ...string) (string, error)
+
+func (f fakeGHRunner) Run(ctx context.Context, repoPath string, args ...string) (string, error) {
+    return f(ctx, repoPath, args...)
+}
+
+func TestSomething(t *testing.T) {
+    t.Parallel()
+    pc := NewPRClient(WithGHRunner(fakeGHRunner(func(_ context.Context, _ string, args ...string) (string, error) {
+        return `[{"number":1,"url":"https://github.com/x/y/pull/1"}]`, nil
+    })))
+    pr, err := pc.findExistingPR(context.Background(), "/repo", "feature/branch")
+    ...
 }
 ```
-
-**Do not add `t.Parallel()` to tests using this pattern** — they race on the shared global. Migrate to interface injection (see above) before parallelising.
 
 ## Time control
 
