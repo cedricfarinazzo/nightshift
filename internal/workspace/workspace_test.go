@@ -11,6 +11,7 @@ import (
 )
 
 func TestValidateConfig(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		cfg     Config
@@ -85,6 +86,7 @@ func TestValidateConfig(t *testing.T) {
 }
 
 func TestNormalizeName(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		url  string
 		want string
@@ -102,6 +104,7 @@ func TestNormalizeName(t *testing.T) {
 }
 
 func TestCleanupStaleWorkspaces(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 
 	writeMetaFile := func(t *testing.T, dir string, createdAt time.Time) {
@@ -157,6 +160,7 @@ func TestCleanupStaleWorkspaces(t *testing.T) {
 }
 
 func TestCleanupStaleWorkspaces_NonexistentRoot(t *testing.T) {
+	t.Parallel()
 	cfg := Config{Root: "/tmp/nightshift-test-nonexistent-12345", TTLDays: 7}
 	n, err := CleanupStaleWorkspaces(cfg)
 	if err != nil {
@@ -171,6 +175,7 @@ func TestCleanupStaleWorkspaces_NonexistentRoot(t *testing.T) {
 // directory entry mtime is old (> TTL) but has a recently modified file inside
 // is NOT reaped. This is the VC-83 regression case.
 func TestCleanupStaleWorkspaces_RecentFileActivity(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	wsDir := filepath.Join(root, "repo_active")
 	if err := os.Mkdir(wsDir, 0o755); err != nil {
@@ -222,6 +227,7 @@ func TestCleanupStaleWorkspaces_RecentFileActivity(t *testing.T) {
 // TestCleanupStaleWorkspaces_AllOld verifies that a workspace where ALL entries
 // (dir, meta, files) have old mtimes IS reaped past TTL.
 func TestCleanupStaleWorkspaces_AllOld(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	wsDir := filepath.Join(root, "repo_stale")
 	if err := os.Mkdir(wsDir, 0o755); err != nil {
@@ -268,18 +274,22 @@ func TestCleanupStaleWorkspaces_AllOld(t *testing.T) {
 	}
 }
 
+type fakeGitRunner struct {
+	clonedURLs []string
+}
+
+func (f *fakeGitRunner) Run(_ context.Context, _ string, args ...string) (string, error) {
+	if len(args) > 0 && args[0] == "clone" {
+		f.clonedURLs = append(f.clonedURLs, args[1])
+	}
+	return "", nil
+}
+
 func TestSetupWorkspace(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 
-	var clonedURLs []string
-	orig := gitExecFn
-	defer func() { gitExecFn = orig }()
-	gitExecFn = func(_ context.Context, dir string, args ...string) (string, error) {
-		if len(args) > 0 && args[0] == "clone" {
-			clonedURLs = append(clonedURLs, args[1])
-		}
-		return "", nil
-	}
+	fake := &fakeGitRunner{}
 
 	cfg := Config{
 		Root: root,
@@ -290,7 +300,7 @@ func TestSetupWorkspace(t *testing.T) {
 		TTLDays: 7,
 	}
 
-	ws, err := SetupWorkspace(context.Background(), cfg, "abc123")
+	ws, err := SetupWorkspace(context.Background(), cfg, "abc123", WithGitRunner(fake))
 	if err != nil {
 		t.Fatalf("SetupWorkspace: %v", err)
 	}
@@ -301,8 +311,8 @@ func TestSetupWorkspace(t *testing.T) {
 	if len(ws.Repos) != 2 {
 		t.Fatalf("len(Repos) = %d, want 2", len(ws.Repos))
 	}
-	if len(clonedURLs) != 2 {
-		t.Fatalf("clone calls = %d, want 2", len(clonedURLs))
+	if len(fake.clonedURLs) != 2 {
+		t.Fatalf("clone calls = %d, want 2", len(fake.clonedURLs))
 	}
 
 	// Verify workspace paths contain runID

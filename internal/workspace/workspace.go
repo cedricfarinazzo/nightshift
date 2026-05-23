@@ -53,8 +53,15 @@ type workspaceMeta struct {
 	URL       string    `json:"url"`
 }
 
-// gitExecFn is the function used to run git commands. Replaced in tests.
-var gitExecFn = func(ctx context.Context, dir string, args ...string) (string, error) {
+// GitRunner executes git commands in a working directory.
+type GitRunner interface {
+	Run(ctx context.Context, dir string, args ...string) (string, error)
+}
+
+// execGitRunner is the default GitRunner using os/exec.
+type execGitRunner struct{}
+
+func (execGitRunner) Run(ctx context.Context, dir string, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = dir
 	out, err := cmd.CombinedOutput()
@@ -69,18 +76,23 @@ var gitExecFn = func(ctx context.Context, dir string, args ...string) (string, e
 	return trimmed, nil
 }
 
-// SetGitExecFn replaces the git executor used by SetupWorkspace. Returns the old
-// function so tests can restore it via defer. Intended for testing only.
-func SetGitExecFn(fn func(context.Context, string, ...string) (string, error)) func(context.Context, string, ...string) (string, error) {
-	old := gitExecFn
-	gitExecFn = fn
-	return old
-}
+// Option configures SetupWorkspace behaviour.
+type Option func(*setupOpts)
+
+type setupOpts struct{ runner GitRunner }
+
+// WithGitRunner overrides the GitRunner used by SetupWorkspace. Intended for testing.
+func WithGitRunner(r GitRunner) Option { return func(o *setupOpts) { o.runner = r } }
 
 // SetupWorkspace creates a fresh isolated workspace for runID.
 // Each repo is cloned into <root>/<name>_<runID>/ and a metadata file is written.
 // If any error occurs mid-setup, already-created directories are cleaned up.
-func SetupWorkspace(ctx context.Context, cfg Config, runID string) (*Workspace, error) {
+func SetupWorkspace(ctx context.Context, cfg Config, runID string, opts ...Option) (*Workspace, error) {
+	o := setupOpts{runner: execGitRunner{}}
+	for _, opt := range opts {
+		opt(&o)
+	}
+
 	if cfg.Root == "" {
 		return nil, fmt.Errorf("workspace root is empty")
 	}
@@ -116,7 +128,7 @@ func SetupWorkspace(ctx context.Context, cfg Config, runID string) (*Workspace, 
 		}
 		createdDirs = append(createdDirs, wsPath)
 
-		if _, err := gitExecFn(ctx, wsPath, "clone", r.URL, "."); err != nil {
+		if _, err := o.runner.Run(ctx, wsPath, "clone", r.URL, "."); err != nil {
 			for _, d := range createdDirs {
 				os.RemoveAll(d)
 			}
