@@ -2,6 +2,39 @@
 
 All notable changes to nightshift are documented in this file.
 
+## [v1.0.0] - 2026-05-23
+
+### Breaking Changes
+
+- **Removed `nightshift daemon` command (VC-102)** — the in-process scheduler daemon is removed.
+  Scheduling is now delegated to the OS via systemd timer + `Type=oneshot` service (or cron/launchd on
+  macOS). Run `nightshift install systemd` to install the unit files.
+
+  **Migration:**
+  ```bash
+  # Stop and remove old daemon
+  systemctl --user disable --now nightshift.service 2>/dev/null || true
+  # Install new timer pair
+  nightshift install systemd
+  systemctl --user enable --now nightshift.timer
+  # Optional: Jira timer
+  nightshift install --systemd-jira
+  systemctl --user enable --now nightshift-jira.timer
+  ```
+
+  The `schedule:` YAML block is retained for back-compat but is no longer acted on at runtime.
+  Set your actual schedule in the systemd `OnCalendar=` expression.
+
+- **Removed `internal/scheduler/` package** — delete any code importing
+  `github.com/cedricfarinazzo/nightshift/internal/scheduler`.
+
+### Features
+
+- `nightshift run` and `nightshift jira run` abort with a clear error if an old daemon unit is still
+  active (`assertDaemonNotActive()` preflight guard).
+- `nightshift doctor` checks `nightshift.timer` status instead of daemon PID.
+- `nightshift install systemd` now generates `Type=oneshot` service units.
+
 ## [Unreleased]
 
 ### Features

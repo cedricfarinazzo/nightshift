@@ -117,6 +117,9 @@ func init() {
 }
 
 func runRun(cmd *cobra.Command, args []string) error {
+	if err := assertDaemonNotActive(); err != nil {
+		return err
+	}
 	dryRun, _ := cmd.Flags().GetBool("dry-run")
 	projectPath, _ := cmd.Flags().GetString("project")
 	taskFilter, _ := cmd.Flags().GetString("task")

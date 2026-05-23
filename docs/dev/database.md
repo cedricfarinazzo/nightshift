@@ -105,7 +105,7 @@ Use SQLite's online backup:
 sqlite3 ~/.local/share/nightshift/nightshift.db ".backup '/tmp/ns-$(date +%F).db'"
 ```
 
-Safe to run while the daemon is active.
+Safe to run at any time (SQLite WAL mode).
 
 ## Import
 

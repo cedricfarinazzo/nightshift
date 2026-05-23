@@ -43,17 +43,18 @@ gh auth login          # Copilot
 - `nightshift budget --provider claude` to inspect raw windows.
 - `nightshift run --ignore-budget` to bypass for testing.
 
-## Daemon won't start: stale PID file
-
-```
-PID file exists: ~/.local/share/nightshift/nightshift.pid
-```
-
-The daemon detects + removes stale PID files automatically. If it doesn't, delete manually then retry:
+## Timer not firing
 
 ```bash
-rm ~/.local/share/nightshift/nightshift.pid
-nightshift daemon start
+systemctl --user list-timers nightshift.timer
+journalctl --user -u nightshift.service -e
+```
+
+If the timer is not installed, run:
+
+```bash
+nightshift install systemd
+systemctl --user enable --now nightshift.timer
 ```
 
 ## Jira clone fails: `could not read Username`

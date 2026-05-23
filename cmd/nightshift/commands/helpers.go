@@ -14,6 +14,31 @@ import (
 	"github.com/cedricfarinazzo/nightshift/internal/workspace"
 )
 
+// assertDaemonNotActive returns an error if the old nightshift daemon unit is
+// still running. Operators must stop it before using nightshift run / jira run
+// as oneshot commands to avoid conflicting concurrent executions.
+// No-ops when systemctl is not available (non-Linux or non-systemd hosts).
+func assertDaemonNotActive() error {
+	if _, err := exec.LookPath("systemctl"); err != nil {
+		return nil
+	}
+	units := []string{"nightshift-daemon.service", "nightshift.service"}
+	for _, unit := range units {
+		out, err := exec.Command("systemctl", "--user", "is-active", unit).CombinedOutput()
+		if err != nil {
+			continue
+		}
+		if strings.TrimSpace(string(out)) == "active" {
+			return fmt.Errorf(
+				"old nightshift daemon is active (%s); stop and disable it first:\n"+
+					"  systemctl --user disable --now %s nightshift.timer",
+				unit, unit,
+			)
+		}
+	}
+	return nil
+}
+
 // agentByName creates an agent for the given provider name.
 // Returns an error if the provider is unknown or its CLI is not in PATH.
 func agentByName(cfg *config.Config, provider string) (agents.Agent, error) {

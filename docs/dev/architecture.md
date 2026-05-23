@@ -14,7 +14,6 @@ graph TD
     CLI --> WS["internal/workspace<br/>clone-based workspaces"]
     CLI --> DB["internal/db<br/>SQLite + migrations"]
     CLI --> Security["internal/security<br/>credentials, audit, sandbox"]
-    CLI --> Sched["internal/scheduler<br/>cron + SkipIfStillRunning"]
 
     Orch --> Agents["internal/agents<br/>claude, codex, copilot"]
     Orch --> Providers["internal/providers<br/>usage/quota tracking"]
@@ -26,8 +25,6 @@ graph TD
     JiraOrch --> GH["gh CLI"]
 
     Budget --> UsageAPI["Anthropic / OpenAI<br/>GitHub Usage APIs"]
-    Sched --> Orch
-    Sched --> JiraOrch
 ```
 
 ## High-Level Map
@@ -46,7 +43,6 @@ internal/
   projects/                 # Project discovery
   providers/                # Quota / usage tracking (Anthropic, OpenAI, Copilot)
   reporting/                # Run reports + daily summaries
-  scheduler/                # Cron / interval wrapper
   security/                 # Credentials + audit + sandbox
   setup/                    # Setup wizard presets
   snapshots/                # Usage snapshot collector
@@ -180,7 +176,7 @@ Single config knob: `budget.max_percent` (default 90). No token arithmetic. See 
 
 ```mermaid
 flowchart LR
-    Trigger(["run / scheduler tick"]) --> Each["for each enabled provider<br/>in preference order"]
+    Trigger(["nightshift run"]) --> Each["for each enabled provider<br/>in preference order"]
     Each --> Fetch["Usage(ctx)"]
     Fetch --> Each2["for each window<br/>5h, 7d, monthly"]
     Each2 --> Calc["computeWindowCapacity<br/>= max_percent − used_pct"]
@@ -216,4 +212,4 @@ See [Database](database.md).
 7. **One config home** — all viper access in `internal/config/`.
 8. **One credentials home** — all secret access in `internal/security/credentials.go`.
 9. **Compressible vs protected prompts** — `Prompt` is compressible (task data); `PromptPrefix` + `PromptSuffix` are never compressed. Instructions + JSON schemas MUST go in `PromptSuffix`.
-10. **Atomic PID files** — `O_CREATE|O_EXCL`; never `O_TRUNC`.
+10. **No in-process scheduler** — scheduling is delegated to systemd timers (or cron/launchd). `nightshift run` is a oneshot command; overlap prevention is via systemd `Type=oneshot` semantics.

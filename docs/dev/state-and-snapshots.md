@@ -127,7 +127,7 @@ VACUUM;
 ## Concurrency Guarantees
 
 - `State` uses `sync.RWMutex` for in-process safety
-- The DB layer uses SQLite WAL + `busy_timeout=5000` for cross-process safety (rare — only one daemon runs)
+- The DB layer uses SQLite WAL + `busy_timeout=5000` for cross-process safety
 - All writes inside transactions
 
 ## Migration Note

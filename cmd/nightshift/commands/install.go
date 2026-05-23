@@ -264,17 +264,22 @@ func installSystemd(binaryPath string, cfg *config.Config) error {
 }
 
 // generateSystemdService creates the systemd service unit content.
-// Uses daemon start --foreground so the internal interval+window loop handles cycles.
+// Type=oneshot — run executes once per timer fire. The timer controls scheduling.
 func generateSystemdService(binaryPath string) string {
 	return fmt.Sprintf(`[Unit]
 Description=Nightshift AI-powered code maintenance
 Documentation=https://github.com/cedricfarinazzo/nightshift
+After=network-online.target
+Wants=network-online.target
 
 [Service]
-Type=simple
-ExecStart=%s daemon start --foreground
+Type=oneshot
+ExecStart=%s run --yes
+Environment=HOME=%%h
+EnvironmentFile=-%%h/.config/nightshift/env
 StandardOutput=journal
 StandardError=journal
+SyslogIdentifier=nightshift
 
 [Install]
 WantedBy=default.target

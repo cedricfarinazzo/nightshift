@@ -1,7 +1,6 @@
 package commands
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -14,7 +13,6 @@ import (
 	"github.com/cedricfarinazzo/nightshift/internal/budget"
 	"github.com/cedricfarinazzo/nightshift/internal/config"
 	"github.com/cedricfarinazzo/nightshift/internal/db"
-	"github.com/cedricfarinazzo/nightshift/internal/scheduler"
 	"github.com/cedricfarinazzo/nightshift/internal/state"
 )
 
@@ -82,9 +80,8 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 		add("state", statusOK, "ready")
 	}
 
-	checkSchedule(cfg, add)
+	checkTimer(add)
 	checkService(add)
-	checkDaemon(add)
 
 	checkCLIs(cfg, add)
 	checkProviders(cfg, add)
@@ -98,22 +95,28 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func checkSchedule(cfg *config.Config, add func(string, checkStatus, string)) {
-	sched, err := scheduler.NewFromConfig(&cfg.Schedule)
+// checkTimer verifies whether the nightshift systemd timer is enabled.
+// On non-systemd systems, reports a neutral info entry.
+func checkTimer(add func(string, checkStatus, string)) {
+	if _, err := exec.LookPath("systemctl"); err != nil {
+		add("timer", statusWarn, "systemd not available; use cron or launchd to schedule nightshift run")
+		return
+	}
+	out, err := exec.Command("systemctl", "--user", "list-timers", "--all", "--no-pager", systemdTimerName).CombinedOutput()
 	if err != nil {
-		if errors.Is(err, scheduler.ErrNoSchedule) {
-			add("schedule", statusWarn, "no schedule configured (cron or interval)")
-			return
+		add("timer", statusWarn, "unable to query systemd timers")
+		return
+	}
+	text := strings.TrimSpace(string(out))
+	if strings.Contains(text, systemdTimerName) {
+		if strings.Contains(text, "active") {
+			add("timer", statusOK, "nightshift.timer active")
+		} else {
+			add("timer", statusWarn, "nightshift.timer installed but not active")
 		}
-		add("schedule", statusFail, err.Error())
 		return
 	}
-	nextRuns, err := sched.NextRuns(1)
-	if err != nil || len(nextRuns) == 0 {
-		add("schedule", statusWarn, "unable to compute next run")
-		return
-	}
-	add("schedule", statusOK, fmt.Sprintf("next run %s", nextRuns[0].Format("2006-01-02 15:04")))
+	add("timer", statusWarn, "nightshift.timer not installed; run: nightshift install systemd")
 }
 
 func checkService(add func(string, checkStatus, string)) {
@@ -192,18 +195,6 @@ func checkService(add func(string, checkStatus, string)) {
 	}
 }
 
-func checkDaemon(add func(string, checkStatus, string)) {
-	pid, _, err := readPidLock(pidFilePath())
-	if err != nil {
-		add("daemon", statusWarn, "not running (pid file missing)")
-		return
-	}
-	if isProcessRunning(pid) {
-		add("daemon", statusOK, fmt.Sprintf("running (pid %d)", pid))
-	} else {
-		add("daemon", statusWarn, "pid file present but process not running")
-	}
-}
 
 func checkCLIs(cfg *config.Config, add func(string, checkStatus, string)) {
 	if cfg.Providers.Claude.Enabled {

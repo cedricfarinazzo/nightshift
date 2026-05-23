@@ -6,6 +6,34 @@ import (
 	"time"
 )
 
+// timeOfDay is an HH:MM clock value.
+type timeOfDay struct {
+	Hour   int
+	Minute int
+}
+
+func (t timeOfDay) String() string {
+	return fmt.Sprintf("%02d:%02d", t.Hour, t.Minute)
+}
+
+// parseTimeOfDay parses "HH:MM" → timeOfDay.
+func parseTimeOfDay(s string) (timeOfDay, error) {
+	h, m, err := parseClock(s)
+	if err != nil {
+		return timeOfDay{}, err
+	}
+	return timeOfDay{Hour: h, Minute: m}, nil
+}
+
+// validateCronExpression checks that expr has exactly 5 space-separated fields.
+func validateCronExpression(expr string) error {
+	fields := strings.Fields(strings.TrimSpace(expr))
+	if len(fields) != 5 {
+		return fmt.Errorf("cron expression must have 5 fields (minute hour day month weekday), got %d", len(fields))
+	}
+	return nil
+}
+
 var timeLayouts = []string{
 	time.RFC3339,
 	"2006-01-02 15:04:05",

@@ -20,7 +20,6 @@ All commands. Run any with `--help` for full flag list.
 | `nightshift report` | Browse / show run reports |
 | `nightshift logs` | Stream / tail / export logs |
 | `nightshift config` | Show / get / set / validate config |
-| `nightshift daemon` | Start / stop / status the scheduler |
 | `nightshift busfactor` | Bus-factor analysis on a repo |
 | `nightshift jira` | Jira autonomous pipeline (subcommands) |
 
@@ -39,7 +38,7 @@ All commands. Run any with `--help` for full flag list.
 | `--provider` | _(auto)_ | Force a provider |
 | `--timeout` | `30m` | Per-task timeout |
 
-Non-TTY runs (cron/daemon/pipe) auto-skip the confirm prompt.
+Non-TTY runs (systemd/cron/pipe) auto-skip the confirm prompt.
 
 ## `nightshift preview`
 
@@ -74,17 +73,6 @@ nightshift budget --provider claude
 nightshift budget snapshot --local-only
 nightshift budget history -n 10
 ```
-
-## `nightshift daemon`
-
-```bash
-nightshift daemon start
-nightshift daemon start --foreground    # don't fork; useful for debug
-nightshift daemon stop
-nightshift daemon status
-```
-
-PID file at `~/.local/share/nightshift/nightshift.pid` (atomic — only one daemon can hold it).
 
 ## `nightshift jira`
 

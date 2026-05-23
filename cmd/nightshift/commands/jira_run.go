@@ -56,6 +56,10 @@ func jiraRunLockPath() (string, error) {
 }
 
 func runJira(cmd *cobra.Command, _ []string) error {
+	if err := assertDaemonNotActive(); err != nil {
+		return err
+	}
+
 	// Signal handling first so SIGINT/SIGTERM cancels any lock wait.
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()

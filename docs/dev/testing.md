@@ -163,7 +163,7 @@ For tests touching cooldowns, intervals, or scheduling, inject a `clock` via dep
 
 ## Race detector
 
-`make test-race` should pass clean. The orchestrator + state + scheduler have explicit concurrency contracts; any new shared state needs sync primitives.
+`make test-race` should pass clean. The orchestrator + state packages have explicit concurrency contracts; any new shared state needs sync primitives.
 
 ## Test data placement
 

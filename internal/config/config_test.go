@@ -515,24 +515,21 @@ func TestValidate_CustomTaskDuplicateType(t *testing.T) {
 	}
 }
 
-func TestValidateForDaemon_NoSchedule(t *testing.T) {
-	cfg := &Config{}
-	if err := ValidateForDaemon(cfg); !errors.Is(err, ErrNoSchedule) {
-		t.Errorf("expected ErrNoSchedule, got %v", err)
-	}
-}
+// ValidateForDaemon was removed in v1.0.0 (daemon removed; use systemd timers).
+// The following tests verify that Validate() accepts schedule config without error
+// (schedule fields are now informational / deprecated).
 
-func TestValidateForDaemon_WithCron(t *testing.T) {
+func TestValidate_ScheduleCronAccepted(t *testing.T) {
 	cfg := &Config{Schedule: ScheduleConfig{Cron: "0 22 * * *"}}
-	if err := ValidateForDaemon(cfg); err != nil {
-		t.Errorf("unexpected error with cron schedule: %v", err)
+	if err := Validate(cfg); err != nil {
+		t.Errorf("Validate() with cron schedule should pass, got %v", err)
 	}
 }
 
-func TestValidateForDaemon_WithInterval(t *testing.T) {
+func TestValidate_ScheduleIntervalAccepted(t *testing.T) {
 	cfg := &Config{Schedule: ScheduleConfig{Interval: "24h"}}
-	if err := ValidateForDaemon(cfg); err != nil {
-		t.Errorf("unexpected error with interval schedule: %v", err)
+	if err := Validate(cfg); err != nil {
+		t.Errorf("Validate() with interval schedule should pass, got %v", err)
 	}
 }
 
