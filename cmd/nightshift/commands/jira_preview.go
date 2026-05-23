@@ -26,7 +26,7 @@ execution order, and budget without executing anything.`,
 }
 
 func init() {
-	jiraPreviewCmd.Flags().StringP("project", "p", "", "Jira project key (overrides config)")
+	addProjectFlag(jiraPreviewCmd)
 	jiraPreviewCmd.Flags().String("label", "", "Jira label filter (overrides config, default \"nightshift\")")
 	jiraPreviewCmd.Flags().Bool("json", false, "Output as JSON")
 	jiraPreviewCmd.Flags().Bool("plain", false, "Disable TUI pager")

@@ -302,12 +302,12 @@ func TestFilterProjectsByKey(t *testing.T) {
 	}
 
 	tests := []struct {
-		name      string
-		projects  []jira.ProjectConfig
-		key       string
-		wantLen   int
-		wantErr   bool
-		errSubstr string
+		name       string
+		projects   []jira.ProjectConfig
+		key        string
+		wantLen    int
+		wantErr    bool
+		errSubstrs []string
 	}{
 		{
 			name:    "match exact",
@@ -330,23 +330,23 @@ func TestFilterProjectsByKey(t *testing.T) {
 			wantLen: 2,
 		},
 		{
-			name:      "no match returns error with key",
-			key:       "ZZ",
-			wantErr:   true,
-			errSubstr: "ZZ",
+			name:       "no match returns error with key",
+			key:        "ZZ",
+			wantErr:    true,
+			errSubstrs: []string{"ZZ"},
 		},
 		{
-			name:      "no match error lists configured keys",
-			key:       "ZZ",
-			wantErr:   true,
-			errSubstr: "VC",
+			name:       "no match error lists configured keys",
+			key:        "ZZ",
+			wantErr:    true,
+			errSubstrs: []string{"VC", "FIN", "configured:"},
 		},
 		{
-			name:      "empty config returns error",
-			projects:  []jira.ProjectConfig{},
-			key:       "VC",
-			wantErr:   true,
-			errSubstr: "VC",
+			name:       "empty config returns error",
+			projects:   []jira.ProjectConfig{},
+			key:        "VC",
+			wantErr:    true,
+			errSubstrs: []string{"no Jira projects configured"},
 		},
 	}
 
@@ -361,8 +361,10 @@ func TestFilterProjectsByKey(t *testing.T) {
 				if err == nil {
 					t.Fatal("expected error, got nil")
 				}
-				if tc.errSubstr != "" && !strings.Contains(err.Error(), tc.errSubstr) {
-					t.Fatalf("error %q does not contain %q", err.Error(), tc.errSubstr)
+				for _, sub := range tc.errSubstrs {
+					if !strings.Contains(err.Error(), sub) {
+						t.Fatalf("error %q does not contain %q", err.Error(), sub)
+					}
 				}
 				return
 			}

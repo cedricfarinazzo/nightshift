@@ -19,12 +19,22 @@ func init() {
 	rootCmd.AddCommand(jiraCmd)
 }
 
+// addProjectFlag registers the --project/-p flag on cmd with the canonical
+// help text. Call from init() in both jira_run.go and jira_preview.go so the
+// paired commands stay in sync.
+func addProjectFlag(cmd *cobra.Command) {
+	cmd.Flags().StringP("project", "p", "", "Jira project key — process only this project (default: all configured)")
+}
+
 // filterProjectsByKey returns only the projects whose Key matches key
 // (case-insensitive). Empty key returns projects unchanged. No match returns
 // an error listing configured keys.
 func filterProjectsByKey(projects []jira.ProjectConfig, key string) ([]jira.ProjectConfig, error) {
 	if key == "" {
 		return projects, nil
+	}
+	if len(projects) == 0 {
+		return nil, fmt.Errorf("no Jira projects configured")
 	}
 	var filtered []jira.ProjectConfig
 	for _, p := range projects {
