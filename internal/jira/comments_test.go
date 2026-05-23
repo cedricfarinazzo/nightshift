@@ -316,14 +316,22 @@ func TestFormatComment_SortedKeyOrder(t *testing.T) {
 		t.Fatal("nightshift:meta line not found")
 	}
 	pairs := reKVPair.FindAllStringSubmatch(m[1], -1)
-	for i := 1; i < len(pairs); i++ {
-		if pairs[i][1] <= pairs[i-1][1] {
-			t.Errorf("keys not strictly ascending at position %d: %q after %q", i, pairs[i][1], pairs[i-1][1])
+	gotKeys := make([]string, len(pairs))
+	for i, p := range pairs {
+		gotKeys[i] = p[1]
+	}
+	wantKeys := []string{"alpha", "beta", "mango", "zebra"}
+	if len(gotKeys) != len(wantKeys) {
+		t.Fatalf("key count mismatch: got %v, want %v", gotKeys, wantKeys)
+	}
+	for i, k := range wantKeys {
+		if gotKeys[i] != k {
+			t.Errorf("key[%d] = %q, want %q (full order: got %v, want %v)", i, gotKeys[i], k, gotKeys, wantKeys)
 		}
 	}
 }
 
-func TestFormatComment_IdempotentSerializationForResumeLogic(t *testing.T) {
+func TestFormatComment_DeterministicSerializationForDigestComparison(t *testing.T) {
 	ts := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
 	c := NightshiftComment{
 		Type:      CommentRework,
