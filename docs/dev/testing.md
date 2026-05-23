@@ -145,8 +145,9 @@ Packages migrated to this pattern:
 - `internal/analysis` — `GitRunner` / `WithGitRunner` (VC-100, reference implementation)
 - `internal/jira` — `GHRunner` / `WithGHRunner` / `PRClient` (VC-106); `t.Parallel()` is safe in most PR tests. Exception: `TestFetchPRReviewComments_ReviewThreadsError` captures `os.Stderr` to assert warning log output and must remain non-parallel.
 - `internal/workspace` — `GitRunner` / `WithGitRunner` as a `SetupWorkspace` option (VC-107); `t.Parallel()` is safe.
+- `internal/orchestrator` — `GitRunner` / `WithGitRunner` + `GhRunner` / `WithGhRunner` on the `Orchestrator` struct (VC-108); `t.Parallel()` is safe. `validateGitRepo`, `checkoutBranch`, `currentBranch` are unexported methods using `o.git`. The exported `CurrentBranch` package function uses a local `execGitRunner{}` for `cmd/` callers.
 
-Packages still using package-level vars (`gitExec` in `internal/orchestrator`) are tracked for migration — see VC-108.
+All `internal/*` packages above are now seam-free — no package-level func-valued vars used as test seams remain.
 
 ### internal/jira PR tests
 
