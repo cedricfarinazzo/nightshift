@@ -2,12 +2,12 @@
 package tasks
 
 import (
-	"fmt"
 	"math/rand/v2"
 	"sort"
 	"time"
 
 	"github.com/cedricfarinazzo/nightshift/internal/config"
+	"github.com/cedricfarinazzo/nightshift/internal/logging"
 	"github.com/cedricfarinazzo/nightshift/internal/state"
 )
 
@@ -232,7 +232,7 @@ func (s *Selector) SelectAndAssign(project string) *ScoredTask {
 	taskID := makeTaskID(string(task.Definition.Type), project)
 	if err := s.state.MarkAssigned(taskID, project, string(task.Definition.Type)); err != nil {
 		// Log and continue — task runs but won't be locked against concurrent selection.
-		fmt.Printf("state: SelectAndAssign mark assigned: %v\n", err)
+		logging.Get().Warnf("state: SelectAndAssign mark assigned: %v", err)
 	}
 
 	return task

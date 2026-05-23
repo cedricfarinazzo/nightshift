@@ -84,7 +84,9 @@ func TestFilterProcessedToday(t *testing.T) {
 	}
 
 	// Mark one as processed
-	_ = s.RecordProjectRun("/processed")
+	if err := s.RecordProjectRun("/processed"); err != nil {
+		t.Fatalf("RecordProjectRun: %v", err)
+	}
 
 	filtered := FilterProcessedToday(projects, s)
 	if len(filtered) != 1 {

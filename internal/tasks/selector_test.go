@@ -61,7 +61,9 @@ func TestScoreTask(t *testing.T) {
 	}
 
 	// Record a recent run to reduce staleness bonus
-	_ = st.RecordTaskRun(project, string(TaskLintFix))
+	if err := st.RecordTaskRun(project, string(TaskLintFix)); err != nil {
+		t.Fatalf("RecordTaskRun: %v", err)
+	}
 	score = sel.ScoreTask(TaskLintFix, project)
 	if score > 0.1 {
 		t.Errorf("expected score ~0 for just-run task, got %f", score)
@@ -96,7 +98,9 @@ func TestScoreTaskWithConfigPriority(t *testing.T) {
 	sel := NewSelector(cfg, st)
 
 	project := "/test/project"
-	st.RecordTaskRun(project, string(TaskLintFix)) // Remove staleness bonus
+	if err := st.RecordTaskRun(project, string(TaskLintFix)); err != nil { // Remove staleness bonus
+		t.Fatalf("RecordTaskRun: %v", err)
+	}
 
 	score := sel.ScoreTask(TaskLintFix, project)
 	if score < 4.9 || score > 5.1 {
@@ -196,7 +200,9 @@ func TestFilterUnassigned(t *testing.T) {
 
 	// Mark one as assigned
 	taskID := makeTaskID(string(TaskLintFix), project)
-	_ = st.MarkAssigned(taskID, project, string(TaskLintFix))
+	if err := st.MarkAssigned(taskID, project, string(TaskLintFix)); err != nil {
+		t.Fatalf("MarkAssigned: %v", err)
+	}
 
 	got := sel.FilterUnassigned(tasks, project)
 	if len(got) != 2 {

@@ -253,7 +253,9 @@ func TestMaxProjects_SkipsProcessedBeforeCounting(t *testing.T) {
 	params.maxProjects = 1
 
 	// Mark p0 as already processed today
-	_ = params.st.RecordProjectRun(p0)
+	if err := params.st.RecordProjectRun(p0); err != nil {
+		t.Fatalf("RecordProjectRun: %v", err)
+	}
 
 	plan, err := buildPreflight(params)
 	if err != nil {

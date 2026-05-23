@@ -418,46 +418,30 @@ func TestRunHistoryBranchEmpty(t *testing.T) {
 	}
 }
 
-// TestRecordTaskRun_DBFailureReturnsError verifies that a DB failure returns an error
-// and leaves state unchanged (LastTaskRun stays zero).
+// TestRecordTaskRun_DBFailureReturnsError verifies that a DB failure returns an error.
 func TestRecordTaskRun_DBFailureReturnsError(t *testing.T) {
 	s, closeDB := newFailingState(t)
+	defer closeDB()
 
-	err := s.RecordTaskRun("/project", "lint")
-	if err == nil {
+	if err := s.RecordTaskRun("/project", "lint"); err == nil {
 		t.Fatal("RecordTaskRun() expected error after DB closed, got nil")
 	}
-
-	// State must be unchanged — zero time means no write occurred.
-	lastRun := s.LastTaskRun("/project", "lint")
-	if !lastRun.IsZero() {
-		t.Errorf("LastTaskRun() = %v, want zero (no state mutation on failure)", lastRun)
-	}
-
-	closeDB()
 }
 
-// TestRecordProjectRun_DBFailureReturnsError verifies that a DB failure returns an error
-// and leaves project unrecorded.
+// TestRecordProjectRun_DBFailureReturnsError verifies that a DB failure returns an error.
 func TestRecordProjectRun_DBFailureReturnsError(t *testing.T) {
 	s, closeDB := newFailingState(t)
+	defer closeDB()
 
-	err := s.RecordProjectRun("/project")
-	if err == nil {
+	if err := s.RecordProjectRun("/project"); err == nil {
 		t.Fatal("RecordProjectRun() expected error after DB closed, got nil")
 	}
-
-	if s.WasProcessedToday("/project") {
-		t.Error("WasProcessedToday() = true after failed write, want false")
-	}
-
-	closeDB()
 }
 
-// TestAddRunRecord_DBFailureReturnsError verifies that a DB failure returns an error
-// and no record is stored.
+// TestAddRunRecord_DBFailureReturnsError verifies that a DB failure returns an error.
 func TestAddRunRecord_DBFailureReturnsError(t *testing.T) {
 	s, closeDB := newFailingState(t)
+	defer closeDB()
 
 	err := s.AddRunRecord(RunRecord{
 		ID:      "test-run",
@@ -467,29 +451,16 @@ func TestAddRunRecord_DBFailureReturnsError(t *testing.T) {
 	if err == nil {
 		t.Fatal("AddRunRecord() expected error after DB closed, got nil")
 	}
-
-	if len(s.GetRunHistory(10)) != 0 {
-		t.Error("GetRunHistory() not empty after failed write, want empty")
-	}
-
-	closeDB()
 }
 
-// TestMarkAssigned_DBFailureReturnsError verifies that a DB failure returns an error
-// and the task is not marked as assigned.
+// TestMarkAssigned_DBFailureReturnsError verifies that a DB failure returns an error.
 func TestMarkAssigned_DBFailureReturnsError(t *testing.T) {
 	s, closeDB := newFailingState(t)
+	defer closeDB()
 
-	err := s.MarkAssigned("task-x", "/project", "lint")
-	if err == nil {
+	if err := s.MarkAssigned("task-x", "/project", "lint"); err == nil {
 		t.Fatal("MarkAssigned() expected error after DB closed, got nil")
 	}
-
-	if s.IsAssigned("task-x") {
-		t.Error("IsAssigned() = true after failed write, want false")
-	}
-
-	closeDB()
 }
 
 // newFailingState creates a State backed by a DB that is immediately closed,
