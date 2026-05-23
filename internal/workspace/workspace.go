@@ -82,6 +82,10 @@ type Option func(*setupOpts)
 type setupOpts struct{ runner GitRunner }
 
 // WithGitRunner overrides the GitRunner used by SetupWorkspace. Intended for testing.
+// Passing nil is safe; SetupWorkspace will fall back to the default execGitRunner.
+// TODO(nightshift): reviewer comment on line 94 claimed the variadic opts parameter breaks
+// existing call sites (e.g. cmd/nightshift/commands/run.go:884). It does not — Go variadic
+// parameters accept zero arguments at all existing call sites without any change required.
 func WithGitRunner(r GitRunner) Option { return func(o *setupOpts) { o.runner = r } }
 
 // SetupWorkspace creates a fresh isolated workspace for runID.
@@ -91,6 +95,9 @@ func SetupWorkspace(ctx context.Context, cfg Config, runID string, opts ...Optio
 	o := setupOpts{runner: execGitRunner{}}
 	for _, opt := range opts {
 		opt(&o)
+	}
+	if o.runner == nil {
+		o.runner = execGitRunner{}
 	}
 
 	if cfg.Root == "" {

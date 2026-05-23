@@ -161,7 +161,9 @@ func TestCleanupStaleWorkspaces(t *testing.T) {
 
 func TestCleanupStaleWorkspaces_NonexistentRoot(t *testing.T) {
 	t.Parallel()
-	cfg := Config{Root: "/tmp/nightshift-test-nonexistent-12345", TTLDays: 7}
+	// Use a path under t.TempDir() that is guaranteed unique and does not exist.
+	nonexistent := filepath.Join(t.TempDir(), "does-not-exist")
+	cfg := Config{Root: nonexistent, TTLDays: 7}
 	n, err := CleanupStaleWorkspaces(cfg)
 	if err != nil {
 		t.Fatalf("expected no error for missing root, got %v", err)
@@ -279,7 +281,7 @@ type fakeGitRunner struct {
 }
 
 func (f *fakeGitRunner) Run(_ context.Context, _ string, args ...string) (string, error) {
-	if len(args) > 0 && args[0] == "clone" {
+	if len(args) >= 2 && args[0] == "clone" {
 		f.clonedURLs = append(f.clonedURLs, args[1])
 	}
 	return "", nil
