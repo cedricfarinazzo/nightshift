@@ -49,7 +49,7 @@ Sections:
 - Failures
 - Budget at start vs end of day
 
-Written once per day by the daemon (or on demand via `nightshift report`).
+Written once per day on the first `nightshift run` of the day (or on demand via `nightshift report`).
 
 ## JSON Results
 
@@ -87,7 +87,7 @@ reporting:
   retention_days: 30
 ```
 
-On daemon startup, reports + summaries older than `retention_days` are deleted. Logs are not affected (rotate separately).
+On each `nightshift run`, reports + summaries older than `retention_days` are deleted. Logs are not affected (rotate separately).
 
 ## CLI surface
 

@@ -23,7 +23,7 @@ Two flagship workflows:
 flowchart LR
     You["You"] -->|label tickets| Jira[("Jira project")]
     You -->|config + schedule| Cfg["~/.config/nightshift/config.yaml"]
-    Cron(["cron @ 2am"]) --> NS["nightshift daemon"]
+    Timer(["systemd timer @ 2am"]) --> NS["nightshift run / jira run"]
     Cfg --> NS
     NS --> JR["nightshift jira run"]
     NS --> TR["nightshift run<br/>(maintenance tasks)"]
@@ -38,7 +38,7 @@ flowchart LR
 ## What a Typical Night Looks Like
 
 ```
-22:00  cron fires → daemon runs
+22:00  systemd timer fires → nightshift jira run + nightshift run
        ├─ jira run
        │    fetch labeled todo tickets in VC project
        │    BuildDependencyGraph → topo-sort

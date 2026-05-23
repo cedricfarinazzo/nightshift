@@ -1,44 +1,112 @@
-# Systemd Install
+# Systemd Installation
 
-Run Nightshift as a user-level systemd service so it survives reboots.
+Nightshift v1.0.0 uses a **systemd timer + oneshot service** pair instead of a
+long-running daemon. The timer fires on schedule; the service runs
+`nightshift run` once and exits.
 
-## Install
-
-```bash
-nightshift install
-```
-
-The `install` command writes a user unit to `~/.config/systemd/user/nightshift.service`, enables it (`systemctl --user enable`), and starts it.
-
-## Manual Verification
+## Quick install
 
 ```bash
-systemctl --user status nightshift
-systemctl --user restart nightshift
-journalctl --user -u nightshift -f
+nightshift install systemd
 ```
 
-## Unit File
+This writes two unit files to `~/.config/systemd/user/` and enables the timer.
 
-The generated unit roughly:
+---
+
+## Manual unit files
+
+### `~/.config/systemd/user/nightshift.service`
 
 ```ini
 [Unit]
-Description=Nightshift autonomous coding agent scheduler
+Description=Nightshift AI-powered code maintenance
 Documentation=https://github.com/cedricfarinazzo/nightshift
 After=network-online.target
+Wants=network-online.target
 
 [Service]
-Type=simple
-ExecStart=%h/.local/bin/nightshift daemon start --foreground
-Restart=on-failure
-RestartSec=10
+Type=oneshot
+ExecStart=/usr/local/bin/nightshift run --yes
+Environment=HOME=%h
+EnvironmentFile=-%h/.config/nightshift/env
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=nightshift
 
 [Install]
 WantedBy=default.target
 ```
 
-Tweak the path if you installed `nightshift` somewhere other than `~/.local/bin`.
+### `~/.config/systemd/user/nightshift.timer`
+
+```ini
+[Unit]
+Description=Nightshift scheduled runs
+
+[Timer]
+OnCalendar=*-*-* 02:00:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+```
+
+Adjust `OnCalendar=` to match your preferred schedule. Examples:
+
+| Expression | Meaning |
+|---|---|
+| `*-*-* 02:00:00` | Daily at 02:00 |
+| `Mon..Fri *-*-* 23:00:00` | Weeknights at 23:00 |
+| `*-*-* 0/4:00:00` | Every 4 hours |
+
+Validate with:
+
+```bash
+systemd-analyze calendar '*-*-* 02:00:00'
+```
+
+---
+
+## Jira pipeline
+
+Install a separate oneshot pair for `nightshift jira run`:
+
+```bash
+nightshift install --systemd-jira
+```
+
+This writes `nightshift-jira.service` and `nightshift-jira.timer`. The Jira
+timer's `OnCalendar` is taken from `jira.systemd_on_calendar` in config
+(default `*-*-* 22:00:00`).
+
+---
+
+## Enable and start
+
+```bash
+systemctl --user daemon-reload
+systemctl --user enable --now nightshift.timer
+# Optional: also enable jira timer
+systemctl --user enable --now nightshift-jira.timer
+```
+
+## Check status
+
+```bash
+# Next fire times
+systemctl --user list-timers nightshift.timer nightshift-jira.timer
+
+# Last run logs
+journalctl --user -u nightshift.service -n 50
+journalctl --user -u nightshift-jira.service -n 50
+```
+
+## Disable
+
+```bash
+systemctl --user disable --now nightshift.timer
+```
 
 ## Linger (run while logged out)
 
@@ -48,32 +116,27 @@ By default user services stop when you log out. To keep Nightshift running on a 
 sudo loginctl enable-linger $USER
 ```
 
-## Environment Variables
+## Environment variables
 
-API tokens must reach the service. Two options:
+Put `KEY=VALUE` lines in `~/.config/nightshift/env` with `chmod 600`. The
+generated service unit includes `EnvironmentFile=-%h/.config/nightshift/env`
+so the file is picked up automatically when it exists.
 
-**Option A — drop-in:**
+---
+
+## macOS
+
+macOS does not have systemd. Use `launchd`:
 
 ```bash
-mkdir -p ~/.config/systemd/user/nightshift.service.d/
-cat > ~/.config/systemd/user/nightshift.service.d/env.conf <<EOF
-[Service]
-Environment="ANTHROPIC_API_KEY=sk-ant-..."
-Environment="OPENAI_API_KEY=sk-..."
-Environment="NIGHTSHIFT_JIRA_TOKEN=..."
-EOF
-systemctl --user daemon-reload
-systemctl --user restart nightshift
+nightshift install launchd
 ```
 
-**Option B — EnvironmentFile:**
+Or schedule manually with `crontab -e`:
 
-```ini
-[Service]
-EnvironmentFile=%h/.config/nightshift/env
 ```
-
-Then put `KEY=VALUE` lines in `~/.config/nightshift/env` with `chmod 600`.
+0 2 * * * /usr/local/bin/nightshift run --yes >> ~/.local/share/nightshift/logs/cron.log 2>&1
+```
 
 ## Uninstall
 
@@ -81,10 +144,10 @@ Then put `KEY=VALUE` lines in `~/.config/nightshift/env` with `chmod 600`.
 nightshift uninstall
 ```
 
-Stops the service and removes the unit file. Config and data are preserved.
+Removes the unit files and reloads systemd. Config and data are preserved.
 
 ## Troubleshooting
 
-- `systemctl --user status nightshift` shows `failed` — check journal: `journalctl --user -u nightshift -e`.
-- Service starts but never fires runs — check that schedule is configured (`nightshift config get schedule`) and the daemon is healthy (`nightshift daemon status`).
-- Service can't find `claude`/`codex` — `PATH` in user service is minimal. Add to the drop-in: `Environment="PATH=/usr/local/bin:/usr/bin:%h/.local/bin"`.
+- `systemctl --user list-timers` shows no `nightshift.timer` — run `nightshift install systemd`.
+- Service fails — check journal: `journalctl --user -u nightshift.service -e`.
+- CLI not found — add to `~/.config/nightshift/env`: `PATH=/usr/local/bin:/usr/bin:/home/USER/.local/bin`.

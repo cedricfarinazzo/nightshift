@@ -32,10 +32,12 @@ projects:
 
 ## Schedule
 
+> **v1.0.0**: The `schedule:` block is retained for YAML back-compat but is **not acted on at runtime**. Scheduling is delegated to systemd timers (or cron/launchd). Set your actual schedule in the systemd `OnCalendar=` expression. See [Scheduling](scheduling.md).
+
 ```yaml
 schedule:
-  cron: "0 2 * * *"          # cron expression
-  # interval: "8h"           # OR fixed interval (mutually exclusive)
+  cron: "0 2 * * *"          # informational only — set schedule in systemd timer
+  # interval: "8h"           # informational only
 ```
 
 ## Budget
@@ -185,7 +187,9 @@ Each run creates `<root>/<name>_<runID>/` per repo, clones fresh, runs tasks the
 
 Workspace mode activates only when `workspace.root` is non-empty. Existing `projects:` path-based config is unaffected.
 
-Stale workspaces are cleaned up automatically on daemon start, or manually:
+When using workspace mode with the systemd timer, each timer fire clones repos fresh, runs tasks, and leaves workspaces for automatic cleanup.
+
+Stale workspaces are cleaned up automatically on each `nightshift run`, or manually:
 
 ```bash
 nightshift workspace clean           # uses config TTL (7 days)
@@ -207,4 +211,3 @@ See [Jira Pipeline](jira-pipeline.md) for the full Jira config block.
 | Audit log | `~/.local/share/nightshift/audit/` |
 | Run reports | `~/.local/share/nightshift/reports/` |
 | Daily summaries | `~/.local/share/nightshift/summaries/` |
-| PID file | `~/.local/share/nightshift/nightshift.pid` |

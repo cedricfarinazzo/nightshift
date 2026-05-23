@@ -1,103 +1,49 @@
 # Scheduling Internals
 
-`internal/scheduler/scheduler.go` — wraps `robfig/cron/v3` with safety middleware.
+As of v1.0.0, Nightshift has **no in-process scheduler**. The `internal/scheduler/` package was removed. Scheduling is fully delegated to the operating system.
 
-```mermaid
-sequenceDiagram
-    participant Cron as robfig/cron
-    participant Mw as SkipIfStillRunning
-    participant Fn as runFunc closure
-    participant Bud as budget.Manager
-    participant O as orchestrator
-
-    Cron->>Mw: tick @ scheduled time
-    alt previous run still active
-        Mw-->>Cron: silently dropped
-    else idle
-        Mw->>Fn: invoke
-        Fn->>Fn: re-load config
-        Fn->>Bud: Check(ctx)
-        alt no capacity
-            Bud-->>Fn: skip
-        else
-            Fn->>O: RunAll(ctx)
-            O-->>Fn: result
-            Fn->>Fn: write report + update state
-        end
-    end
-```
-
-## Construction
-
-```go
-sched := scheduler.New(cfg, runFunc)
-sched.Start(ctx)
-defer sched.Stop()
-```
-
-## Cron Wrapper
-
-```go
-c := cron.New(
-    cron.WithChain(
-        cron.SkipIfStillRunning(cron.DiscardLogger),
-    ),
-)
-```
-
-`SkipIfStillRunning` — if a previous fire is still running when the next is due, the next fire is silently dropped. Prevents:
-
-- Overlapping runs hitting the same project simultaneously
-- Unbounded goroutine growth on slow runs
-
-`cron.DiscardLogger` silences the "skip" log (cron's own logger). Our zerolog logger captures the skip via the wrapped job.
-
-## Two Modes
-
-```yaml
-schedule:
-  cron: "0 2 * * *"
-  # OR
-  interval: "8h"
-```
-
-If both are set, `Validate()` errors out.
-
-**Cron**: registered as a cron job.
-
-**Interval**: wrapped as `cron.Every(interval)` to reuse the same `SkipIfStillRunning` machinery.
-
-## Fire path
+## How It Works
 
 ```
-cron tick
-  → wrapped middleware (SkipIfStillRunning)
-  → runFunc(ctx)
-       → orchestrator.RunAll(ctx)
+systemd timer (OnCalendar=*-*-* 02:00:00)
+  └─ fires → runs  nightshift run --yes
+                   nightshift jira run --yes
 ```
 
-`runFunc` is provided by the daemon and ties together budget check + task selection + orchestrator.
+The service unit is `Type=oneshot` — it starts, runs to completion, and exits. The timer fires the next scheduled run. No daemon process runs between fires.
 
-## Tests
+## Overlap Prevention
 
-`scheduler_test.go` uses an immediate-fire mock cron + a counting `runFunc` to verify:
+`Persistent=true` on the timer ensures missed fires are caught on next boot. Overlapping runs are impossible by construction: the timer only starts the service when the previous invocation has exited (oneshot semantics).
 
-- Single fire when not running
-- Skipped fire when previous still running
-- Stop signal propagation
+## Configuring the Schedule
 
-## Daemon integration
+Edit `~/.config/systemd/user/nightshift.timer`:
 
-`cmd/nightshift/commands/daemon.go` constructs the scheduler with a `runFunc` closure that:
+```ini
+[Timer]
+OnCalendar=*-*-* 02:00:00
+Persistent=true
+```
 
-1. Re-loads config (in case it changed between fires)
-2. Checks budget
-3. Selects tasks
-4. Drives the orchestrator
-5. Writes report + updates state
+Validate with `systemd-analyze calendar '<expression>'`. Reload with `systemctl --user daemon-reload && systemctl --user restart nightshift.timer`.
 
-## Gotchas
+## `assertDaemonNotActive`
 
-- Config changes do not require a daemon restart — `runFunc` re-loads on each fire.
-- Schedule changes (cron/interval) DO require restart — the cron job is registered once.
-- `SkipIfStillRunning` is on the cron instance, not per-job — registering multiple jobs would need refactoring.
+`cmd/nightshift/commands/helpers.go` contains `assertDaemonNotActive()`, which checks `systemctl --user is-active` for old daemon unit names (`nightshift-daemon.service`, `nightshift.service` in daemon mode). If an old daemon is still active, `nightshift run` and `nightshift jira run` abort with a clear migration message.
+
+## macOS / Non-systemd
+
+Use `launchd` or `cron`:
+
+```bash
+nightshift install launchd
+# or:
+crontab -e
+# 0 2 * * * /usr/local/bin/nightshift run --yes >> ~/.local/share/nightshift/logs/cron.log 2>&1
+```
+
+## See Also
+
+- [Systemd Install](../operations/systemd-install.md)
+- [Scheduling](../user/scheduling.md)

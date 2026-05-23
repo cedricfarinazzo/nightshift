@@ -1,6 +1,6 @@
 # Run Lifecycle
 
-End-to-end trace of `nightshift run`, daemon-triggered or manual.
+End-to-end trace of `nightshift run` — invoked manually or by a systemd timer.
 
 ```mermaid
 sequenceDiagram
@@ -53,9 +53,9 @@ sequenceDiagram
 5. Builds preflight summary
 6. Confirms (or auto-skip in non-TTY) → runs orchestrator
 
-## Daemon path
+## Systemd timer path
 
-`cmd/nightshift/commands/daemon.go` registers the schedule (`internal/scheduler`) and on each fire calls the same orchestrator entry point as `nightshift run`. Cron uses `cron.SkipIfStillRunning(cron.DiscardLogger)` so overlapping fires are dropped.
+As of v1.0.0, scheduling is delegated to the OS. The systemd timer fires `nightshift run --yes` as a oneshot service. Overlap prevention is handled by systemd `Type=oneshot` — the next timer fire only starts after the service exits. No in-process scheduler runs between fires.
 
 ## Orchestrator loop
 

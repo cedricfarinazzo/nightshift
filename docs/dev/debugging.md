@@ -3,8 +3,8 @@
 ## First steps
 
 ```bash
-nightshift doctor                              # env, paths, agent binaries
-nightshift daemon status                       # daemon up?
+nightshift doctor                              # env, paths, agent binaries, timer
+systemctl --user list-timers nightshift.timer  # next fire?
 tail -F ~/.local/share/nightshift/logs/*.log | jq .
 ```
 
@@ -12,10 +12,7 @@ tail -F ~/.local/share/nightshift/logs/*.log | jq .
 
 ```bash
 nightshift --verbose run
-nightshift daemon start --foreground --verbose
 ```
-
-`--foreground` keeps logs on stderr — useful to watch in real-time.
 
 ## Log locations
 
@@ -24,8 +21,7 @@ nightshift daemon start --foreground --verbose
 | App | `~/.local/share/nightshift/logs/nightshift-YYYY-MM-DD.log` |
 | Audit | `~/.local/share/nightshift/audit/audit-YYYY-MM-DD.jsonl` |
 | Run reports | `~/.local/share/nightshift/reports/run-*.md` |
-| Daemon stderr (foreground) | terminal |
-| Systemd stderr | `journalctl --user -u nightshift` |
+| Systemd service | `journalctl --user -u nightshift.service` |
 
 ## Common errors
 
@@ -44,15 +40,6 @@ Environment="PATH=/usr/local/bin:/usr/bin:%h/.local/bin"
 
 - Configure project paths that point at git repos
 - Don't pass `$HOME` as a project path
-
-### `failed to write PID file: file exists`
-
-Stale `~/.local/share/nightshift/nightshift.pid`. The daemon should detect + clean this, but if it doesn't:
-
-```bash
-rm ~/.local/share/nightshift/nightshift.pid
-nightshift daemon start
-```
 
 ### `could not read Username` (Jira clone)
 

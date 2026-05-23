@@ -24,7 +24,6 @@ import (
 	jiraconfig "github.com/cedricfarinazzo/nightshift/internal/jira"
 	"github.com/cedricfarinazzo/nightshift/internal/providers"
 	"github.com/cedricfarinazzo/nightshift/internal/reporting"
-	"github.com/cedricfarinazzo/nightshift/internal/scheduler"
 	"github.com/cedricfarinazzo/nightshift/internal/security"
 	"github.com/cedricfarinazzo/nightshift/internal/setup"
 	"github.com/cedricfarinazzo/nightshift/internal/tasks"
@@ -955,18 +954,18 @@ func (m *setupModel) View() string {
 			b.WriteString("\nPress Enter to apply.\n")
 		}
 	case stepDaemon:
-		b.WriteString(styleAccent.Render("Daemon setup"))
+		b.WriteString(styleAccent.Render("Service setup"))
 		b.WriteString("\n\n")
-		fmt.Fprintf(&b, "Service: %s\n", m.serviceType)
+		fmt.Fprintf(&b, "Service type: %s\n", m.serviceType)
 		if m.serviceState.installed {
 			b.WriteString("Status: installed\n")
 		} else {
 			b.WriteString("Status: not installed\n")
 		}
 		if m.serviceState.running {
-			b.WriteString("Daemon: running\n")
+			b.WriteString("Timer: active\n")
 		} else {
-			b.WriteString("Daemon: stopped\n")
+			b.WriteString("Timer: inactive\n")
 		}
 		b.WriteString("\nSelect action:\n")
 		for i, label := range m.daemonOptions() {
@@ -1477,7 +1476,7 @@ func (m *setupModel) applyScheduleEdit() error {
 	value := strings.TrimSpace(m.scheduleInput.Value())
 	switch m.scheduleCursor {
 	case 0:
-		if _, err := scheduler.ParseTimeOfDay(value); err != nil {
+		if _, err := parseTimeOfDay(value); err != nil {
 			return err
 		}
 		m.scheduleStart = value
@@ -1498,8 +1497,7 @@ func (m *setupModel) applyScheduleEdit() error {
 		}
 		m.scheduleMode = value
 	case 4:
-		test := scheduler.New()
-		if err := test.SetCron(value); err != nil {
+		if err := validateCronExpression(value); err != nil {
 			return err
 		}
 		m.scheduleCron = value
@@ -1515,7 +1513,7 @@ func (m *setupModel) applyScheduleDefaults() {
 	}
 
 	m.cfg.Schedule.Interval = m.scheduleInterval
-	start, _ := scheduler.ParseTimeOfDay(m.scheduleStart)
+	start, _ := parseTimeOfDay(m.scheduleStart)
 	interval, _ := time.ParseDuration(m.scheduleInterval)
 	end := computeWindowEnd(start, interval, m.scheduleCycles)
 	m.scheduleWindowEnd = end.String()
@@ -1528,26 +1526,32 @@ func (m *setupModel) applyScheduleDefaults() {
 
 func (m *setupModel) daemonOptions() []string {
 	if !m.serviceState.installed {
-		return []string{"Install and enable daemon", "Skip"}
+		return []string{"Install and enable timer", "Skip"}
 	}
-	return []string{"Start daemon", "Stop daemon", "Remove service", "Leave as-is"}
+	return []string{"Enable timer", "Disable timer", "Remove service", "Leave as-is"}
 }
 
 func (m *setupModel) applyDaemonAction(action string) error {
 	switch action {
-	case "Install and enable daemon":
+	case "Install and enable timer":
 		if err := installService(m.serviceType, m.cfg); err != nil {
 			return err
 		}
-		// Non-fatal: service is installed; start failure (e.g. systemd not reloaded yet) should not block wizard.
-		_ = runDaemonStart(nil, nil)
+		if m.serviceType == ServiceSystemd {
+			_ = exec.Command("systemctl", "--user", "enable", "--now", "nightshift.timer").Run()
+		}
 		return nil
-	case "Start daemon":
-		return runDaemonStart(nil, nil)
-	case "Stop daemon":
-		return runDaemonStop(nil, nil)
+	case "Enable timer":
+		if m.serviceType == ServiceSystemd {
+			return exec.Command("systemctl", "--user", "enable", "--now", "nightshift.timer").Run()
+		}
+		return nil
+	case "Disable timer":
+		if m.serviceType == ServiceSystemd {
+			return exec.Command("systemctl", "--user", "disable", "--now", "nightshift.timer").Run()
+		}
+		return nil
 	case "Remove service":
-		_ = runDaemonStop(nil, nil) // ignore if not running
 		return uninstallService(m.serviceType)
 	default:
 		return nil
@@ -1556,16 +1560,16 @@ func (m *setupModel) applyDaemonAction(action string) error {
 
 func (m *setupModel) finishSummaryLine() string {
 	switch m.daemonAction {
-	case "Stop daemon", "Remove service", "Skip":
-		return "Nightshift is configured, but the daemon is not running."
+	case "Disable timer", "Remove service", "Skip":
+		return "Nightshift is configured. Enable the timer to schedule automatic runs."
 	case "Leave as-is":
 		if m.serviceState.running {
-			return "Nightshift is configured and the daemon is running."
+			return "Nightshift is configured and the timer is active."
 		}
 		if m.serviceState.installed {
-			return "Nightshift is configured, but the daemon is stopped."
+			return "Nightshift is configured, but the timer is inactive."
 		}
-		return "Nightshift is configured, but no daemon service is installed."
+		return "Nightshift is configured, but no service is installed."
 	default:
 		return "Nightshift is configured and ready to run."
 	}
@@ -1573,24 +1577,24 @@ func (m *setupModel) finishSummaryLine() string {
 
 func (m *setupModel) finishDaemonStatus() string {
 	switch m.daemonAction {
-	case "Install and enable daemon":
-		return "Daemon status: installed and started."
-	case "Start daemon":
-		return "Daemon status: started."
-	case "Stop daemon":
-		return "Daemon status: stopped."
+	case "Install and enable timer":
+		return "Timer status: installed and enabled."
+	case "Enable timer":
+		return "Timer status: enabled."
+	case "Disable timer":
+		return "Timer status: disabled."
 	case "Remove service":
-		return "Daemon status: service removed."
+		return "Timer status: service removed."
 	case "Skip":
-		return "Daemon status: not installed."
+		return "Timer status: not installed."
 	case "Leave as-is":
 		if m.serviceState.running {
-			return "Daemon status: running (unchanged)."
+			return "Timer status: active (unchanged)."
 		}
 		if m.serviceState.installed {
-			return "Daemon status: installed but stopped (unchanged)."
+			return "Timer status: installed but inactive (unchanged)."
 		}
-		return "Daemon status: not installed."
+		return "Timer status: not installed."
 	default:
 		return ""
 	}
@@ -1618,18 +1622,18 @@ func (m *setupModel) finishExpectations() []string {
 	}
 
 	switch m.daemonAction {
-	case "Stop daemon", "Remove service", "Skip":
+	case "Disable timer", "Remove service", "Skip":
 		lines = append([]string{
-			"Nightshift will not run automatically until the daemon is started.",
+			"Nightshift will not run automatically until the timer is enabled.",
 			"Run manually: `nightshift run`.",
-			"Start the daemon later: `nightshift daemon start` (or re-run setup to install a service).",
+			"Enable the timer later: `systemctl --user enable --now nightshift.timer` (or re-run setup).",
 		}, lines...)
 	case "Leave as-is":
 		if !m.serviceState.running {
 			lines = append([]string{
-				"Nightshift will not run automatically until the daemon is started.",
+				"Nightshift will not run automatically until the timer is enabled.",
 				"Run manually: `nightshift run`.",
-				"Start the daemon later: `nightshift daemon start` (or re-run setup to install a service).",
+				"Enable the timer later: `systemctl --user enable --now nightshift.timer` (or re-run setup).",
 			}, lines...)
 		}
 	}
@@ -2308,7 +2312,7 @@ func renderScheduleFields(b *strings.Builder, m *setupModel) {
 		fmt.Fprintf(b, " %s %s\n", cursor, field)
 	}
 	if m.scheduleMode == "interval" {
-		start, errStart := scheduler.ParseTimeOfDay(m.scheduleStart)
+		start, errStart := parseTimeOfDay(m.scheduleStart)
 		interval, errInterval := time.ParseDuration(m.scheduleInterval)
 		if errStart == nil && errInterval == nil {
 			end := computeWindowEnd(start, interval, m.scheduleCycles)
@@ -2425,7 +2429,7 @@ func setupSteps(includePathStep bool) []setupStepInfo {
 		steps = append(steps, setupStepInfo{step: stepPath, label: "PATH"})
 	}
 	steps = append(steps,
-		setupStepInfo{step: stepDaemon, label: "Daemon"},
+		setupStepInfo{step: stepDaemon, label: "Service"},
 		setupStepInfo{step: stepFinish, label: "Finish"},
 	)
 	return steps
@@ -2451,14 +2455,14 @@ func renderSetupProgressBar(current, total, width int) string {
 	return "[" + filledPart + emptyPart + "]"
 }
 
-func computeWindowEnd(start scheduler.TimeOfDay, interval time.Duration, cycles int) scheduler.TimeOfDay {
+func computeWindowEnd(start timeOfDay, interval time.Duration, cycles int) timeOfDay {
 	if cycles <= 0 {
 		cycles = 3
 	}
 	total := interval * time.Duration(cycles)
 	startTime := time.Date(2000, 1, 1, start.Hour, start.Minute, 0, 0, time.Local)
 	endTime := startTime.Add(total)
-	return scheduler.TimeOfDay{Hour: endTime.Hour(), Minute: endTime.Minute()}
+	return timeOfDay{Hour: endTime.Hour(), Minute: endTime.Minute()}
 }
 
 func detectServiceState() (string, serviceState) {
@@ -2492,8 +2496,13 @@ func detectServiceState() (string, serviceState) {
 		}
 	}
 
-	running, _ := isDaemonRunning()
-	state.running = running
+	// Check if the systemd timer is active (best-effort; false on non-systemd hosts).
+	if service == ServiceSystemd {
+		out, err := exec.Command("systemctl", "--user", "is-active", systemdTimerName).CombinedOutput()
+		if err == nil {
+			state.running = strings.TrimSpace(string(out)) == "active"
+		}
+	}
 	return service, state
 }
 

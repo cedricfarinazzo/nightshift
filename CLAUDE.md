@@ -14,7 +14,7 @@ Repo: https://github.com/cedricfarinazzo/nightshift
 - **CLI framework**: `spf13/cobra` (commands) + `spf13/viper` (config)
 - **TUI**: `charmbracelet/bubbletea` + `bubbles` + `lipgloss`
 - **Database**: `modernc.org/sqlite` (pure Go, no CGO required)
-- **Scheduling**: `robfig/cron/v3`
+- **Scheduling**: systemd timer + `Type=oneshot` (no in-process scheduler since v1.0.0)
 - **Logging**: `rs/zerolog`
 - **Config format**: YAML
 - **Build/release**: `Makefile` + `goreleaser`
@@ -30,7 +30,7 @@ cmd/
   nightshift/           # Main CLI binary (cobra root)
     main.go             # Entry point; calls Execute()
     commands/
-      root.go           # Root cobra command; version = 0.3.4; global flags
+      root.go           # Root cobra command; version = 1.0.0; global flags
       run.go            # `nightshift run` — start a scheduled/manual agent run
       preview.go        # `nightshift preview` — dry-run: show what would run + cost
       preview_output.go # TUI rendering for preview command
@@ -40,7 +40,6 @@ cmd/
       stats.go          # `nightshift stats` — historical run stats
       status.go         # `nightshift status` — current run status
       report.go         # `nightshift report` — generate/show run reports
-      daemon.go         # `nightshift daemon` — run as background scheduler
       setup.go          # `nightshift setup` — interactive onboarding wizard; steps: schedule, budget,
                         # providers, model, effort, jira, compression (NEW), systemd, preview;
                         # compressionConfigFromApp() in helpers.go bridges config↔agents packages
@@ -142,10 +141,6 @@ internal/
     run_results.go      # RunResult types and aggregation
     summary.go          # Daily summary → ~/.local/share/nightshift/summaries/summary-YYYY-MM-DD.md
 
-  scheduler/            # Cron-based scheduling
-    scheduler.go        # Wraps robfig/cron with SkipIfStillRunning middleware (prevents concurrent fires);
-                        # reads schedule config; triggers runs
-
   security/             # Credential management — env vars only, never config files
     credentials.go      # CredentialManager: validates ANTHROPIC_API_KEY, OPENAI_API_KEY;
                         # masks values for display; never stores secrets
@@ -188,7 +183,7 @@ docs/                   # All documentation (plain markdown, no static-site gene
     agents.md           jira-pipeline.md    budget.md
     scheduling.md       bus-factor.md       troubleshooting.md
   operations/           # Running Nightshift as a long-lived service
-    daemon.md           systemd-install.md  logs-and-reports.md
+    systemd-install.md  logs-and-reports.md
     data-and-backup.md  security.md         release.md
   dev/                  # Internal / developer guides
     architecture.md            # Package map, layers, key design constraints
@@ -415,8 +410,8 @@ Agents MUST follow these rules:
 - **workDir git validation** — `orchestrator.RunTask()` calls `validateGitRepo(ctx, workDir)` before executing any task. Refuses to run if workDir is not inside a git repo, or if the repo root is `$HOME`. Prevents agents from running `git init` in unintended locations. Injectable via `WithGitValidator()` for tests.
 - **Branch save/restore in RunTask()** — `RunTask()` calls `CurrentBranch()` before executing and uses `defer checkoutBranch()` to restore it on exit (regardless of outcome). Prevents stacked branches when multiple tasks run sequentially. If `CurrentBranch` fails or returns "HEAD" (detached), no restore is attempted.
 - **Prompt split: compressible vs protected** — `ExecuteOptions.Prompt` is the compressible payload (task data only). `PromptPrefix` and `PromptSuffix` are never compressed. All critical instructions (output format, JSON schemas, behavioral rules) MUST go in `PromptSuffix`, not `Prompt`. Putting instructions in `Prompt` risks them being stripped by the compression agent.
-- **PID file is atomic** — `writePidFile()` uses `O_CREATE|O_EXCL` so only one daemon can start even under a race. If a stale PID file exists (process gone), it is removed and retried. Never use `O_TRUNC` for PID files.
-- **SkipIfStillRunning on cron** — `scheduler.go` wraps the cron instance with `cron.SkipIfStillRunning(cron.DiscardLogger)`. If a scheduled run exceeds its interval, the next fire is silently skipped rather than overlapping. This prevents unbounded goroutine growth on slow runs.
+- **No in-process scheduler (v1.0.0)** — `internal/scheduler/` and `cmd/nightshift/commands/daemon.go` were deleted in v1.0.0. Do not re-create them. Scheduling is now via systemd timer + `Type=oneshot`. `assertDaemonNotActive()` in `helpers.go` guards `nightshift run` and `nightshift jira run` against old daemon units still being active.
+- **`ScheduleConfig` is informational only** — the `schedule:` YAML block is kept for back-compat but no code reads it for scheduling. Never add `// Deprecated:` godoc tag to `ScheduleConfig` — staticcheck SA1019 will flag every usage site.
 - **`internal/providers` has no Execute/Name/Cost** — the `Provider` interface and its stubs were removed. `providers/` only tracks quota/usage (token counts, request counts). Do not add `Execute()` back; agent invocation belongs in `internal/agents/`.
 - **`handleExecuteResult` in util.go** — all three agents (claude, codex, copilot) share `handleExecuteResult()` for post-run logic. When adding a new agent, use this helper instead of duplicating exit-code/timeout/JSON-extraction logic.
 - **Future-sprint exclusion is always on** — `buildTodoJQL` always appends `AND (sprint not in futureSprints() OR sprint is EMPTY)`. The `OR sprint is EMPTY` arm is mandatory: Jira's `sprint not in futureSprints()` silently excludes issues with no sprint (NULL), which drops all Kanban board tickets. `futureSprints()` requires Jira Software license; Work Management projects will get a JQL error at runtime. There is no config flag to disable this.
@@ -424,7 +419,7 @@ Agents MUST follow these rules:
 - **Workspace state key** — in workspace mode, the repo clone path (not the configured repo name) is used as the state key for cooldown/staleness tracking. This means each fresh clone appears "new" to the staleness tracker, which is intentional: workspace runs always pick the highest-priority tasks.
 - **Workspace clone uses `.` as target** — `git clone <url> .` clones into the already-created `<root>/<name>_<runID>/` directory. The directory must exist and be empty before the clone.
 - **`CleanupStaleWorkspaces` walks dir contents for mtime** — on Linux, git operations update file mtimes inside a directory but not the directory entry's own mtime. `CleanupStaleWorkspaces` uses `filepath.WalkDir` to find the newest mtime across all files/subdirs inside each workspace. The directory entry mtime alone is unreliable and was the source of VC-83 (active workspaces deleted early). When writing tests for this, remember that `os.WriteFile` inside a dir updates the dir's own mtime — re-apply `os.Chtimes` on the dir after writing files if you need the dir entry to appear old.
-- **Daemon workspace mode (VC-87)** — when `workspace.root` is set, `runScheduledTasks` routes to `runScheduledWorkspacedTasks` instead of the project-path loop. Both `nightshift run` and daemon share `runRepoTasks()` for per-repo task execution. State key is always `rw.Name` (not `rw.Path`) in workspace mode. First daemon run after upgrading from a pre-VC-87 release will re-process all workspace repos once (old cooldowns were keyed on paths, new ones on names — safe, one extra run).
+- **Workspace mode (VC-87)** — when `workspace.root` is set, `nightshift run` routes to `workspacedRun()` instead of the project-path loop. `runRepoTasks()` handles per-repo task execution. State key is always `rw.Name` (not `rw.Path`) in workspace mode.
 - **`runRepoTasks` allowedTasks filter** — when `workspace.repos[*].tasks` is set, `runRepoTasks` filters selected tasks to only those types before execution. Empty/nil means no filter. Filter applied after selector, so cooldown/staleness scoring still runs on all tasks but only matching types are executed.
 - **Rejection forces re-validation on next run** — Rejection is posted by the orchestrator as a structured `CommentRejection` NightshiftComment (via `postPhaseComment`); `HandleInvalidTicket` only does the status transition. `detectResumeState` compares `GetLastCommentOfType(CommentRejection).Timestamp` against `GetLastCommentOfType(CommentValidation).Timestamp`: if rejection is newer, `hasValidation` is false and the ticket falls to `PhaseValidate` for re-evaluation. If acceptance is newer (user fixed ticket, later run passed), rejection is ignored. Root cause of FIN-31: prior `CommentValidation` from an older partial run caused `detectResumeState` to skip validation despite a newer rejection.
 - **`internal/analysis` uses functional-option exec injection (`WithGitRunner`)** — `gitExecFn` package-level var removed (VC-100). `NewGitParser(repoPath, analysis.WithGitRunner(fake))` pattern for tests; `t.Parallel()` safe. Remaining packages (`internal/jira/pr.go` `ghExec`, `internal/orchestrator` `ghExec`/`gitExec`, `internal/workspace` `gitExecFn`/`SetGitExecFn`) still use the old global-var pattern — tracked in follow-up tickets VC-106, VC-107, VC-108. Do NOT add `t.Parallel()` to tests in those packages until they are migrated.

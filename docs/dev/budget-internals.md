@@ -85,7 +85,7 @@ ok := ignoreBudget || capacity > 0
 
 `internal/snapshots/collector.go` periodically calls each provider's `Usage()` and persists to the `snapshots` table. Used for `nightshift budget history` and trend visualisation.
 
-Configure interval via daemon code (not exposed in config — fixed at 30m).
+Snapshot interval is fixed at 30m (not exposed in config).
 
 ## Adding a new provider
 

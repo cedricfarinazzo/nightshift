@@ -14,6 +14,41 @@ import (
 	"github.com/cedricfarinazzo/nightshift/internal/workspace"
 )
 
+// assertDaemonNotActive returns an error if the old nightshift daemon unit is
+// still running. Operators must stop it before using nightshift run / jira run
+// as oneshot commands to avoid conflicting concurrent executions.
+// No-ops when systemctl is not available (non-Linux or non-systemd hosts).
+func assertDaemonNotActive() error {
+	if _, err := exec.LookPath("systemctl"); err != nil {
+		return nil
+	}
+
+	// nightshift-daemon.service is unambiguously the old daemon unit name.
+	out, err := exec.Command("systemctl", "--user", "is-active", "nightshift-daemon.service").CombinedOutput()
+	if err == nil && strings.TrimSpace(string(out)) == "active" {
+		return fmt.Errorf(
+			"old nightshift daemon is active (nightshift-daemon.service); stop and disable it first:\n" +
+				"  systemctl --user disable --now nightshift-daemon.service nightshift.timer",
+		)
+	}
+
+	// nightshift.service may be the old daemon unit OR the new oneshot unit introduced in
+	// v1.0.0. Only abort when the unit's ExecStart contains "daemon" (old invocation style);
+	// the new oneshot unit runs "nightshift run --yes" and must not be blocked.
+	out, err = exec.Command("systemctl", "--user", "is-active", "nightshift.service").CombinedOutput()
+	if err == nil && strings.TrimSpace(string(out)) == "active" {
+		prop, propErr := exec.Command("systemctl", "--user", "show", "nightshift.service", "--property=ExecStart").CombinedOutput()
+		if propErr == nil && strings.Contains(string(prop), "daemon") {
+			return fmt.Errorf(
+				"old nightshift daemon is active (nightshift.service); stop and disable it first:\n" +
+					"  systemctl --user disable --now nightshift.service nightshift.timer",
+			)
+		}
+	}
+
+	return nil
+}
+
 // agentByName creates an agent for the given provider name.
 // Returns an error if the provider is unknown or its CLI is not in PATH.
 func agentByName(cfg *config.Config, provider string) (agents.Agent, error) {

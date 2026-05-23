@@ -14,7 +14,6 @@ import (
 	"github.com/cedricfarinazzo/nightshift/internal/config"
 	"github.com/cedricfarinazzo/nightshift/internal/db"
 	"github.com/cedricfarinazzo/nightshift/internal/orchestrator"
-	"github.com/cedricfarinazzo/nightshift/internal/scheduler"
 	"github.com/cedricfarinazzo/nightshift/internal/state"
 	"github.com/cedricfarinazzo/nightshift/internal/tasks"
 )
@@ -238,14 +237,12 @@ func buildPreviewResult(cfg *config.Config, database *db.DB, projects []string, 
 		return nil, fmt.Errorf("init state: %w", err)
 	}
 
-	sched, err := scheduler.NewFromConfig(&cfg.Schedule)
-	if err != nil {
-		return nil, fmt.Errorf("schedule config: %w", err)
-	}
-
-	nextRuns, err := sched.NextRuns(runs)
-	if err != nil {
-		return nil, fmt.Errorf("compute next runs: %w", err)
+	// Scheduling is now driven by systemd timers; preview shows N simulated runs
+	// at 24-hour intervals starting from now.
+	nextRuns := make([]time.Time, runs)
+	now := time.Now()
+	for i := range nextRuns {
+		nextRuns[i] = now.Add(time.Duration(i) * 24 * time.Hour)
 	}
 
 	budgetMgr := budget.NewManagerWithTracking(cfg)

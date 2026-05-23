@@ -58,11 +58,14 @@ type PromptCompressionConfig struct {
 	Threshold       int    `mapstructure:"threshold"` // min chars to trigger compression; default 3000
 }
 
-// ScheduleConfig defines when nightshift runs.
+// ScheduleConfig is retained for YAML back-compat but is no longer acted on
+// by any in-process scheduler. Scheduling is delegated to systemd timers
+// (OnCalendar=) or equivalent. Fields cron/interval are informational only
+// and may be removed in a future major version.
 type ScheduleConfig struct {
-	Cron        string        `mapstructure:"cron"`         // Cron expression (e.g., "0 2 * * *")
-	Interval    string        `mapstructure:"interval"`     // Alternative: duration (e.g., "1h")
-	Window      *WindowConfig `mapstructure:"window"`       // Optional time window constraint
+	Cron        string        `mapstructure:"cron"`         // informational; use systemd OnCalendar
+	Interval    string        `mapstructure:"interval"`     // informational; use systemd OnCalendar
+	Window      *WindowConfig `mapstructure:"window"`       // informational; no longer used
 	MaxProjects int           `mapstructure:"max_projects"` // Default max projects per run (0 = unlimited)
 	MaxTasks    int           `mapstructure:"max_tasks"`    // Default max tasks per project (0 = 1)
 }
@@ -352,7 +355,6 @@ var (
 	ErrInvalidMaxPercent = errors.New("max_percent must be between 1 and 100")
 	ErrInvalidLogLevel   = errors.New("log level must be debug, info, warn, or error")
 	ErrInvalidLogFormat  = errors.New("log format must be json or text")
-	ErrNoSchedule        = errors.New("either cron or interval must be specified")
 
 	ErrInvalidClaudeReasoningEffort  = errors.New("claude: invalid reasoning_effort; allowed: low, medium, high, xhigh, max")
 	ErrInvalidCopilotReasoningEffort = errors.New("copilot: invalid reasoning_effort; allowed: low, medium, high, xhigh")
@@ -495,17 +497,6 @@ func Validate(cfg *Config) error {
 	return nil
 }
 
-// ValidateForDaemon extends Validate with daemon-specific checks.
-// One-shot commands (e.g. `run`) should use Validate instead.
-func ValidateForDaemon(cfg *Config) error {
-	if err := Validate(cfg); err != nil {
-		return err
-	}
-	if cfg.Schedule.Cron == "" && cfg.Schedule.Interval == "" {
-		return ErrNoSchedule
-	}
-	return nil
-}
 
 func validateCustomTasks(tasks []CustomTaskConfig) error {
 	validCategories := map[string]bool{

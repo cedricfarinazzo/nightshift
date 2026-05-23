@@ -90,7 +90,7 @@ Refs: <TICKET-KEY>
 
 ## Cleanup
 
-`CleanupStaleWorkspaces(cfg)` — removes workspace dirs whose newest file activity (across all contained files and subdirs) is older than `cfg.CleanupAfterDays` days. Called from the daemon periodically.
+`CleanupStaleWorkspaces(cfg)` — removes workspace dirs whose newest file activity (across all contained files and subdirs) is older than `cfg.CleanupAfterDays` days. Called at the start of each `nightshift run`.
 
 **Staleness is determined by walking the entire workspace directory tree** and taking the newest mtime found among all entries. The workspace directory entry's own mtime is not used alone, because on Linux, git operations (clone, fetch, checkout, file writes) update file mtimes inside a directory without updating the directory entry's own mtime. Using the directory mtime alone would cause active workspaces to be falsely deleted.
 
@@ -116,20 +116,15 @@ For a true clean slate, move the ticket back to TODO and let `CleanupStaleWorksp
 
 `internal/workspace` manages clone-based isolated working directories for task runs configured via `workspace.root` + `workspace.repos` in the YAML config.
 
-### Daemon workspace mode (VC-87)
+### Workspace mode
 
-When `workspace.root` is set, both `nightshift run` **and** `nightshift daemon` clone repos into fresh workspaces before executing tasks:
+When `workspace.root` is set, `nightshift run` clones repos into fresh workspaces before executing tasks:
 
 - `nightshift run` → `workspacedRun()` in `cmd/nightshift/commands/run.go`
-- `nightshift daemon` → `runScheduledWorkspacedTasks()` in `cmd/nightshift/commands/daemon.go`
-
-Both paths share `runRepoTasks()` for the per-repo task execution loop.
 
 ### State key
 
 In workspace mode, the **repo name** (`workspace.repos[*].name`) is used as the state key for cooldown and staleness tracking — not the UUID-suffixed clone path. This ensures cooldowns persist across runs even though each run creates a fresh clone directory.
-
-This applies consistently in both `nightshift run` and `nightshift daemon`.
 
 ### Per-repo task filter
 
@@ -137,4 +132,4 @@ This applies consistently in both `nightshift run` and `nightshift daemon`.
 
 ### Exported test helper
 
-`workspace.SetGitExecFn(fn)` replaces the internal git executor and returns the previous function for `defer`-based restoration. Used in `cmd/nightshift/commands/daemon_test.go` to avoid real git clones in tests.
+`workspace.SetGitExecFn(fn)` replaces the internal git executor and returns the previous function for `defer`-based restoration. Used in tests to avoid real git clones.

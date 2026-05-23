@@ -58,10 +58,11 @@ nightshift jira run --max-tickets 5        # cap
 nightshift jira run --skip-validation      # save tokens, skip the scoring LLM
 ```
 
-Or let the daemon handle it on schedule:
+Or let the systemd timer handle it on schedule:
 
 ```bash
-nightshift daemon start
+nightshift install systemd
+systemctl --user enable --now nightshift-jira.timer
 ```
 
 ### 7. Wake up to PRs

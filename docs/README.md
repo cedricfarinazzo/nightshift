@@ -23,7 +23,7 @@ For people running Nightshift on their own machine.
 - [Configuration](user/configuration.md) — YAML reference
 - [Tasks](user/tasks.md) — maintenance task catalog
 - [Budget](user/budget.md) — how budget enforcement works
-- [Scheduling](user/scheduling.md) — cron vs interval
+- [Scheduling](user/scheduling.md) — systemd timer setup
 - [Bus Factor](user/bus-factor.md) — code ownership analysis
 - [Troubleshooting](user/troubleshooting.md) — common errors
 
@@ -31,8 +31,7 @@ For people running Nightshift on their own machine.
 
 For running Nightshift as a long-lived service.
 
-- [Daemon Mode](operations/daemon.md) — start/stop/status, PID files
-- [Systemd Install](operations/systemd-install.md) — install unit, autostart
+- [Systemd Install](operations/systemd-install.md) — install timer+oneshot unit, autostart
 - [Kubernetes CronJob](operations/kubernetes-cronjob.md) — deploy as a K8s CronJob with Kustomize manifests
 - [Logs & Reports](operations/logs-and-reports.md) — where output lives, retention
 - [Data & Backup](operations/data-and-backup.md) — DB layout, what to back up
@@ -59,7 +58,7 @@ For people hacking on the Nightshift codebase.
 - [Budget Internals](dev/budget-internals.md) — capacity formula, provider APIs
 - [Tasks Internals](dev/tasks-internals.md) — `TaskDefinition`, selector scoring
 - [State & Snapshots](dev/state-and-snapshots.md) — RunRecord, staleness, snapshots
-- [Scheduling Internals](dev/scheduling-internals.md) — cron wrapper, `SkipIfStillRunning`
+- [Scheduling Internals](dev/scheduling-internals.md) — systemd timer model, no in-process scheduler
 - [Reporting](dev/reporting.md) — run reports, daily summaries
 - [Logging](dev/logging.md) — zerolog setup, log queries
 - [Bus Factor](dev/bus-factor.md) — HHI, Gini, risk levels
