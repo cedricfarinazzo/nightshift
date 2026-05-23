@@ -22,20 +22,30 @@ func assertDaemonNotActive() error {
 	if _, err := exec.LookPath("systemctl"); err != nil {
 		return nil
 	}
-	units := []string{"nightshift-daemon.service", "nightshift.service"}
-	for _, unit := range units {
-		out, err := exec.Command("systemctl", "--user", "is-active", unit).CombinedOutput()
-		if err != nil {
-			continue
-		}
-		if strings.TrimSpace(string(out)) == "active" {
+
+	// nightshift-daemon.service is unambiguously the old daemon unit name.
+	out, err := exec.Command("systemctl", "--user", "is-active", "nightshift-daemon.service").CombinedOutput()
+	if err == nil && strings.TrimSpace(string(out)) == "active" {
+		return fmt.Errorf(
+			"old nightshift daemon is active (nightshift-daemon.service); stop and disable it first:\n" +
+				"  systemctl --user disable --now nightshift-daemon.service nightshift.timer",
+		)
+	}
+
+	// nightshift.service may be the old daemon unit OR the new oneshot unit introduced in
+	// v1.0.0. Only abort when the unit's ExecStart contains "daemon" (old invocation style);
+	// the new oneshot unit runs "nightshift run --yes" and must not be blocked.
+	out, err = exec.Command("systemctl", "--user", "is-active", "nightshift.service").CombinedOutput()
+	if err == nil && strings.TrimSpace(string(out)) == "active" {
+		prop, propErr := exec.Command("systemctl", "--user", "show", "nightshift.service", "--property=ExecStart").CombinedOutput()
+		if propErr == nil && strings.Contains(string(prop), "daemon") {
 			return fmt.Errorf(
-				"old nightshift daemon is active (%s); stop and disable it first:\n"+
-					"  systemctl --user disable --now %s nightshift.timer",
-				unit, unit,
+				"old nightshift daemon is active (nightshift.service); stop and disable it first:\n" +
+					"  systemctl --user disable --now nightshift.service nightshift.timer",
 			)
 		}
 	}
+
 	return nil
 }
 

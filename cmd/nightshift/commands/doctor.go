@@ -102,18 +102,16 @@ func checkTimer(add func(string, checkStatus, string)) {
 		add("timer", statusWarn, "systemd not available; use cron or launchd to schedule nightshift run")
 		return
 	}
-	out, err := exec.Command("systemctl", "--user", "list-timers", "--all", "--no-pager", systemdTimerName).CombinedOutput()
-	if err != nil {
-		add("timer", statusWarn, "unable to query systemd timers")
+	out, err := exec.Command("systemctl", "--user", "is-active", systemdTimerName).CombinedOutput()
+	if err == nil && strings.TrimSpace(string(out)) == "active" {
+		add("timer", statusOK, "nightshift.timer active")
 		return
 	}
-	text := strings.TrimSpace(string(out))
-	if strings.Contains(text, systemdTimerName) {
-		if strings.Contains(text, "active") {
-			add("timer", statusOK, "nightshift.timer active")
-		} else {
-			add("timer", statusWarn, "nightshift.timer installed but not active")
-		}
+	// Timer not active — check whether the unit file is installed at all.
+	home, _ := os.UserHomeDir()
+	timerPath := filepath.Join(home, ".config", "systemd", "user", systemdTimerName)
+	if _, statErr := os.Stat(timerPath); statErr == nil {
+		add("timer", statusWarn, "nightshift.timer installed but not active")
 		return
 	}
 	add("timer", statusWarn, "nightshift.timer not installed; run: nightshift install systemd")

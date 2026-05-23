@@ -236,7 +236,7 @@ func installSystemd(binaryPath string, cfg *config.Config) error {
 
 	// Generate service and timer content
 	service := generateSystemdService(binaryPath)
-	timer := generateSystemdTimer(cfg)
+	timer, timerWarn := generateSystemdTimer(cfg)
 
 	// Stop and disable existing service if present
 	_ = exec.Command("systemctl", "--user", "stop", "nightshift.timer").Run()
@@ -259,6 +259,9 @@ func installSystemd(binaryPath string, cfg *config.Config) error {
 
 	fmt.Printf("Installed systemd service: %s\n", servicePath)
 	fmt.Printf("Installed systemd timer: %s\n", timerPath)
+	if timerWarn != "" {
+		fmt.Printf("Warning: %s\n", timerWarn)
+	}
 	fmt.Println("Timer enabled and started (or run: systemctl --user enable --now nightshift.timer)")
 	return nil
 }
@@ -286,12 +289,13 @@ WantedBy=default.target
 `, binaryPath)
 }
 
-// generateSystemdTimer creates the systemd timer unit content
-func generateSystemdTimer(cfg *config.Config) string {
-	// Convert cron to systemd OnCalendar format or use interval
-	onCalendar := convertCronToSystemd(cfg)
-
-	return fmt.Sprintf(`[Unit]
+// generateSystemdTimer creates the systemd timer unit content.
+// Returns (unitContent, warning). warning is non-empty when the cron expression
+// could not be auto-converted; the caller should print it and instruct the user
+// to edit OnCalendar= in the generated timer file manually.
+func generateSystemdTimer(cfg *config.Config) (string, string) {
+	onCalendar, warn := convertCronToSystemd(cfg)
+	content := fmt.Sprintf(`[Unit]
 Description=Nightshift scheduled runs
 
 [Timer]
@@ -301,51 +305,71 @@ Persistent=true
 [Install]
 WantedBy=timers.target
 `, onCalendar)
+	return content, warn
 }
 
-// convertCronToSystemd converts a cron expression to systemd OnCalendar format.
-// When interval mode is used, the timer fires once at the window start time (if set)
-// or at 02:00 — nightshift's internal cycle loop handles the interval repetition.
-func convertCronToSystemd(cfg *config.Config) string {
+// isSimpleCronField reports whether f is "*" or a plain non-negative integer.
+// Step notation (*/n), ranges (a-b), and lists (a,b) are not simple.
+func isSimpleCronField(f string) bool {
+	if f == "*" {
+		return true
+	}
+	for _, c := range f {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return len(f) > 0
+}
+
+// convertCronToSystemd converts a cron expression to a systemd OnCalendar value.
+// Returns (onCalendar, warning). When the expression contains step notation, ranges,
+// lists, or non-trivial day-of-week constraints that cannot be faithfully represented
+// in OnCalendar format, it falls back to "*-*-* 02:00:00" and returns a non-empty
+// warning asking the user to edit the timer file manually.
+func convertCronToSystemd(cfg *config.Config) (string, string) {
 	if cfg.Schedule.Interval != "" {
 		// Use window start if configured, else default to 02:00.
 		if cfg.Schedule.Window != nil && cfg.Schedule.Window.Start != "" {
 			start := cfg.Schedule.Window.Start // e.g. "09:00"
 			parts := strings.SplitN(start, ":", 2)
 			if len(parts) == 2 {
-				return fmt.Sprintf("*-*-* %s:%s:00", parts[0], parts[1])
+				return fmt.Sprintf("*-*-* %s:%s:00", parts[0], parts[1]), ""
 			}
 		}
-		return "*-*-* 02:00:00"
+		return "*-*-* 02:00:00", ""
 	}
 
 	if cfg.Schedule.Cron == "" {
-		// Default: 2 AM daily
-		return "*-*-* 02:00:00"
+		return "*-*-* 02:00:00", ""
 	}
 
-	// Parse simple cron format: minute hour day month dow
 	parts := strings.Fields(cfg.Schedule.Cron)
 	if len(parts) != 5 {
-		return "*-*-* 02:00:00" // Default fallback
+		return "*-*-* 02:00:00", fmt.Sprintf(
+			"cron expression %q has %d fields (expected 5); defaulting to 02:00 daily — "+
+				"edit OnCalendar= in %s manually",
+			cfg.Schedule.Cron, len(parts), systemdTimerName,
+		)
 	}
 
-	minute := parts[0]
-	hour := parts[1]
-	dayOfMonth := parts[2]
-	month := parts[3]
-	// dayOfWeek := parts[4] // systemd handles this differently
+	minute, hour, dayOfMonth, month, dayOfWeek := parts[0], parts[1], parts[2], parts[3], parts[4]
 
-	// Build OnCalendar string
-	// Format: DayOfWeek Year-Month-Day Hour:Minute:Second
-	if dayOfMonth == "*" {
-		dayOfMonth = "*"
-	}
-	if month == "*" {
-		month = "*"
+	// Only handle expressions where every field is "*" or a plain integer.
+	// Anything else (step notation like */6, ranges like 1-5, lists like 1,3,5,
+	// or non-trivial day-of-week) cannot be converted without losing information.
+	hasDOW := dayOfWeek != "*" && dayOfWeek != "0" && dayOfWeek != "7"
+	if !isSimpleCronField(minute) || !isSimpleCronField(hour) ||
+		!isSimpleCronField(dayOfMonth) || !isSimpleCronField(month) || hasDOW {
+		return "*-*-* 02:00:00", fmt.Sprintf(
+			"cron expression %q contains step notation, ranges, lists, or day-of-week "+
+				"constraints that cannot be auto-converted to OnCalendar format; "+
+				"defaulting to 02:00 daily — edit OnCalendar= in %s manually",
+			cfg.Schedule.Cron, systemdTimerName,
+		)
 	}
 
-	return fmt.Sprintf("*-%s-%s %s:%s:00", month, dayOfMonth, hour, minute)
+	return fmt.Sprintf("*-%s-%s %s:%s:00", month, dayOfMonth, hour, minute), ""
 }
 
 // installCron adds a crontab entry for nightshift
