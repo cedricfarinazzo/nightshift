@@ -61,7 +61,7 @@ func TestScoreTask(t *testing.T) {
 	}
 
 	// Record a recent run to reduce staleness bonus
-	st.RecordTaskRun(project, string(TaskLintFix))
+	_ = st.RecordTaskRun(project, string(TaskLintFix))
 	score = sel.ScoreTask(TaskLintFix, project)
 	if score > 0.1 {
 		t.Errorf("expected score ~0 for just-run task, got %f", score)
@@ -196,7 +196,7 @@ func TestFilterUnassigned(t *testing.T) {
 
 	// Mark one as assigned
 	taskID := makeTaskID(string(TaskLintFix), project)
-	st.MarkAssigned(taskID, project, string(TaskLintFix))
+	_ = st.MarkAssigned(taskID, project, string(TaskLintFix))
 
 	got := sel.FilterUnassigned(tasks, project)
 	if len(got) != 2 {
@@ -235,8 +235,8 @@ func TestSelectNext(t *testing.T) {
 
 	project := "/test/project"
 	// Run both tasks recently to remove staleness bonus
-	st.RecordTaskRun(project, string(TaskLintFix))
-	st.RecordTaskRun(project, string(TaskDocsBackfill))
+	_ = st.RecordTaskRun(project, string(TaskLintFix))
+	_ = st.RecordTaskRun(project, string(TaskDocsBackfill))
 
 	// Select should return highest priority task
 	task := sel.SelectNext(project)
@@ -307,9 +307,9 @@ func TestSelectTopN(t *testing.T) {
 
 	project := "/test/project"
 	// Run all tasks recently
-	st.RecordTaskRun(project, string(TaskLintFix))
-	st.RecordTaskRun(project, string(TaskDocsBackfill))
-	st.RecordTaskRun(project, string(TaskDeadCode))
+	_ = st.RecordTaskRun(project, string(TaskLintFix))
+	_ = st.RecordTaskRun(project, string(TaskDocsBackfill))
+	_ = st.RecordTaskRun(project, string(TaskDeadCode))
 
 	// Get top 2
 	tasks := sel.SelectTopN(project, 2)
@@ -351,7 +351,7 @@ func TestStalenessAffectsSelection(t *testing.T) {
 	project := "/test/project"
 
 	// Run lint-fix recently, never run docs-backfill
-	st.RecordTaskRun(project, string(TaskLintFix))
+	_ = st.RecordTaskRun(project, string(TaskLintFix))
 	// docs-backfill never run -> higher staleness bonus
 
 	task := sel.SelectNext(project)
@@ -377,7 +377,7 @@ func TestSetContextMentions(t *testing.T) {
 	sel, st := setupTestSelector(t)
 
 	project := "/test/project"
-	st.RecordTaskRun(project, string(TaskLintFix))
+	_ = st.RecordTaskRun(project, string(TaskLintFix))
 
 	// Without context mentions
 	score1 := sel.ScoreTask(TaskLintFix, project)
@@ -395,7 +395,7 @@ func TestSetTaskSources(t *testing.T) {
 	sel, st := setupTestSelector(t)
 
 	project := "/test/project"
-	st.RecordTaskRun(project, string(TaskLintFix))
+	_ = st.RecordTaskRun(project, string(TaskLintFix))
 
 	// Without task sources
 	score1 := sel.ScoreTask(TaskLintFix, project)
@@ -415,7 +415,7 @@ func TestFilterByCooldown_OnCooldown(t *testing.T) {
 	project := "/test/project"
 
 	// Record a recent run - task has 24h default interval so it's on cooldown
-	st.RecordTaskRun(project, string(TaskLintFix))
+	_ = st.RecordTaskRun(project, string(TaskLintFix))
 
 	tasks := []TaskDefinition{
 		{Type: TaskLintFix, DefaultInterval: 24 * time.Hour},
@@ -453,7 +453,7 @@ func TestFilterByCooldown_ZeroIntervalIncluded(t *testing.T) {
 	sel, st := setupTestSelector(t)
 
 	project := "/test/project"
-	st.RecordTaskRun(project, string(TaskLintFix))
+	_ = st.RecordTaskRun(project, string(TaskLintFix))
 
 	tasks := []TaskDefinition{
 		{Type: TaskLintFix, DefaultInterval: 0}, // No interval = always included
@@ -479,7 +479,7 @@ func TestFilterByCooldown_ConfigOverride(t *testing.T) {
 	sel := NewSelector(cfg, st)
 
 	project := "/test/project"
-	st.RecordTaskRun(project, string(TaskLintFix))
+	_ = st.RecordTaskRun(project, string(TaskLintFix))
 
 	// Small sleep to ensure 1ns has passed
 	time.Sleep(time.Microsecond)
@@ -511,7 +511,7 @@ func TestIsOnCooldown(t *testing.T) {
 	}
 
 	// Record run - should be on cooldown now
-	st.RecordTaskRun(project, string(TaskLintFix))
+	_ = st.RecordTaskRun(project, string(TaskLintFix))
 	onCooldown, remaining, interval = sel.IsOnCooldown(TaskLintFix, project)
 	if !onCooldown {
 		t.Error("IsOnCooldown() = false for just-run task, want true")
@@ -563,9 +563,9 @@ func TestSelectRandom(t *testing.T) {
 
 	project := "/test/project"
 	// Run all tasks recently to remove staleness bonus
-	st.RecordTaskRun(project, string(TaskLintFix))
-	st.RecordTaskRun(project, string(TaskDocsBackfill))
-	st.RecordTaskRun(project, string(TaskDeadCode))
+	_ = st.RecordTaskRun(project, string(TaskLintFix))
+	_ = st.RecordTaskRun(project, string(TaskDocsBackfill))
+	_ = st.RecordTaskRun(project, string(TaskDeadCode))
 
 	// Small sleep to ensure 1ns intervals have passed
 	time.Sleep(time.Microsecond)
@@ -609,7 +609,7 @@ func TestSelectRandomSingleTask(t *testing.T) {
 	sel := NewSelector(cfg, st)
 
 	project := "/test/project"
-	st.RecordTaskRun(project, string(TaskLintFix))
+	_ = st.RecordTaskRun(project, string(TaskLintFix))
 	time.Sleep(time.Microsecond)
 
 	// With only one eligible task, SelectRandom should always return it
@@ -641,7 +641,7 @@ func TestSelectRandomRespectsFilters(t *testing.T) {
 	project := "/test/project"
 
 	// Put lint-fix on cooldown (24h default interval)
-	st.RecordTaskRun(project, string(TaskLintFix))
+	_ = st.RecordTaskRun(project, string(TaskLintFix))
 
 	// SelectRandom should only return docs-backfill (lint-fix on cooldown)
 	for i := 0; i < 20; i++ {
@@ -674,7 +674,7 @@ func TestSelectNextRespectssCooldown(t *testing.T) {
 	project := "/test/project"
 
 	// Record lint-fix run (puts it on 24h cooldown)
-	st.RecordTaskRun(project, string(TaskLintFix))
+	_ = st.RecordTaskRun(project, string(TaskLintFix))
 
 	// SelectNext should skip lint-fix (on cooldown) and return docs-backfill
 	task := sel.SelectNext(project)
@@ -702,7 +702,7 @@ func TestIsAssigned_StateIntegration(t *testing.T) {
 		t.Error("should not be assigned before assignment")
 	}
 
-	st.MarkAssigned(taskID, "/proj", "lint-fix")
+	_ = st.MarkAssigned(taskID, "/proj", "lint-fix")
 	if !sel.IsAssigned(taskID) {
 		t.Error("should be assigned after Assign")
 	}

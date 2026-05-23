@@ -2,6 +2,7 @@
 package tasks
 
 import (
+	"fmt"
 	"math/rand/v2"
 	"sort"
 	"time"
@@ -229,7 +230,10 @@ func (s *Selector) SelectAndAssign(project string) *ScoredTask {
 
 	// Mark as assigned to prevent duplicate selection
 	taskID := makeTaskID(string(task.Definition.Type), project)
-	s.state.MarkAssigned(taskID, project, string(task.Definition.Type))
+	if err := s.state.MarkAssigned(taskID, project, string(task.Definition.Type)); err != nil {
+		// Log and continue — task runs but won't be locked against concurrent selection.
+		fmt.Printf("state: SelectAndAssign mark assigned: %v\n", err)
+	}
 
 	return task
 }

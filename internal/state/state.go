@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -63,7 +62,7 @@ func New(database *db.DB) (*State, error) {
 }
 
 // RecordProjectRun marks a project as having been processed.
-func (s *State) RecordProjectRun(projectPath string) {
+func (s *State) RecordProjectRun(projectPath string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -76,12 +75,13 @@ func (s *State) RecordProjectRun(projectPath string) {
 		now,
 	)
 	if err != nil {
-		log.Printf("state: record project run: %v", err)
+		return fmt.Errorf("state: record project run: %w", err)
 	}
+	return nil
 }
 
 // RecordTaskRun marks a specific task type as having run for a project.
-func (s *State) RecordTaskRun(projectPath, taskType string) {
+func (s *State) RecordTaskRun(projectPath, taskType string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -95,8 +95,9 @@ func (s *State) RecordTaskRun(projectPath, taskType string) {
 		now,
 	)
 	if err != nil {
-		log.Printf("state: record task run: %v", err)
+		return fmt.Errorf("state: record task run: %w", err)
 	}
+	return nil
 }
 
 // WasProcessedToday returns true if the project was already processed today.
@@ -109,7 +110,7 @@ func (s *State) WasProcessedToday(projectPath string) bool {
 	var lastRun sql.NullTime
 	if err := row.Scan(&lastRun); err != nil {
 		if !errors.Is(err, sql.ErrNoRows) {
-			log.Printf("state: query last_run: %v", err)
+			fmt.Printf("state: query last_run: %v\n", err)
 		}
 		return false
 	}
@@ -129,7 +130,7 @@ func (s *State) LastProjectRun(projectPath string) time.Time {
 	var lastRun sql.NullTime
 	if err := row.Scan(&lastRun); err != nil {
 		if !errors.Is(err, sql.ErrNoRows) {
-			log.Printf("state: query last_run: %v", err)
+			fmt.Printf("state: query last_run: %v\n", err)
 		}
 		return time.Time{}
 	}
@@ -149,7 +150,7 @@ func (s *State) LastTaskRun(projectPath, taskType string) time.Time {
 	var lastRun time.Time
 	if err := row.Scan(&lastRun); err != nil {
 		if !errors.Is(err, sql.ErrNoRows) {
-			log.Printf("state: query task last_run: %v", err)
+			fmt.Printf("state: query task last_run: %v\n", err)
 		}
 		return time.Time{}
 	}
@@ -184,7 +185,7 @@ func (s *State) StalenessBonus(projectPath, taskType string) float64 {
 }
 
 // MarkAssigned marks a task as assigned/in-progress.
-func (s *State) MarkAssigned(taskID, project, taskType string) {
+func (s *State) MarkAssigned(taskID, project, taskType string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -197,8 +198,9 @@ func (s *State) MarkAssigned(taskID, project, taskType string) {
 		time.Now(),
 	)
 	if err != nil {
-		log.Printf("state: mark assigned: %v", err)
+		return fmt.Errorf("state: mark assigned: %w", err)
 	}
+	return nil
 }
 
 // IsAssigned checks if a task is currently assigned.
@@ -210,7 +212,7 @@ func (s *State) IsAssigned(taskID string) bool {
 	var one int
 	if err := row.Scan(&one); err != nil {
 		if !errors.Is(err, sql.ErrNoRows) {
-			log.Printf("state: check assigned: %v", err)
+			fmt.Printf("state: check assigned: %v\n", err)
 		}
 		return false
 	}
@@ -226,7 +228,7 @@ func (s *State) GetAssigned(taskID string) (AssignedTask, bool) {
 	var task AssignedTask
 	if err := row.Scan(&task.TaskID, &task.Project, &task.TaskType, &task.AssignedAt); err != nil {
 		if !errors.Is(err, sql.ErrNoRows) {
-			log.Printf("state: get assigned: %v", err)
+			fmt.Printf("state: get assigned: %v\n", err)
 		}
 		return AssignedTask{}, false
 	}
@@ -234,42 +236,42 @@ func (s *State) GetAssigned(taskID string) (AssignedTask, bool) {
 }
 
 // ClearAssigned removes a task from the assigned list.
-func (s *State) ClearAssigned(taskID string) {
+func (s *State) ClearAssigned(taskID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	if _, err := s.db.SQL().Exec(`DELETE FROM assigned_tasks WHERE task_id = ?`, taskID); err != nil {
-		log.Printf("state: clear assigned: %v", err)
+		return fmt.Errorf("state: clear assigned: %w", err)
 	}
+	return nil
 }
 
 // ClearAllAssigned removes all assigned tasks (e.g., on daemon restart).
-func (s *State) ClearAllAssigned() {
+func (s *State) ClearAllAssigned() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	if _, err := s.db.SQL().Exec(`DELETE FROM assigned_tasks`); err != nil {
-		log.Printf("state: clear all assigned: %v", err)
+		return fmt.Errorf("state: clear all assigned: %w", err)
 	}
+	return nil
 }
 
 // ClearStaleAssignments removes assignments older than the given duration.
-func (s *State) ClearStaleAssignments(maxAge time.Duration) int {
+func (s *State) ClearStaleAssignments(maxAge time.Duration) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	cutoff := time.Now().Add(-maxAge)
 	result, err := s.db.SQL().Exec(`DELETE FROM assigned_tasks WHERE assigned_at < ?`, cutoff)
 	if err != nil {
-		log.Printf("state: clear stale assignments: %v", err)
-		return 0
+		return 0, fmt.Errorf("state: clear stale assignments: %w", err)
 	}
 	cleared, err := result.RowsAffected()
 	if err != nil {
-		log.Printf("state: rows affected: %v", err)
-		return 0
+		return 0, fmt.Errorf("state: rows affected: %w", err)
 	}
-	return int(cleared)
+	return int(cleared), nil
 }
 
 // ListAssigned returns all currently assigned tasks.
@@ -279,7 +281,7 @@ func (s *State) ListAssigned() []AssignedTask {
 
 	rows, err := s.db.SQL().Query(`SELECT task_id, project, task_type, assigned_at FROM assigned_tasks ORDER BY assigned_at ASC`)
 	if err != nil {
-		log.Printf("state: list assigned: %v", err)
+		fmt.Printf("state: list assigned: %v\n", err)
 		return nil
 	}
 	defer func() { _ = rows.Close() }()
@@ -288,13 +290,13 @@ func (s *State) ListAssigned() []AssignedTask {
 	for rows.Next() {
 		var task AssignedTask
 		if err := rows.Scan(&task.TaskID, &task.Project, &task.TaskType, &task.AssignedAt); err != nil {
-			log.Printf("state: scan assigned: %v", err)
+			fmt.Printf("state: scan assigned: %v\n", err)
 			continue
 		}
 		tasks = append(tasks, task)
 	}
 	if err := rows.Err(); err != nil {
-		log.Printf("state: list assigned rows: %v", err)
+		fmt.Printf("state: list assigned rows: %v\n", err)
 	}
 	return tasks
 }
@@ -311,25 +313,25 @@ func (s *State) GetProjectState(projectPath string) *ProjectState {
 	var runCount int
 	if err := row.Scan(&path, &lastRun, &runCount); err != nil {
 		if !errors.Is(err, sql.ErrNoRows) {
-			log.Printf("state: get project state: %v", err)
+			fmt.Printf("state: get project state: %v\n", err)
 		}
 		return nil
 	}
 
-	state := &ProjectState{
+	st := &ProjectState{
 		Path:        path,
 		LastRun:     time.Time{},
 		TaskHistory: make(map[string]time.Time),
 		RunCount:    runCount,
 	}
 	if lastRun.Valid {
-		state.LastRun = lastRun.Time
+		st.LastRun = lastRun.Time
 	}
 
 	rows, err := s.db.SQL().Query(`SELECT task_type, last_run FROM task_history WHERE project_path = ?`, projectPath)
 	if err != nil {
-		log.Printf("state: load task history: %v", err)
-		return state
+		fmt.Printf("state: load task history: %v\n", err)
+		return st
 	}
 	defer func() { _ = rows.Close() }()
 
@@ -337,16 +339,16 @@ func (s *State) GetProjectState(projectPath string) *ProjectState {
 		var taskType string
 		var last time.Time
 		if err := rows.Scan(&taskType, &last); err != nil {
-			log.Printf("state: scan task history: %v", err)
+			fmt.Printf("state: scan task history: %v\n", err)
 			continue
 		}
-		state.TaskHistory[taskType] = last
+		st.TaskHistory[taskType] = last
 	}
 	if err := rows.Err(); err != nil {
-		log.Printf("state: task history rows: %v", err)
+		fmt.Printf("state: task history rows: %v\n", err)
 	}
 
-	return state
+	return st
 }
 
 // ProjectCount returns the number of tracked projects.
@@ -357,7 +359,7 @@ func (s *State) ProjectCount() int {
 	row := s.db.SQL().QueryRow(`SELECT COUNT(*) FROM projects`)
 	var count int
 	if err := row.Scan(&count); err != nil {
-		log.Printf("state: project count: %v", err)
+		fmt.Printf("state: project count: %v\n", err)
 		return 0
 	}
 	return count
@@ -390,7 +392,7 @@ func expandPath(path string) string {
 }
 
 // AddRunRecord adds a run record to history.
-func (s *State) AddRunRecord(record RunRecord) {
+func (s *State) AddRunRecord(record RunRecord) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -407,8 +409,7 @@ func (s *State) AddRunRecord(record RunRecord) {
 	}
 	tasksJSON, err := json.Marshal(tasks)
 	if err != nil {
-		log.Printf("state: marshal tasks: %v", err)
-		return
+		return fmt.Errorf("state: marshal tasks: %w", err)
 	}
 
 	var endTime sql.NullTime
@@ -418,8 +419,7 @@ func (s *State) AddRunRecord(record RunRecord) {
 
 	tx, err := s.db.SQL().Begin()
 	if err != nil {
-		log.Printf("state: begin run insert: %v", err)
-		return
+		return fmt.Errorf("state: begin run insert: %w", err)
 	}
 
 	_, err = tx.Exec(
@@ -438,19 +438,18 @@ func (s *State) AddRunRecord(record RunRecord) {
 	)
 	if err != nil {
 		_ = tx.Rollback()
-		log.Printf("state: insert run_history: %v", err)
-		return
+		return fmt.Errorf("state: insert run_history: %w", err)
 	}
 
 	if _, err := tx.Exec(`DELETE FROM run_history WHERE id NOT IN (SELECT id FROM run_history ORDER BY start_time DESC LIMIT 100)`); err != nil {
 		_ = tx.Rollback()
-		log.Printf("state: prune run_history: %v", err)
-		return
+		return fmt.Errorf("state: prune run_history: %w", err)
 	}
 
 	if err := tx.Commit(); err != nil {
-		log.Printf("state: commit run_history: %v", err)
+		return fmt.Errorf("state: commit run_history: %w", err)
 	}
+	return nil
 }
 
 // GetRunHistory returns the last N run records (most recent first).
@@ -471,7 +470,7 @@ func (s *State) GetRunHistory(n int) []RunRecord {
 		limit,
 	)
 	if err != nil {
-		log.Printf("state: get run history: %v", err)
+		fmt.Printf("state: get run history: %v\n", err)
 		return nil
 	}
 	defer func() { _ = rows.Close() }()
@@ -482,7 +481,7 @@ func (s *State) GetRunHistory(n int) []RunRecord {
 		var tasksJSON string
 		var endTime sql.NullTime
 		if err := rows.Scan(&record.ID, &record.StartTime, &endTime, &record.Provider, &record.Project, &tasksJSON, &record.TokensUsed, &record.Status, &record.Error, &record.Branch); err != nil {
-			log.Printf("state: scan run history: %v", err)
+			fmt.Printf("state: scan run history: %v\n", err)
 			continue
 		}
 		if endTime.Valid {
@@ -490,14 +489,14 @@ func (s *State) GetRunHistory(n int) []RunRecord {
 		}
 		if tasksJSON != "" {
 			if err := json.Unmarshal([]byte(tasksJSON), &record.Tasks); err != nil {
-				log.Printf("state: unmarshal tasks: %v", err)
+				fmt.Printf("state: unmarshal tasks: %v\n", err)
 				continue
 			}
 		}
 		result = append(result, record)
 	}
 	if err := rows.Err(); err != nil {
-		log.Printf("state: run history rows: %v", err)
+		fmt.Printf("state: run history rows: %v\n", err)
 	}
 	return result
 }
@@ -520,7 +519,7 @@ func (s *State) GetTodayRuns() []RunRecord {
 		endOfDay,
 	)
 	if err != nil {
-		log.Printf("state: get today runs: %v", err)
+		fmt.Printf("state: get today runs: %v\n", err)
 		return nil
 	}
 	defer func() { _ = rows.Close() }()
@@ -531,7 +530,7 @@ func (s *State) GetTodayRuns() []RunRecord {
 		var tasksJSON string
 		var endTime sql.NullTime
 		if err := rows.Scan(&record.ID, &record.StartTime, &endTime, &record.Provider, &record.Project, &tasksJSON, &record.TokensUsed, &record.Status, &record.Error, &record.Branch); err != nil {
-			log.Printf("state: scan today runs: %v", err)
+			fmt.Printf("state: scan today runs: %v\n", err)
 			continue
 		}
 		if endTime.Valid {
@@ -539,14 +538,14 @@ func (s *State) GetTodayRuns() []RunRecord {
 		}
 		if tasksJSON != "" {
 			if err := json.Unmarshal([]byte(tasksJSON), &record.Tasks); err != nil {
-				log.Printf("state: unmarshal tasks: %v", err)
+				fmt.Printf("state: unmarshal tasks: %v\n", err)
 				continue
 			}
 		}
 		result = append(result, record)
 	}
 	if err := rows.Err(); err != nil {
-		log.Printf("state: today runs rows: %v", err)
+		fmt.Printf("state: today runs rows: %v\n", err)
 	}
 	return result
 }
