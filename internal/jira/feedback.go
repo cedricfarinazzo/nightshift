@@ -37,18 +37,22 @@ func (o *Orchestrator) ProcessFeedback(ctx context.Context, ticket Ticket, ws *W
 	if o.fnCommitAndPush == nil {
 		o.fnCommitAndPush = CommitAndPush
 	}
+	if o.prClient == nil {
+		o.prClient = NewPRClient()
+	}
 	if o.fnFindPR == nil {
 		o.fnFindPR = func(ctx context.Context, repoPath, branch string) (*PRInfo, error) {
-			return findExistingPR(ctx, repoPath, branch)
+			return o.prClient.findExistingPR(ctx, repoPath, branch)
 		}
 	}
 	if o.fnFetchReviews == nil {
-		o.fnFetchReviews = FetchPRReviewComments
+		o.fnFetchReviews = func(ctx context.Context, repoPath, prURL string) (*PRReviewState, error) {
+			return o.prClient.FetchPRReviewComments(ctx, repoPath, prURL)
+		}
 	}
 	if o.fnPostPRComment == nil {
 		o.fnPostPRComment = func(ctx context.Context, repoPath, prURL, body string) error {
-			_, err := ghExec(ctx, repoPath, "pr", "comment", prURL, "--body", body)
-			return err
+			return o.prClient.PostPRComment(ctx, repoPath, prURL, body)
 		}
 	}
 

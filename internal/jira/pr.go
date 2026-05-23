@@ -72,23 +72,69 @@ type PRComment struct {
 	CreatedAt time.Time
 }
 
+// GHRunner executes gh CLI commands in a repository directory.
+type GHRunner interface {
+	Run(ctx context.Context, repoPath string, args ...string) (string, error)
+}
+
+// execGHRunner is the default GHRunner using os/exec.
+type execGHRunner struct{}
+
+func (execGHRunner) Run(ctx context.Context, repoPath string, args ...string) (string, error) {
+	cmd := exec.CommandContext(ctx, "gh", args...)
+	cmd.Dir = repoPath
+	out, err := cmd.CombinedOutput()
+	trimmed := strings.TrimSpace(string(out))
+	if err != nil {
+		subcommand := strings.Join(args, " ")
+		if trimmed != "" {
+			return "", fmt.Errorf("gh %s failed: %s: %w", subcommand, trimmed, err)
+		}
+		return "", fmt.Errorf("gh %s failed: %w", subcommand, err)
+	}
+	return trimmed, nil
+}
+
+// PROption configures a PRClient.
+type PROption func(*PRClient)
+
+// WithGHRunner overrides the GHRunner used by the PRClient.
+func WithGHRunner(r GHRunner) PROption {
+	return func(p *PRClient) { p.runner = r }
+}
+
+// PRClient executes GitHub PR operations via the gh CLI.
+type PRClient struct {
+	runner GHRunner
+}
+
+// NewPRClient creates a PRClient with the given options.
+// Defaults to the system gh CLI.
+func NewPRClient(opts ...PROption) *PRClient {
+	p := &PRClient{runner: execGHRunner{}}
+	for _, o := range opts {
+		o(p)
+	}
+	return p
+}
+
 // CreateOrUpdatePR creates a GitHub PR for the given ticket and repo, or updates it if one
 // already exists targeting the same head branch. jiraSite is the Atlassian site hostname or
 // full base URL (e.g. "sedinfra" or "https://sedinfra.atlassian.net") used to build the
 // Jira browse link in the PR body.
-func CreateOrUpdatePR(ctx context.Context, repo RepoWorkspace, ticket Ticket, jiraSite string) (*PRInfo, error) {
+func (p *PRClient) CreateOrUpdatePR(ctx context.Context, repo RepoWorkspace, ticket Ticket, jiraSite string) (*PRInfo, error) {
 	title := prTitle(ticket)
 	body := buildPRBody(ticket, jiraSite)
 
 	// Check whether a PR already exists for this branch.
-	existing, err := findExistingPR(ctx, repo.Path, repo.Branch)
+	existing, err := p.findExistingPR(ctx, repo.Path, repo.Branch)
 	if err != nil {
 		return nil, fmt.Errorf("jira: pr: check existing: %w", err)
 	}
 
 	if existing != nil {
 		// Update existing PR.
-		_, err = ghExec(ctx, repo.Path, "pr", "edit", fmt.Sprintf("%d", existing.Number),
+		_, err = p.runner.Run(ctx, repo.Path, "pr", "edit", fmt.Sprintf("%d", existing.Number),
 			"--title", title, "--body", body)
 		if err != nil {
 			return nil, fmt.Errorf("jira: pr: edit: %w", err)
@@ -101,7 +147,7 @@ func CreateOrUpdatePR(ctx context.Context, repo RepoWorkspace, ticket Ticket, ji
 	}
 
 	// Create new PR.
-	out, err := ghExec(ctx, repo.Path, "pr", "create",
+	out, err := p.runner.Run(ctx, repo.Path, "pr", "create",
 		"--title", title,
 		"--body", body,
 		"--base", repo.BaseBranch,
@@ -114,7 +160,7 @@ func CreateOrUpdatePR(ctx context.Context, repo RepoWorkspace, ticket Ticket, ji
 	prURL := lastLine(out)
 
 	// Fetch number from the newly created PR.
-	info, err := fetchPRInfo(ctx, repo.Path, prURL)
+	info, err := p.fetchPRInfo(ctx, repo.Path, prURL)
 	if err != nil {
 		return nil, fmt.Errorf("jira: pr: fetch info after create: %w", err)
 	}
@@ -125,54 +171,11 @@ func CreateOrUpdatePR(ctx context.Context, repo RepoWorkspace, ticket Ticket, ji
 	return info, nil
 }
 
-// jiraBrowseURL returns the Jira browse URL for a ticket key. jiraSite may be a bare
-// hostname ("sedinfra"), a hostname with domain ("sedinfra.atlassian.net"), or a full URL
-// ("https://sedinfra.atlassian.net"). Returns an empty string when jiraSite is empty.
-func jiraBrowseURL(jiraSite, ticketKey string) string {
-	base := strings.TrimSpace(jiraSite)
-	if base == "" {
-		return ""
-	}
-	if !strings.HasPrefix(base, "http://") && !strings.HasPrefix(base, "https://") {
-		// bare hostname — check if it looks like just a subdomain (e.g. "sedinfra")
-		if !strings.Contains(base, ".") {
-			base = base + ".atlassian.net"
-		}
-		base = "https://" + base
-	}
-	base = strings.TrimRight(base, "/")
-	return fmt.Sprintf("%s/browse/%s", base, ticketKey)
-}
-
-// buildPRBody constructs the PR description body for a Jira ticket. jiraSite is passed to
-// jiraBrowseURL to build the Jira ticket link; see jiraBrowseURL for accepted formats.
-func buildPRBody(ticket Ticket, jiraSite string) string {
-	// Jira browse link: https://<site>.atlassian.net/browse/<key>
-	var b strings.Builder
-	fmt.Fprintf(&b, "## %s — %s\n\n", ticket.Key, ticket.Summary)
-	if browseURL := jiraBrowseURL(jiraSite, ticket.Key); browseURL != "" {
-		fmt.Fprintf(&b, "**Jira ticket:** %s\n\n", browseURL)
-	}
-	if ticket.Description != "" {
-		b.WriteString("### Description\n\n")
-		b.WriteString(ticket.Description)
-		b.WriteString("\n\n")
-	}
-	if ticket.AcceptanceCriteria != "" {
-		b.WriteString("### Acceptance Criteria\n\n")
-		b.WriteString(ticket.AcceptanceCriteria)
-		b.WriteString("\n\n")
-	}
-	b.WriteString("---\n")
-	b.WriteString("*Generated by [Nightshift](https://github.com/cedricfarinazzo/nightshift) — automated agent*\n")
-	return b.String()
-}
-
 // FetchPRReviewComments fetches the current review state for a PR using `gh pr view --json`
 // and appends inline review thread comments (with resolved status) via the GitHub GraphQL API.
 // It also populates FailingChecks with any failing GitHub status checks on the PR head commit.
-func FetchPRReviewComments(ctx context.Context, repoPath, prURL string) (*PRReviewState, error) {
-	out, err := ghExec(ctx, repoPath, "pr", "view", prURL,
+func (p *PRClient) FetchPRReviewComments(ctx context.Context, repoPath, prURL string) (*PRReviewState, error) {
+	out, err := p.runner.Run(ctx, repoPath, "pr", "view", prURL,
 		"--json", "url,state,reviewDecision,reviews,comments,number,headRefOid")
 	if err != nil {
 		return nil, fmt.Errorf("jira: pr: fetch review state: %w", err)
@@ -183,7 +186,7 @@ func FetchPRReviewComments(ctx context.Context, repoPath, prURL string) (*PRRevi
 	}
 
 	// Fetch inline review thread comments with isResolved via GraphQL.
-	inline, err := fetchReviewThreads(ctx, repoPath, rs.Number)
+	inline, err := p.fetchReviewThreads(ctx, repoPath, rs.Number)
 	if err != nil {
 		logging.Get().Warnf("jira: pr: fetch review threads for PR #%d (%s) in repo %s: %v", rs.Number, prURL, repoPath, err)
 	}
@@ -193,7 +196,7 @@ func FetchPRReviewComments(ctx context.Context, repoPath, prURL string) (*PRRevi
 
 	// Fetch failing GitHub status checks — non-fatal; log and continue on error.
 	// Pass the head SHA from the initial query to avoid a duplicate gh pr view call.
-	checks, err := FetchPRCheckRuns(ctx, repoPath, rs.Number, rs.HeadRefOid)
+	checks, err := p.FetchPRCheckRuns(ctx, repoPath, rs.Number, rs.HeadRefOid)
 	if err != nil {
 		logging.Get().Warnf("jira: pr: fetch check-runs for PR #%d (%s) in repo %s: %v", rs.Number, prURL, repoPath, err)
 	} else {
@@ -201,7 +204,7 @@ func FetchPRReviewComments(ctx context.Context, repoPath, prURL string) (*PRRevi
 	}
 
 	// Detect merge conflicts — non-fatal; log and continue on error.
-	conflict, err := HasMergeConflict(ctx, repoPath, rs.Number)
+	conflict, err := p.HasMergeConflict(ctx, repoPath, rs.Number)
 	if err != nil {
 		logging.Get().Warnf("jira: pr: fetch mergeable for PR #%d (%s) in repo %s: %v", rs.Number, prURL, repoPath, err)
 	} else {
@@ -213,8 +216,8 @@ func FetchPRReviewComments(ctx context.Context, repoPath, prURL string) (*PRRevi
 
 // HasMergeConflict returns true when the PR's mergeable state is "CONFLICTING".
 // UNKNOWN (GitHub hasn't computed it yet) is treated as non-blocking and returns false.
-func HasMergeConflict(ctx context.Context, repoPath string, prNumber int) (bool, error) {
-	out, err := ghExec(ctx, repoPath, "pr", "view", fmt.Sprintf("%d", prNumber),
+func (p *PRClient) HasMergeConflict(ctx context.Context, repoPath string, prNumber int) (bool, error) {
+	out, err := p.runner.Run(ctx, repoPath, "pr", "view", fmt.Sprintf("%d", prNumber),
 		"--json", "mergeable", "--jq", ".mergeable")
 	if err != nil {
 		return false, fmt.Errorf("gh pr view mergeable: %w", err)
@@ -225,7 +228,7 @@ func HasMergeConflict(ctx context.Context, repoPath string, prNumber int) (bool,
 // FetchPRCheckRuns fetches GitHub check-run results for the head commit of a PR and returns
 // only those that completed with a failing conclusion (failure, timed_out, cancelled, or action_required).
 // If sha is non-empty, it is used directly; otherwise, the head commit SHA is fetched via gh pr view.
-func FetchPRCheckRuns(ctx context.Context, repoPath string, prNumber int, sha ...string) ([]CheckRun, error) {
+func (p *PRClient) FetchPRCheckRuns(ctx context.Context, repoPath string, prNumber int, sha ...string) ([]CheckRun, error) {
 	if prNumber == 0 {
 		return nil, nil
 	}
@@ -236,7 +239,7 @@ func FetchPRCheckRuns(ctx context.Context, repoPath string, prNumber int, sha ..
 		commitSha = sha[0]
 	} else {
 		// Resolve the head commit SHA for this PR.
-		shaOut, err := ghExec(ctx, repoPath, "pr", "view", fmt.Sprintf("%d", prNumber),
+		shaOut, err := p.runner.Run(ctx, repoPath, "pr", "view", fmt.Sprintf("%d", prNumber),
 			"--json", "headRefOid", "--jq", ".headRefOid")
 		if err != nil {
 			return nil, fmt.Errorf("gh pr view headRefOid: %w", err)
@@ -248,12 +251,99 @@ func FetchPRCheckRuns(ctx context.Context, repoPath string, prNumber int, sha ..
 		return nil, fmt.Errorf("empty head SHA for PR #%d", prNumber)
 	}
 
-	out, err := ghExec(ctx, repoPath, "api",
+	out, err := p.runner.Run(ctx, repoPath, "api",
 		fmt.Sprintf("repos/{owner}/{repo}/commits/%s/check-runs?per_page=100", commitSha))
 	if err != nil {
 		return nil, fmt.Errorf("gh api check-runs: %w", err)
 	}
 	return parseCheckRuns(out)
+}
+
+// PostPRComment posts a comment body to a GitHub PR.
+func (p *PRClient) PostPRComment(ctx context.Context, repoPath, prURL, body string) error {
+	_, err := p.runner.Run(ctx, repoPath, "pr", "comment", prURL, "--body", body)
+	return err
+}
+
+// fetchReviewThreads fetches per-line review thread comments via the GitHub GraphQL API.
+// Each comment carries the isResolved and isOutdated status of its parent thread.
+func (p *PRClient) fetchReviewThreads(ctx context.Context, repoPath string, prNumber int) ([]PRComment, error) {
+	if prNumber == 0 {
+		return nil, nil
+	}
+	query := `query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$number){reviewThreads(first:100){nodes{isResolved isOutdated comments(first:20){nodes{author{login}body path line createdAt}}}}}}}`
+	out, err := p.runner.Run(ctx, repoPath, "api", "graphql",
+		"-F", "owner={owner}",
+		"-F", "repo={repo}",
+		"-F", fmt.Sprintf("number=%d", prNumber),
+		"-f", fmt.Sprintf("query=%s", query))
+	if err != nil {
+		return nil, fmt.Errorf("gh graphql review threads: %w", err)
+	}
+	return parseReviewThreads(out)
+}
+
+// findExistingPR checks whether a PR already exists for the given branch.
+// Returns nil if none is found.
+func (p *PRClient) findExistingPR(ctx context.Context, repoPath, branch string) (*PRInfo, error) {
+	out, err := p.runner.Run(ctx, repoPath, "pr", "list",
+		"--head", branch,
+		"--state", "open",
+		"--json", "number,url",
+		"--limit", "1")
+	if err != nil {
+		return nil, fmt.Errorf("gh pr list: %w", err)
+	}
+	var prs []struct {
+		Number int    `json:"number"`
+		URL    string `json:"url"`
+	}
+	if err := json.Unmarshal([]byte(out), &prs); err != nil {
+		return nil, fmt.Errorf("parse pr list: %w", err)
+	}
+	if len(prs) == 0 {
+		return nil, nil
+	}
+	return &PRInfo{Number: prs[0].Number, URL: prs[0].URL}, nil
+}
+
+// fetchPRInfo retrieves number and URL for a PR by its URL.
+func (p *PRClient) fetchPRInfo(ctx context.Context, repoPath, prURL string) (*PRInfo, error) {
+	out, err := p.runner.Run(ctx, repoPath, "pr", "view", prURL, "--json", "number,url")
+	if err != nil {
+		return nil, fmt.Errorf("gh pr view: %w", err)
+	}
+	var v struct {
+		Number int    `json:"number"`
+		URL    string `json:"url"`
+	}
+	if err := json.Unmarshal([]byte(out), &v); err != nil {
+		return nil, fmt.Errorf("parse pr view: %w", err)
+	}
+	return &PRInfo{Number: v.Number, URL: v.URL}, nil
+}
+
+// Package-level shims delegate to a default PRClient.
+// For runner injection in tests, use NewPRClient(WithGHRunner(...)).Method(...) directly.
+
+// CreateOrUpdatePR creates a GitHub PR for the given ticket and repo, or updates it if one already exists.
+func CreateOrUpdatePR(ctx context.Context, repo RepoWorkspace, ticket Ticket, jiraSite string) (*PRInfo, error) {
+	return NewPRClient().CreateOrUpdatePR(ctx, repo, ticket, jiraSite)
+}
+
+// FetchPRReviewComments fetches the current review state for a PR.
+func FetchPRReviewComments(ctx context.Context, repoPath, prURL string) (*PRReviewState, error) {
+	return NewPRClient().FetchPRReviewComments(ctx, repoPath, prURL)
+}
+
+// HasMergeConflict returns true when the PR's mergeable state is "CONFLICTING".
+func HasMergeConflict(ctx context.Context, repoPath string, prNumber int) (bool, error) {
+	return NewPRClient().HasMergeConflict(ctx, repoPath, prNumber)
+}
+
+// FetchPRCheckRuns fetches failing GitHub check-run results for the head commit of a PR.
+func FetchPRCheckRuns(ctx context.Context, repoPath string, prNumber int, sha ...string) ([]CheckRun, error) {
+	return NewPRClient().FetchPRCheckRuns(ctx, repoPath, prNumber, sha...)
 }
 
 // parseCheckRuns decodes the GitHub check-runs API response and returns only entries
@@ -289,24 +379,6 @@ func parseCheckRuns(raw string) ([]CheckRun, error) {
 		}
 	}
 	return runs, nil
-}
-
-// fetchReviewThreads fetches per-line review thread comments via the GitHub GraphQL API.
-// Each comment carries the isResolved and isOutdated status of its parent thread.
-func fetchReviewThreads(ctx context.Context, repoPath string, prNumber int) ([]PRComment, error) {
-	if prNumber == 0 {
-		return nil, nil
-	}
-	query := `query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$number){reviewThreads(first:100){nodes{isResolved isOutdated comments(first:20){nodes{author{login}body path line createdAt}}}}}}}`
-	out, err := ghExec(ctx, repoPath, "api", "graphql",
-		"-F", "owner={owner}",
-		"-F", "repo={repo}",
-		"-F", fmt.Sprintf("number=%d", prNumber),
-		"-f", fmt.Sprintf("query=%s", query))
-	if err != nil {
-		return nil, fmt.Errorf("gh graphql review threads: %w", err)
-	}
-	return parseReviewThreads(out)
 }
 
 // parseReviewThreads parses the GraphQL response for review threads.
@@ -417,61 +489,47 @@ func prTitle(ticket Ticket) string {
 	return fmt.Sprintf("[%s] %s", ticket.Key, ticket.Summary)
 }
 
-// findExistingPR checks whether a PR already exists for the given branch.
-// Returns nil if none is found.
-func findExistingPR(ctx context.Context, repoPath, branch string) (*PRInfo, error) {
-	out, err := ghExec(ctx, repoPath, "pr", "list",
-		"--head", branch,
-		"--state", "open",
-		"--json", "number,url",
-		"--limit", "1")
-	if err != nil {
-		return nil, fmt.Errorf("gh pr list: %w", err)
+// jiraBrowseURL returns the Jira browse URL for a ticket key. jiraSite may be a bare
+// hostname ("sedinfra"), a hostname with domain ("sedinfra.atlassian.net"), or a full URL
+// ("https://sedinfra.atlassian.net"). Returns an empty string when jiraSite is empty.
+func jiraBrowseURL(jiraSite, ticketKey string) string {
+	base := strings.TrimSpace(jiraSite)
+	if base == "" {
+		return ""
 	}
-	var prs []struct {
-		Number int    `json:"number"`
-		URL    string `json:"url"`
-	}
-	if err := json.Unmarshal([]byte(out), &prs); err != nil {
-		return nil, fmt.Errorf("parse pr list: %w", err)
-	}
-	if len(prs) == 0 {
-		return nil, nil
-	}
-	return &PRInfo{Number: prs[0].Number, URL: prs[0].URL}, nil
-}
-
-// fetchPRInfo retrieves number and URL for a PR by its URL.
-func fetchPRInfo(ctx context.Context, repoPath, prURL string) (*PRInfo, error) {
-	out, err := ghExec(ctx, repoPath, "pr", "view", prURL, "--json", "number,url")
-	if err != nil {
-		return nil, fmt.Errorf("gh pr view: %w", err)
-	}
-	var v struct {
-		Number int    `json:"number"`
-		URL    string `json:"url"`
-	}
-	if err := json.Unmarshal([]byte(out), &v); err != nil {
-		return nil, fmt.Errorf("parse pr view: %w", err)
-	}
-	return &PRInfo{Number: v.Number, URL: v.URL}, nil
-}
-
-// ghExec runs a gh command in repoPath and returns trimmed combined output.
-// It is a variable so tests can substitute a fake implementation.
-var ghExec = func(ctx context.Context, repoPath string, args ...string) (string, error) {
-	cmd := exec.CommandContext(ctx, "gh", args...)
-	cmd.Dir = repoPath
-	out, err := cmd.CombinedOutput()
-	trimmed := strings.TrimSpace(string(out))
-	if err != nil {
-		subcommand := strings.Join(args, " ")
-		if trimmed != "" {
-			return "", fmt.Errorf("gh %s failed: %s: %w", subcommand, trimmed, err)
+	if !strings.HasPrefix(base, "http://") && !strings.HasPrefix(base, "https://") {
+		// bare hostname — check if it looks like just a subdomain (e.g. "sedinfra")
+		if !strings.Contains(base, ".") {
+			base = base + ".atlassian.net"
 		}
-		return "", fmt.Errorf("gh %s failed: %w", subcommand, err)
+		base = "https://" + base
 	}
-	return trimmed, nil
+	base = strings.TrimRight(base, "/")
+	return fmt.Sprintf("%s/browse/%s", base, ticketKey)
+}
+
+// buildPRBody constructs the PR description body for a Jira ticket. jiraSite is passed to
+// jiraBrowseURL to build the Jira ticket link; see jiraBrowseURL for accepted formats.
+func buildPRBody(ticket Ticket, jiraSite string) string {
+	// Jira browse link: https://<site>.atlassian.net/browse/<key>
+	var b strings.Builder
+	fmt.Fprintf(&b, "## %s — %s\n\n", ticket.Key, ticket.Summary)
+	if browseURL := jiraBrowseURL(jiraSite, ticket.Key); browseURL != "" {
+		fmt.Fprintf(&b, "**Jira ticket:** %s\n\n", browseURL)
+	}
+	if ticket.Description != "" {
+		b.WriteString("### Description\n\n")
+		b.WriteString(ticket.Description)
+		b.WriteString("\n\n")
+	}
+	if ticket.AcceptanceCriteria != "" {
+		b.WriteString("### Acceptance Criteria\n\n")
+		b.WriteString(ticket.AcceptanceCriteria)
+		b.WriteString("\n\n")
+	}
+	b.WriteString("---\n")
+	b.WriteString("*Generated by [Nightshift](https://github.com/cedricfarinazzo/nightshift) — automated agent*\n")
+	return b.String()
 }
 
 // lastLine returns the last non-empty line of s.

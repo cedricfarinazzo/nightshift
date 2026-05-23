@@ -620,15 +620,6 @@ func TestE2E_VC8_ProcessTicket_WithStubAgents(t *testing.T) {
 		implAgent:       ia,
 		fnHasChanges:    HasChanges,
 		fnCommitAndPush: CommitAndPush,
-		fnCreatePR:      CreateOrUpdatePR,
-		fnFindPR: func(ctx context.Context, repoPath, branch string) (*PRInfo, error) {
-			return findExistingPR(ctx, repoPath, branch)
-		},
-		fnFetchReviews: FetchPRReviewComments,
-		fnPostPRComment: func(ctx context.Context, repoPath, prURL, body string) error {
-			_, err := ghExec(ctx, repoPath, "pr", "comment", prURL, "--body", body)
-			return err
-		},
 	}
 
 	// Empty workspace — skips commit/PR phases entirely.

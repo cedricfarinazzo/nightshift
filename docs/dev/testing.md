@@ -141,21 +141,32 @@ func TestSomething(t *testing.T) {
 }
 ```
 
-Packages still using package-level vars (`ghExec` in `internal/jira/pr.go`, `gitExec` in `internal/orchestrator`, `gitExecFn`/`SetGitExecFn` in `internal/workspace`) are tracked for migration — see follow-up ticket VC-101.
+Packages migrated to this pattern:
+- `internal/analysis` — `GitRunner` / `WithGitRunner` (VC-100, reference implementation)
+- `internal/jira` — `GHRunner` / `WithGHRunner` / `PRClient` (VC-106); `t.Parallel()` is now safe in all PR tests
 
-### Legacy: ghExec (internal/jira/pr.go — not yet migrated)
+Packages still using package-level vars (`gitExec` in `internal/orchestrator`, `gitExecFn`/`SetGitExecFn` in `internal/workspace`) are tracked for migration — see VC-107, VC-108.
 
-PR creation tests stub the `gh` CLI:
+### internal/jira PR tests
+
+Use `NewPRClient(WithGHRunner(fakeGHRunner(...)))` and call the method under test:
 
 ```go
-oldExec := ghExec
-defer func() { ghExec = oldExec }()
-ghExec = func(ctx context.Context, args ...string) (string, error) {
-    return `{"url":"https://github.com/x/y/pull/1"}`, nil
+type fakeGHRunner func(ctx context.Context, repoPath string, args ...string) (string, error)
+
+func (f fakeGHRunner) Run(ctx context.Context, repoPath string, args ...string) (string, error) {
+    return f(ctx, repoPath, args...)
+}
+
+func TestSomething(t *testing.T) {
+    t.Parallel()
+    pc := NewPRClient(WithGHRunner(fakeGHRunner(func(_ context.Context, _ string, args ...string) (string, error) {
+        return `[{"number":1,"url":"https://github.com/x/y/pull/1"}]`, nil
+    })))
+    pr, err := pc.findExistingPR(context.Background(), "/repo", "feature/branch")
+    ...
 }
 ```
-
-**Do not add `t.Parallel()` to tests using this pattern** — they race on the shared global. Migrate to interface injection (see above) before parallelising.
 
 ## Time control
 

@@ -93,6 +93,9 @@ type Orchestrator struct {
 
 	compression *agents.CompressConfig // optional LLM prompt compression
 
+	// prClient drives all gh CLI PR operations; injectable for testing via WithPRClient.
+	prClient *PRClient
+
 	// ops are injectable for testing; set to real functions by NewOrchestrator.
 	fnHasChanges             func(ctx context.Context, repoPath string) (bool, error)
 	fnCommitAndPush          func(ctx context.Context, repoPath, message string) error
@@ -163,27 +166,38 @@ func WithCompression(c *agents.CompressConfig) OrchestratorOption {
 	return func(o *Orchestrator) { o.compression = c }
 }
 
+// WithPRClient overrides the PRClient used for all gh CLI PR operations.
+// Use in tests to inject a fake GHRunner: WithPRClient(NewPRClient(WithGHRunner(fake))).
+func WithPRClient(pc *PRClient) OrchestratorOption {
+	return func(o *Orchestrator) { o.prClient = pc }
+}
+
 // NewOrchestrator creates an Orchestrator with the given client, config, project, and options.
 func NewOrchestrator(client *Client, cfg JiraConfig, proj ProjectConfig, opts ...OrchestratorOption) *Orchestrator {
 	o := &Orchestrator{
-		client:          client,
-		cfg:             cfg,
-		proj:            proj,
-		log:             logging.Component("jira.orchestrator"),
-		fnHasChanges:    HasChanges,
-		fnCommitAndPush: CommitAndPush,
-		fnCreatePR:      CreateOrUpdatePR,
-		fnFindPR: func(ctx context.Context, repoPath, branch string) (*PRInfo, error) {
-			return findExistingPR(ctx, repoPath, branch)
-		},
-		fnFetchReviews: FetchPRReviewComments,
-		fnPostPRComment: func(ctx context.Context, repoPath, prURL, body string) error {
-			_, err := ghExec(ctx, repoPath, "pr", "comment", prURL, "--body", body)
-			return err
-		},
+		client:                   client,
+		cfg:                      cfg,
+		proj:                     proj,
+		log:                      logging.Component("jira.orchestrator"),
+		prClient:                 NewPRClient(),
+		fnHasChanges:             HasChanges,
+		fnCommitAndPush:          CommitAndPush,
 		fnBranchAheadOfBase:      BranchAheadOfBase,
 		fnLocalBranchAheadOfBase: LocalBranchAheadOfBase,
 		fnPushBranch:             PushBranch,
+	}
+	// These closures capture o so that a subsequent WithPRClient option takes effect.
+	o.fnCreatePR = func(ctx context.Context, repo RepoWorkspace, ticket Ticket, jiraSite string) (*PRInfo, error) {
+		return o.prClient.CreateOrUpdatePR(ctx, repo, ticket, jiraSite)
+	}
+	o.fnFindPR = func(ctx context.Context, repoPath, branch string) (*PRInfo, error) {
+		return o.prClient.findExistingPR(ctx, repoPath, branch)
+	}
+	o.fnFetchReviews = func(ctx context.Context, repoPath, prURL string) (*PRReviewState, error) {
+		return o.prClient.FetchPRReviewComments(ctx, repoPath, prURL)
+	}
+	o.fnPostPRComment = func(ctx context.Context, repoPath, prURL, body string) error {
+		return o.prClient.PostPRComment(ctx, repoPath, prURL, body)
 	}
 	for _, opt := range opts {
 		opt(o)
@@ -307,21 +321,27 @@ func (o *Orchestrator) ProcessTicket(ctx context.Context, ticket Ticket, ws *Wor
 	if o.fnCommitAndPush == nil {
 		o.fnCommitAndPush = CommitAndPush
 	}
+	if o.prClient == nil {
+		o.prClient = NewPRClient()
+	}
 	if o.fnCreatePR == nil {
-		o.fnCreatePR = CreateOrUpdatePR
+		o.fnCreatePR = func(ctx context.Context, repo RepoWorkspace, ticket Ticket, jiraSite string) (*PRInfo, error) {
+			return o.prClient.CreateOrUpdatePR(ctx, repo, ticket, jiraSite)
+		}
 	}
 	if o.fnFindPR == nil {
 		o.fnFindPR = func(ctx context.Context, repoPath, branch string) (*PRInfo, error) {
-			return findExistingPR(ctx, repoPath, branch)
+			return o.prClient.findExistingPR(ctx, repoPath, branch)
 		}
 	}
 	if o.fnFetchReviews == nil {
-		o.fnFetchReviews = FetchPRReviewComments
+		o.fnFetchReviews = func(ctx context.Context, repoPath, prURL string) (*PRReviewState, error) {
+			return o.prClient.FetchPRReviewComments(ctx, repoPath, prURL)
+		}
 	}
 	if o.fnPostPRComment == nil {
 		o.fnPostPRComment = func(ctx context.Context, repoPath, prURL, body string) error {
-			_, err := ghExec(ctx, repoPath, "pr", "comment", prURL, "--body", body)
-			return err
+			return o.prClient.PostPRComment(ctx, repoPath, prURL, body)
 		}
 	}
 	if o.fnBranchAheadOfBase == nil {
