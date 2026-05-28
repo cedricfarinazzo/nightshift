@@ -115,18 +115,20 @@ func FetchOpenAIModels(ctx context.Context, apiKey string) ([]string, error) {
 
 // CopilotModels returns the hardcoded list of Copilot CLI model IDs.
 // No programmatic API exists for Copilot model listing.
-// Source: https://docs.github.com/en/copilot/reference/ai-models/supported-models (2026-05-10)
+// Source: https://docs.github.com/en/copilot/reference/ai-models/supported-models (2026-05-28)
 func CopilotModels() []string {
 	return []string{
 		"claude-haiku-4.5",
 		"claude-opus-4.5",
 		"claude-opus-4.6",
 		"claude-opus-4.7",
+		"claude-opus-4.8",
 		"claude-sonnet-4.5",
 		"claude-sonnet-4.6",
 		"gemini-2.5-pro",
 		"gemini-3-flash",
 		"gemini-3.1-pro",
+		"gemini-3.5-flash",
 		"gpt-4.1",
 		"gpt-5-mini",
 		"gpt-5.2",

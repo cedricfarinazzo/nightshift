@@ -136,9 +136,10 @@ func modelOptionValues(opts []modelOption) []string {
 
 // claudeModels lists available Claude models (static fallback).
 // Updated at runtime via FetchAnthropicModels when ANTHROPIC_API_KEY is set.
-// Source: https://platform.claude.com/docs/en/about-claude/models/overview
+// Source: https://docs.anthropic.com/en/docs/about-claude/models/overview (2026-05-28)
 var claudeModels = []modelOption{
 	{label: "default", value: ""},
+	{label: "claude-opus-4-8", value: "claude-opus-4-8"},
 	{label: "claude-opus-4-7", value: "claude-opus-4-7"},
 	{label: "claude-sonnet-4-6", value: "claude-sonnet-4-6"},
 	{label: "claude-haiku-4-5-20251001", value: "claude-haiku-4-5-20251001"},
